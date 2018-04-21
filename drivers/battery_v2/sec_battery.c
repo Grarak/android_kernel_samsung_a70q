@@ -55,16 +55,22 @@ static enum power_supply_property sec_battery_props[] = {
 
 static enum power_supply_property sec_power_props[] = {
 	POWER_SUPPLY_PROP_ONLINE,
+	POWER_SUPPLY_PROP_VOLTAGE_MAX,
+	POWER_SUPPLY_PROP_CURRENT_MAX,
 };
 
 static enum power_supply_property sec_wireless_props[] = {
 	POWER_SUPPLY_PROP_ONLINE,
 	POWER_SUPPLY_PROP_PRESENT,
+	POWER_SUPPLY_PROP_VOLTAGE_MAX,
+	POWER_SUPPLY_PROP_CURRENT_MAX,
 };
 
 static enum power_supply_property sec_ac_props[] = {
 	POWER_SUPPLY_PROP_ONLINE,
 	POWER_SUPPLY_PROP_TEMP,
+	POWER_SUPPLY_PROP_VOLTAGE_MAX,
+	POWER_SUPPLY_PROP_CURRENT_MAX,
 };
 
 static enum power_supply_property sec_ps_props[] = {
@@ -830,7 +836,7 @@ static bool sec_bat_change_vbus_pd(struct sec_battery_info *battery, int *input_
 			/* change input current before request new pdo if new pdo's input current is less than now */
 #if defined(CONFIG_PDIC_PD30)
 			if (battery->pd_list.pd_info[target_pd_index].max_current < battery->input_current) {
-#else			
+#else
 			if (battery->pd_list.pd_info[target_pd_index].input_current < battery->input_current) {
 #endif
 				union power_supply_propval value = {0, };
@@ -1236,11 +1242,11 @@ int sec_bat_set_charge(struct sec_battery_info *battery,
 	if(chg_mode != SEC_BAT_CHG_MODE_CHARGING) {
 		val.intval = 0;
 		psy_do_property(battery->pdata->dual_battery_name, set,
-		POWER_SUPPLY_PROP_CHARGING_ENABLED, val);	
+		POWER_SUPPLY_PROP_CHARGING_ENABLED, val);
 	} else {
 		val.intval = 1;
 		psy_do_property(battery->pdata->dual_battery_name, set,
-		POWER_SUPPLY_PROP_CHARGING_ENABLED, val);		
+		POWER_SUPPLY_PROP_CHARGING_ENABLED, val);
 	}
 
 	if(chg_mode != SEC_BAT_CHG_MODE_CHARGING_OFF && battery->status != POWER_SUPPLY_PROP_CHARGE_FULL) {
@@ -2933,7 +2939,7 @@ static void sec_bat_get_temperature_info(
 	case SEC_BATTERY_THERMAL_SOURCE_FG:
 	case SEC_BATTERY_THERMAL_SOURCE_CALLBACK:
 		break;
-	case SEC_BATTERY_THERMAL_SOURCE_ADC:	
+	case SEC_BATTERY_THERMAL_SOURCE_ADC:
 		if(sec_bat_get_value_by_adc(battery,
 			SEC_BAT_ADC_CHANNEL_SUB_BAT_TEMP, &value, battery->pdata->sub_bat_temp_check_type)) {
 			battery->sub_bat_temp = value.intval;
@@ -3047,7 +3053,7 @@ void sec_bat_get_battery_info(struct sec_battery_info *battery)
 	value.intval = SEC_DUAL_BATTERY_SUB;
 	psy_do_property(battery->pdata->dual_battery_name, get,
 		POWER_SUPPLY_PROP_CURRENT_AVG, value);
-	battery->current_now_sub = value.intval;	
+	battery->current_now_sub = value.intval;
 #endif
 
 	value.intval = SEC_BATTERY_CURRENT_MA;
@@ -4924,8 +4930,20 @@ static int sec_usb_get_property(struct power_supply *psy,
 {
 	struct sec_battery_info *battery = power_supply_get_drvdata(psy);
 
-	if (psp != POWER_SUPPLY_PROP_ONLINE)
+	switch (psp) {
+	case POWER_SUPPLY_PROP_ONLINE:
+		break;
+	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
+		/* V -> uV */
+		val->intval = battery->input_voltage * 1000000;
+		return 0;
+	case POWER_SUPPLY_PROP_CURRENT_MAX:
+		/* mA -> uA */
+		val->intval = battery->pdata->charging_current[battery->cable_type].input_current_limit * 1000;
+		return 0;
+	default:
 		return -EINVAL;
+	}
 
 	if ((battery->health == POWER_SUPPLY_HEALTH_OVERVOLTAGE) ||
 		(battery->health == POWER_SUPPLY_HEALTH_UNDERVOLTAGE)) {
@@ -5001,6 +5019,14 @@ static int sec_ac_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_TEMP:
 		val->intval = battery->chg_temp;
 		break;
+	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
+		/* V -> uV */
+		val->intval = battery->input_voltage * 1000000;
+		return 0;
+	case POWER_SUPPLY_PROP_CURRENT_MAX:
+		/* mA -> uA */
+		val->intval = battery->pdata->charging_current[battery->cable_type].input_current_limit * 1000;
+		return 0;
 	default:
 		return -EINVAL;
 	}
@@ -5027,6 +5053,14 @@ static int sec_wireless_get_property(struct power_supply *psy,
 		val->intval = (battery->pdata->wireless_charger_name) ?
 			1 : 0;
 		break;
+	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
+		/* V -> uV */
+		val->intval = battery->input_voltage * 1000000;
+		return 0;
+	case POWER_SUPPLY_PROP_CURRENT_MAX:
+		/* mA -> uA */
+		val->intval = battery->pdata->charging_current[battery->cable_type].input_current_limit * 1000;
+		return 0;
 	default:
 		return -EINVAL;
 	}
@@ -5430,7 +5464,7 @@ static int make_pd_list(struct sec_battery_info *battery)
 		if ((temp_power >= base_charge_power - 1000000) && (temp_power <= pd_charging_charge_power * 1000))
 		{
 			if (temp_power >= selected_pdo_power &&
-				pPower_list->max_voltage > selected_pdo_voltage && 
+				pPower_list->max_voltage > selected_pdo_voltage &&
 				pPower_list->max_voltage <= battery->pdata->max_input_voltage) {
 					selected_pdo_voltage = pPower_list->max_voltage;
 					selected_pdo_power = temp_power;
@@ -5773,7 +5807,7 @@ static int usb_typec_handle_notification(struct notifier_block *nb,
 					battery->pdic_info.sink_status.power_list[i].max_current,
 					battery->pdic_info.sink_status.power_list[i].max_voltage *
 					battery->pdic_info.sink_status.power_list[i].max_current);
-			
+
 			/* no change apdo */
 			if (!isAccpet || isApdo)
 				continue;
