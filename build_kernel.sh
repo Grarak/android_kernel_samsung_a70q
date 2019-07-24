@@ -4,7 +4,9 @@ set -e
 
 export CROSS_COMPILE=~/android/laos16/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin/aarch64-linux-android-
 
-mkdir out
+if [ ! -d out ]; then
+	mkdir out
+fi
 
 BUILD_CROSS_COMPILE=~/android/laos16/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin/aarch64-linux-android-
 KERNEL_LLVM_BIN=~/android/laos16/prebuilts/clang/host/linux-x86/clang-4691093/bin/clang
