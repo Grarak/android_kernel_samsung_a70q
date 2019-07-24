@@ -1,0 +1,124 @@
+The following are the changes in the 6.0.9 release of the Snapdragon LLVM ARM
+C/C++ Toolchain over the 6.0.7 release.
+
+1. Fix a corner case in register allocation exposed by address sanitizer
+
+The following are the changes in the 6.0.7 release of the Snapdragon LLVM ARM
+C/C++ Toolchain over the 6.0.6 release.
+
+1. Fix incorrect loop count calculation in sum-of-sum optimization in 
+   auto-vectorization
+2. Fix division overflow error in auto-vectorization
+
+The following are the changes in the 6.0.6 release of the Snapdragon LLVM ARM
+C/C++ Toolchain over the 6.0.5 release.
+
+1. Mark fma class of functions in Android as constants
+2. Fix miscompile issue when deleted function space is incorrectly reused
+3. Fix an aggressive path in Memory SSA optimization
+
+The following are the changes in the 6.0.5 release of the Snapdragon LLVM ARM
+C/C++ Toolchain over the 6.0.4 release.
+
+1. Disable auto-vectorization during first phase of ThinLTO
+
+The following are the changes in the 6.0.4 release of the Snapdragon LLVM ARM
+C/C++ Toolchain over the 6.0.3 release.
+
+1. Fix QC linker to exclude symbols specified as extern, from the dynamic 
+   symbol table
+2. Do not optimize or remove stores to address zero
+3. Fix QC linker to exclude libraries specified by filename only
+4. Fix include and library paths for embedded linux OE triples (LE only)
+
+The following are the changes in the 6.0.3 release of the Snapdragon LLVM ARM
+C/C++ Toolchain over the 6.0.2 release.
+
+1. Set debug location for calls to __safestack_pointer_address
+2. Fix issue with unreachable code in safe stack coloring
+3. During stack realignment, in certain cases, fix a bug with access to local
+   variables
+4. Auto vectorize outer loop if more profitable than inner loop
+
+The following are the changes in the 6.0.2 release of the Snapdragon LLVM ARM
+C/C++ Toolchain over the 6.0.1 release.
+
+1. Allow LTO to link together objects built with a different "-mcpu"
+   specification
+2. Fix incorrect "Could not set section name for symbol" warnings with LTO
+3. Fix incorrect warning using -fqc-embed-bitcode
+4. Fix crashes in certain loop optimization corner cases
+5. Don't generate .eh_frame section with "-fno-exceptions -fsanitize=cfi"
+6. Fix for corner case issue in loop reroll
+
+The following are the changes in the 6.0.1 release of the Snapdragon LLVM ARM
+C/C++ Toolchain over the 6.0 release.
+
+1. Fix crash when building with Thin LTO
+2. Add  missing post-process SA scripts for Windows host
+3. Fix corner case compiler crash when resolving __stack_chk_guard
+4. Fix codegen issue for VLD3/VLD4/VST3/VST4 instructions with register
+   writeback
+
+This is the release of Snapdragon LLVM ARM C/C++ Compiler toolchain version
+6.0. This is a cross toolchain built to run on x86 64-bit Ubuntu Linux
+(versions 12.04 and later) and Windows platform (Windows 7 64-bit and later).
+The Snapdragon LLVM ARM Compiler will only generate code for ARM targets and
+will not generate code for any of the other targets supported by the AOSP LLVM
+compiler.
+
+Version 6.0 of the Snapdragon LLVM ARM toolchain includes all changes in the
+llvm.org 6.0 release, and additionally includes patches that are post-6.0
+llvm.org release. The Snapdragon LLVM ARM toolchain 6.0 release includes
+proprietary features and optimizations that are not available in the llvm.org
+release or in the AOSP LLVM compiler.
+
+The Snapdragon LLVM ARM Compiler uses the integrated assembler for assembling
+and includes a full featured proprietary linker (QC Linker) for linking. For
+Android, the QC Linker is primarily used for Link Time Optimization (LTO).
+
+The following link contains all the new features in the llvm.org 6.0 release.
+http://releases.llvm.org/6.0.0/docs/ReleaseNotes.html
+
+The Snapdragon LLVM ARM 6.0 toolchain contains all the above features, and
+additionally contains the following key features compared to the Snapdragon
+LLVM ARM 4.0 toolchain:
+
+1. Compiler Features
+  - Improved debugging with LTO
+    - Ability to put breakpoints on inlined functions
+  - ThinLTO framework for ARM
+  - Code size optimizations targeting baremetal images
+  - Code coverage capabilities for baremetal images
+  - Fat object files that contain bit-code and object
+    - Simplify LTO workflow and enable LTO at a finer level
+  - Auto-vectorization of loops that contain arrays as structure members
+  - Choice of profile generation schemes for Android (for use with PGO)
+  - PGO optimization for hot-cold block separation and placement
+
+2. Linker and binutils Features
+  - Features needed for LTO with Android kernel and other baremetal images
+    - Support FILEHDR keyword in linker script
+    - Support NOCROSSREFS keyword
+  - Support for converting stripped ELF to binary
+  - Support for re-linking final ELF executable
+  - YAML parser improvements for linker generated YAML output
+
+3. Library Features for Baremetal
+  - Performance optimization of key library routines targeting Cortex-M0
+  - Standalone standard libc subset for use in secure images
+  - Runtime libraries built with debug info
+
+4. Security/Code Hygiene Features
+  - Static Analyzer: Cross translation unit analysis
+  - Static Analyzer-Klockwork overlap: Improvements on Null pointer
+    dereference
+  - Static Analyzer: File based blacklisting
+
+This version of the Snapdragon LLVM ARM toolchain may generate additional
+front-end warnings compared to the SDLLVM 4.0 version.  However, we expect
+it to perform better than the 4.0 release.  We recommend using this
+version for performance critical components (where possible).
+
+Please contact your Qualcomm Android support POC for more details
+or documentation.
