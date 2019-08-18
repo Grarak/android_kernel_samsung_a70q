@@ -443,6 +443,12 @@ void sec_debug_update_restart_reason(const char *cmd, const int in_panic, const 
 			PON_RESTART_REASON_SECURE_CHECK_FAIL,
 			RESTART_REASON_NORMAL, NULL},
 #endif
+		{ "adb",
+			PON_RESTART_REASON_NORMALBOOT,
+			RESTART_REASON_NORMAL, NULL },
+		{ "shell",
+			PON_RESTART_REASON_NORMALBOOT,
+			RESTART_REASON_NORMAL, NULL },
 	};
 	enum pon_restart_reason pon_rr = PON_RESTART_REASON_UNKNOWN;
 	enum sec_restart_reason_t sec_rr = RESTART_REASON_NORMAL;
