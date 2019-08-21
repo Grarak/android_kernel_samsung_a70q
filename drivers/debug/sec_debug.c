@@ -662,7 +662,9 @@ static int sec_debug_panic_handler(struct notifier_block *nb,
 	size_t len, i;
 	int timeout = 100; /* means timeout * 100ms */
 
+#ifdef CONFIG_QCOM_WATCHDOG_V2
 	emerg_pet_watchdog();	/* CTC-should be modify */
+#endif
 #ifdef CONFIG_USER_RESET_DEBUG
 	sec_debug_store_backtrace();
 #endif

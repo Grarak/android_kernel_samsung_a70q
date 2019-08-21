@@ -75,7 +75,9 @@ static unsigned int check_step;
 
 static void cb_keycrash(void)
 {
+#ifdef CONFIG_QCOM_WATCHDOG_V2
 	emerg_pet_watchdog();
+#endif
 	dump_stack();
 	dump_all_task_info();
 	dump_cpu_stat();

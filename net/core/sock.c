@@ -1637,7 +1637,7 @@ struct sock *sk_alloc(struct net *net, int family, gfp_t priority,
 	int parent_returnValue = -1;
 	char full_parent_process_name[PROCESS_NAME_LEN_NAP] = {0};
 	/* END_OF_KNOX_NPA */
-#endif CONFIG_KNOX_NCM
+#endif
 
 	sk = sk_prot_alloc(prot, priority | __GFP_ZERO, family);
 	if (sk) {
