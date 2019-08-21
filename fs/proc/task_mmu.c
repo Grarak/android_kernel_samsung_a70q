@@ -108,22 +108,27 @@ unsigned long task_statm(struct mm_struct *mm,
 void task_statlmkd(struct mm_struct *mm, unsigned long *size,
 			 unsigned long *resident, unsigned long *swapresident)
 {
+#ifdef CONFIG_SWAP
 	unsigned long swap_orig_nrpages;
 	unsigned long swap_comp_nrpages;
+#endif
 
 	*size = mm->total_vm;
 	*resident = get_mm_counter(mm, MM_FILEPAGES) +
 			get_mm_counter(mm, MM_SHMEMPAGES) +
 			get_mm_counter(mm, MM_ANONPAGES);
 
+#ifdef CONFIG_SWAP
 	swap_orig_nrpages = get_swap_orig_data_nrpages();
 	swap_comp_nrpages = get_swap_comp_pool_nrpages();
-    
+
     if(swap_orig_nrpages > 0){
         *swapresident = get_mm_counter(mm, MM_SWAPENTS) *
                     swap_comp_nrpages / swap_orig_nrpages;
     }
-
+#else
+    *swapresident = 0;
+#endif
 }
 #ifdef CONFIG_NUMA
 /*
