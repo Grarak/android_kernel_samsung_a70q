@@ -98,6 +98,7 @@ enum print_reason {
 #define SEC_BATTERY_DISABLE_HV_VOTER	"SEC_BATTERY_DISABLE_HV_VOTER"
 #define SEC_SS_FACTORY_VOTER		"SEC_SS_FACTORY_VOTER"
 #define SEC_BATTERY_OVERHEATLIMIT_VOTER		"SEC_BATTERY_OVERHEATLIMIT_VOTER"
+#define SEC_BATTERY_QC3P0_VOTER		"SEC_BATTERY_QC3P0_VOTER"
 #if defined(CONFIG_SEC_FACTORY)
 #define SEC_BATTERY_FACTORY_MODE_VOTER	"SEC_BATTERY_FACTORY_MODE_VOTER"
 #endif
@@ -677,7 +678,8 @@ struct smb_charger {
 	int			 vbus_chg_by_full;
 	int			 now_icl;
 
-	bool			float_type_recheck;
+	bool		float_type_recheck;
+	bool		forced_5v_qc30;
 #endif
 };
 

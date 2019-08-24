@@ -145,6 +145,8 @@ int ist40xx_cmd_gesture(struct ist40xx_data *data, u16 value)
 			   (int)utc_time.tv_sec);
 
 		ist40xx_cmd_hold(data, IST40XX_ENABLE);
+		ist40xx_write_sponge_reg(data, IST40XX_SPONGE_CTRL,
+				(u16*)&data->lpm_mode, 1, false);
 		ist40xx_write_sponge_reg(data, IST40XX_SPONGE_UTC,
 				(u16 *)&utc_time.tv_sec, 2, false);
 		ist40xx_write_sponge_reg(data, IST40XX_SPONGE_RECT, data->rect_data,

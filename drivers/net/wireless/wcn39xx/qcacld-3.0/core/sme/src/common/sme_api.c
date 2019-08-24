@@ -58,6 +58,7 @@
 #include <qca_vendor.h>
 #include <wlan_spectral_utils_api.h>
 #include <wlan_mlme_main.h>
+#include <wlan_utility.h>
 
 static tSelfRecoveryStats g_self_recovery_stats;
 
@@ -16614,6 +16615,58 @@ sme_get_roam_scan_stats(tHalHandle hal, roam_scan_stats_cb cb, void *context,
 	} else {
 		sme_err("sme_acquire_global_lock failed");
 		qdf_mem_free(req);
+	}
+
+	return status;
+}
+
+
+QDF_STATUS sme_update_oce_flags(mac_handle_t mac_handle, bool sta_connected)
+{
+	uint16_t sap_connected_peer = 0;
+	uint16_t go_connected_peer = 0;
+	uint8_t updated_fw_value = 0;
+	struct wlan_objmgr_vdev *sta_vdev = NULL;
+	uint8_t vdev_id;
+	QDF_STATUS status = QDF_STATUS_E_FAILURE;
+	tpAniSirGlobal mac_ctx = MAC_CONTEXT(mac_handle);
+	struct wlan_objmgr_pdev *pdev = mac_ctx->pdev;
+	struct wlan_objmgr_psoc *psoc = mac_ctx->psoc;
+
+	sap_connected_peer = wlan_util_get_peer_count_for_mode(pdev,
+							       QDF_SAP_MODE);
+	go_connected_peer =  wlan_util_get_peer_count_for_mode(pdev,
+							       QDF_P2P_GO_MODE);
+	if (sta_connected && (sap_connected_peer == 1 ||
+			      go_connected_peer == 1)) {
+		updated_fw_value = mac_ctx->roam.configParam.oce_feature_bitmap;
+
+		sme_debug("Disable STA OCE probe req rate and defferal");
+		updated_fw_value &=
+			~(WMI_VDEV_OCE_PROBE_REQUEST_RATE_FEATURE_BITMAP);
+		updated_fw_value &=
+		~(WMI_VDEV_OCE_PROBE_REQUEST_DEFERRAL_FEATURE_BITMAP);
+		sme_debug("Updated_fw_value :%d", updated_fw_value);
+	} else if (!sta_connected && (!sap_connected_peer &&
+				      !go_connected_peer)) {
+		sme_debug("Enable STA OCE probe req rate and defferal");
+		sme_debug("updated_fw_value :%d", updated_fw_value);
+		updated_fw_value = mac_ctx->roam.configParam.oce_feature_bitmap;
+	} else {
+		return QDF_STATUS_SUCCESS;
+	}
+
+	sta_vdev = wlan_objmgr_get_vdev_by_opmode_from_psoc(psoc, QDF_STA_MODE,
+							    WLAN_MLME_NB_ID);
+
+	if (sta_vdev) {
+		vdev_id = wlan_vdev_get_id(sta_vdev);
+		wlan_objmgr_vdev_release_ref(sta_vdev, WLAN_MLME_NB_ID);
+
+		status =
+		wma_cli_set_command(vdev_id,
+				    WMI_VDEV_PARAM_ENABLE_DISABLE_OCE_FEATURES,
+				    updated_fw_value, VDEV_CMD);
 	}
 
 	return status;

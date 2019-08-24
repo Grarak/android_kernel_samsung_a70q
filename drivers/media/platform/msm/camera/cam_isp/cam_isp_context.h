@@ -193,9 +193,6 @@ struct cam_isp_context {
 	bool                             hw_acquired;
 	bool                             init_received;
 	bool                             split_acquire;
-	uint32_t                         sof[10];
-	uint32_t                         sof_status[10];
-	uint32_t                         idx;
 };
 
 /**

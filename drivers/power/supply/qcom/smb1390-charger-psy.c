@@ -1420,6 +1420,20 @@ static int smb1390_remove(struct platform_device *pdev)
 	return 0;
 }
 
+static void smb1390_shutdown(struct platform_device *pdev)
+{
+	struct smb1390 *chip = platform_get_drvdata(pdev);
+	int rc;
+
+	power_supply_unreg_notifier(&chip->nb);
+	/* Disable SMB1390 */
+	smb1390_dbg(chip, PR_MISC, "Disabling SMB1390\n");
+	rc = smb1390_masked_write(chip, CORE_CONTROL1_REG,
+			CMD_EN_SWITCHER_BIT, 0);
+	if (rc < 0)
+		pr_err("Couldn't disable chip rc=%d\n", rc);
+}
+
 static int smb1390_suspend(struct device *dev)
 {
 	struct smb1390 *chip = dev_get_drvdata(dev);
@@ -1456,8 +1470,9 @@ static struct platform_driver smb1390_driver = {
 		.pm		= &smb1390_pm_ops,
 		.of_match_table	= match_table,
 	},
-	.probe	= smb1390_probe,
-	.remove	= smb1390_remove,
+	.probe		= smb1390_probe,
+	.remove		= smb1390_remove,
+	.shutdown	= smb1390_shutdown,
 };
 module_platform_driver(smb1390_driver);
 

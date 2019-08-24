@@ -852,6 +852,7 @@ static int cam_fd_mgr_util_submit_frame(void *priv, void *data)
 		return 0;
 	}
 
+	CAM_DBG(CAM_FD, "FrameSubmit : Frame[%lld]", frame_req->request_id);
 	hw_ctx = frame_req->hw_ctx;
 	rc = cam_fd_mgr_util_get_device(hw_mgr, hw_ctx, &hw_device);
 	if (rc) {
@@ -894,8 +895,6 @@ static int cam_fd_mgr_util_submit_frame(void *priv, void *data)
 		rc = -EPERM;
 		goto put_req_into_free_list;
 	}
-
-	CAM_INFO(CAM_FD, "FrameSubmit : Frame[%lld]", frame_req->request_id);
 
 	hw_device->ready_to_process = false;
 	hw_device->cur_hw_ctx = hw_ctx;

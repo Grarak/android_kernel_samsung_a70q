@@ -479,14 +479,14 @@ static int tfa9xxx_pbq_pair_launch(struct tfa9xxx *drv, int pbq_index)
 
 	struct drv_object *obj = &drv->tone_object;
 	struct haptic_data *data;
-	int duration;
+	int duration = 0;
 	struct tfa2_device *tfa = drv->tfa;
-	unsigned int index, set_index;
+	unsigned int index = 0, set_index = 0;
 #if defined(TFA_SEPARATE_WAVE_OBJECT)
 	int use_fscale = 0, set_intensity = 0;
-	int max_intensity;
+	int max_intensity = 0;
 #endif
-	int sleep_duration, rc;
+	int sleep_duration = 0, rc = 0;
 	
 	data = &drv->tfa->hap_data;
 

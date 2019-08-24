@@ -5315,8 +5315,6 @@ int cam_ife_mgr_do_tasklet_buf_done(void *handler_priv,
 		evt_payload->irq_reg_val[5]);
 	CAM_DBG(CAM_ISP, "bus_irq_dual_comp_owrt: = %x",
 		evt_payload->irq_reg_val[6]);
-	trace_printk("core %d, bus_irq_status_1: = %x\n", evt_payload->core_index,
-		evt_payload->irq_reg_val[1]);
 	/* WM Done */
 	return cam_ife_hw_mgr_handle_buf_done_for_hw_res(ife_hwr_mgr_ctx,
 		evt_payload_priv);
@@ -5344,8 +5342,6 @@ int cam_ife_mgr_do_tasklet(void *handler_priv, void *evt_payload_priv)
 	CAM_DBG(CAM_ISP, "irq_status_1: = %x", evt_payload->irq_reg_val[1]);
 	CAM_DBG(CAM_ISP, "Violation register: = %x",
 		evt_payload->irq_reg_val[2]);
-	trace_printk("core %d, irq_status_0: = %x\n", evt_payload->core_index,
-		evt_payload->irq_reg_val[0]);
 
 	/*
 	 * If overflow/overwrite/error/violation are pending

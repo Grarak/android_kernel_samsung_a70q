@@ -20,20 +20,8 @@
 #include <linux/completion.h>
 #include <linux/usb/typec/pm6150/pm6150_typec.h>
 #include <linux/usb/typec/pdic_sysfs.h>
-#if defined(CONFIG_VBUS_NOTIFIER)
-#include <linux/vbus_notifier.h>
-#endif /* CONFIG_VBUS_NOTIFIER */
-#ifdef CONFIG_BATTERY_SAMSUNG_USING_QC
-#include "../../../battery_qc/include/sec_charging_common_qc.h"
-#include "../../../battery_qc/include/sec_battery_qc.h"
-#else 
-#include <linux/sec_batt.h>
-#endif
 #ifdef CONFIG_USB_HOST_NOTIFY
 #include <linux/usb_notify.h>
-#endif
-#ifdef CONFIG_USB_TYPEC_MANAGER_NOTIFIER
-#include <linux/battery/battery_notifier.h>
 #endif
 #include <linux/usb/typec/pm6150/samsung_usbpd.h>
 
@@ -252,6 +240,10 @@ static int pm6150_sysfs_get_prop(struct _ccic_data_t *pccic_data,
 	int val;
 
 	switch (prop) {
+	case CCIC_SYSFS_PROP_STATE:
+		retval = sprintf(buf, "%d\n", pdic_data->pd_state);
+		pr_info("%s : CCIC_SYSFS_PROP_STATE : %d", __func__, pdic_data->pd_state);
+		break;
 	case CCIC_SYSFS_PROP_RID:
 		retval = sprintf(buf, "%d\n", pdic_data->rid);
 		pr_info("%s : CCIC_SYSFS_PROP_RID : %s", __func__, buf);
@@ -260,9 +252,20 @@ static int pm6150_sysfs_get_prop(struct _ccic_data_t *pccic_data,
 		retval = sprintf(buf, "%d\n", pdic_data->is_water_detect);
 		pr_info("%s : CCIC_SYSFS_PROP_FW_WATER : %s", __func__, buf);
 		break;
-	case CCIC_SYSFS_PROP_STATE:
-		retval = sprintf(buf, "%d\n", pdic_data->pd_state);
-		pr_info("%s : CCIC_SYSFS_PROP_STATE : %d", __func__, pdic_data->pd_state);
+	case CCIC_SYSFS_PROP_ACC_DEVICE_VERSION:
+		retval = sprintf(buf, "%04x\n", pdic_data->Device_Version);
+		pr_info("%s : CCIC_SYSFS_PROP_ACC_DEVICE_VERSION : %s",
+			__func__, buf);
+		break;
+	case CCIC_SYSFS_PROP_USBPD_IDS:
+		retval = sprintf(buf, "%04x:%04x\n",
+			le16_to_cpu(pdic_data->Vendor_ID),
+			le16_to_cpu(pdic_data->Product_ID));
+		pr_info("%s : CCIC_SYSFS_PROP_USBPD_IDS : %s", __func__, buf);
+		break;
+	case CCIC_SYSFS_PROP_USBPD_TYPE:
+		retval = sprintf(buf, "%d\n", pdic_data->acc_type);
+		pr_info("%s : CCIC_SYSFS_PROP_USBPD_TYPE : %s", __func__, buf);
 		break;
 	case CCIC_SYSFS_PROP_CABLE:
 		val = pm6150_match_cable(pdic_data->cable);

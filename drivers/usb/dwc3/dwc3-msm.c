@@ -3203,13 +3203,13 @@ static void check_for_sdp_connection(struct work_struct *w)
 	/* floating D+/D- lines detected */
 	if (dwc->gadget.state < USB_STATE_DEFAULT &&
 		dwc3_gadget_get_link_state(dwc) != DWC3_LINK_STATE_CMPLY) {
-		mdwc->vbus_active = 0;
-		dbg_event(0xFF, "Q RW SPD CHK", mdwc->vbus_active);
 #if defined(CONFIG_CCIC_NOTIFIER) && defined(CONFIG_USB_CCIC_NOTIFIER_USING_QC)
 		pr_info("%s(): Turn Off Device(UFP)\n", __func__);
 		pm6150_ccic_event_work(CCIC_NOTIFY_DEV_USB, CCIC_NOTIFY_ID_USB,
 			CCIC_NOTIFY_DETACH/*detach*/, USB_STATUS_NOTIFY_DETACH/*drp*/, 0);
 #else
+		mdwc->vbus_active = 0;
+		dbg_event(0xFF, "Q RW SPD CHK", mdwc->vbus_active);
 		queue_work(mdwc->dwc3_wq, &mdwc->resume_work);
 #endif
 	}

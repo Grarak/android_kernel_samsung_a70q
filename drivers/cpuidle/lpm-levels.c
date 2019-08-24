@@ -1091,9 +1091,11 @@ static int cluster_configure(struct lpm_cluster *cluster, int idx,
 		 * This debug information is useful to know which are the
 		 * clocks that are enabled and preventing the system level
 		 * LPMs(XO and Vmin).
-		 */
+		 *
+		 * move to lpm_suspend_prepare due to BUG in atomic context
 		if (!from_idle)
 			clock_debug_print_enabled(true);
+		*/
 
 		cpu = get_next_online_cpu(from_idle);
 		cpumask_copy(&cpumask, cpumask_of(cpu));
@@ -1698,6 +1700,8 @@ static int lpm_suspend_prepare(void)
 
 #ifdef CONFIG_SEC_PM
 	regulator_showall_enabled();
+	clock_debug_print_enabled(true);
+
 	debug_masterstats_show("entry");
 	debug_rpmstats_show("entry");
 #endif

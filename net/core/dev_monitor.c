@@ -15,6 +15,7 @@ struct dev_addr_info {
 		__be32 addr4;
 		struct in6_addr addr6;
 	} addr;
+	unsigned int prefixlen;
 };
 
 static struct list_head dev_info;
@@ -52,8 +53,9 @@ void dev_monitor_cleanup_sock(struct net_device *dev)
 	struct inet_ehash_bucket *head;
 	unsigned int slot;
 	struct dev_addr_info *addr_info, *addr6_info;
-	__be32 addr4;
+	__be32 addr4, mask;
 	struct in6_addr addr6;
+	unsigned int prefixlen;
 
 	pr_err("%s(), %s\n", __func__, dev->name);
 	/* better to merge AF_INET addr info and AF_INET6 addr info */
@@ -71,31 +73,44 @@ void dev_monitor_cleanup_sock(struct net_device *dev)
 	for (slot = 0; slot <= tcp_hashinfo.ehash_mask; slot++) {
 		head = &tcp_hashinfo.ehash[slot];
 		sk_nulls_for_each_rcu(sk, node, &head->chain) {
-			/*
-			pr_err("%p, family = %d, sk state = %d\n", sk, sk->sk_family, sk->sk_state);
+			pr_err("family = %d, sk state = %d\n", sk->sk_family, sk->sk_state);
 			if (sk->sk_family == AF_INET)
 				pr_err("%pI4 %pI4\n", &sk->sk_rcv_saddr, &sk->sk_daddr);
 			else
 				pr_err("%pI6 %pI6\n", &sk->sk_v6_rcv_saddr, &sk->sk_v6_daddr);
-			*/
 
 			if (addr_info && sk->sk_family == AF_INET) {
-				if (addr4 == sk->sk_rcv_saddr) {
-					pr_err("family = %d, sk state = %d\n", sk->sk_family, sk->sk_state);
-					pr_err("%pI4 %pI4\n", &sk->sk_rcv_saddr, &sk->sk_daddr);
+				prefixlen = addr_info->prefixlen;
+				mask = inet_make_mask(prefixlen);
+				pr_err("family = %d, sk state = %d\n", sk->sk_family, sk->sk_state);
+				pr_err("addr4:%pI4 sk_rcv_saddr:%pI4\n", &addr4, &sk->sk_rcv_saddr);
+				pr_err("verdict: %d %d\n", addr4 == sk->sk_rcv_saddr, ((addr4 ^ sk->sk_rcv_saddr) & mask));
+				if (addr4 == sk->sk_rcv_saddr ||
+				    !((addr4 ^ sk->sk_rcv_saddr) & mask)) {					
 					if (sk->sk_state == TCP_FIN_WAIT1 ||
-					    sk->sk_state == TCP_ESTABLISHED)
-						sk->sk_prot->disconnect(sk, 0);
+					    sk->sk_state == TCP_ESTABLISHED) {
+							sk->sk_prot->disconnect(sk, 0);
+							pr_err("disconnected\n", sk);
+					}
 				}
 			}
 
 			if (addr6_info && sk->sk_family == AF_INET6) {
-				if (ipv6_addr_equal(&addr6, &sk->sk_v6_rcv_saddr)) {
-					pr_err("family = %d, sk state = %d\n", sk->sk_family, sk->sk_state);
-					pr_err("%pI6 %pI6\n", &sk->sk_v6_rcv_saddr, &sk->sk_v6_daddr);
+				prefixlen = addr6_info->prefixlen;
+				pr_err("family = %d, sk state = %d\n", sk->sk_family, sk->sk_state);
+				pr_err("addr6:%pI6 sk_v6_rcv_saddr:%pI6\n", &addr6, &sk->sk_v6_rcv_saddr);
+				pr_err("verdict: %d %d\n", ipv6_addr_equal(&addr6,&sk->sk_v6_rcv_saddr), 
+											ipv6_prefix_equal(&addr6, &sk->sk_v6_rcv_saddr, prefixlen));
+				if (ipv6_addr_equal(&addr6,
+						    &sk->sk_v6_rcv_saddr) ||
+				    ipv6_prefix_equal(&addr6,
+						      &sk->sk_v6_rcv_saddr,
+						      prefixlen)) {
 					if (sk->sk_state == TCP_FIN_WAIT1 ||
-					    sk->sk_state == TCP_ESTABLISHED)
-						sk->sk_prot->disconnect(sk, 0);
+					    sk->sk_state == TCP_ESTABLISHED) {
+							sk->sk_prot->disconnect(sk, 0);
+							pr_err("disconnected\n", sk);
+						}
 				}
 			}
 		}
@@ -108,12 +123,15 @@ static int dev_monitor_notifier_cb(struct notifier_block *nb,
 
 	pr_err("dev : %s : event : %d\n", dev->name, event);
 	switch (event) {
-//	case NETDEV_DOWN:
+	case NETDEV_DOWN:
 	case NETDEV_UNREGISTER_FINAL:
 		/* for given net device, address matched sock will be closed */
 		dev_monitor_cleanup_sock(dev);
 		/* remove dev info from the list */
-		del_dev_info(&dev_info, dev);
+		if (!netdev_refcnt_read(dev)) {
+			pr_err("dev : %s all refcnt has gone\n", dev->name);
+			del_dev_info(&dev_info, dev);
+		}
 		break;
 	default:
 		break;
@@ -144,8 +162,6 @@ static int dev_monitor_inetaddr_event(struct notifier_block *this,
 
 		dev = ifa->ifa_dev->dev;
 
-		pr_err("%s %s: %pI4\n", __func__, dev->name, &ifa->ifa_local);
-
 		addr_info = get_dev_info(&dev_info, dev, AF_INET);
 		if (!addr_info) {
 			addr_info = kzalloc(sizeof(struct dev_addr_info),
@@ -155,13 +171,21 @@ static int dev_monitor_inetaddr_event(struct notifier_block *this,
 			addr_info->dev = dev;
 			addr_info->family = AF_INET;
 			addr_info->addr.addr4 = ifa->ifa_local;
+			addr_info->prefixlen = ifa->ifa_prefixlen;
 
+			INIT_LIST_HEAD(&addr_info->list);
 			list_add(&addr_info->list, &dev_info);
 		} else {
 			addr_info->dev = dev;
 			addr_info->family = AF_INET;
 			addr_info->addr.addr4 = ifa->ifa_local;
+			addr_info->prefixlen = ifa->ifa_prefixlen;
 		}
+
+		pr_err("%s %s: %pI4/%d, added:%pI4/%d\n", __func__, dev->name,
+		       &ifa->ifa_local, ifa->ifa_prefixlen,
+				&addr_info->addr.addr4, addr_info->prefixlen);
+
 		break;
 	default:
 		break;
@@ -180,11 +204,12 @@ static int dev_monitor_inet6addr_event(struct notifier_block *this,
 	const struct inet6_ifaddr *ifa = (struct inet6_ifaddr *)ptr;
 	struct net_device *dev;
 	struct dev_addr_info *addr_info;
-	int addr_type = ipv6_addr_type(&ifa->addr);
+	int addr_type;
 
 	if (!ifa || !ifa->idev)
 		return NOTIFY_DONE;
 
+	addr_type = ipv6_addr_type(&ifa->addr);
 
 	switch (event) {
 	case NETDEV_UP:
@@ -198,8 +223,6 @@ static int dev_monitor_inet6addr_event(struct notifier_block *this,
 
 		dev = ifa->idev->dev;
 
-		pr_err("%s %s: %pI6\n", __func__, dev->name, &ifa->addr);
-
 		addr_info = get_dev_info(&dev_info, dev, AF_INET6);
 		if (!addr_info) {
 			addr_info = kzalloc(sizeof(struct dev_addr_info),
@@ -209,6 +232,7 @@ static int dev_monitor_inet6addr_event(struct notifier_block *this,
 			addr_info->dev = dev;
 			addr_info->family = AF_INET6;
 			addr_info->addr.addr6 = ifa->addr;
+			addr_info->prefixlen = ifa->prefix_len;
 
 			INIT_LIST_HEAD(&addr_info->list);
 			list_add(&addr_info->list, &dev_info);
@@ -216,7 +240,11 @@ static int dev_monitor_inet6addr_event(struct notifier_block *this,
 			addr_info->dev = dev;
 			addr_info->family = AF_INET6;
 			addr_info->addr.addr6 = ifa->addr;
+			addr_info->prefixlen = ifa->prefix_len;
 		}
+		pr_err("%s %s: %pI6/%d, added:%pI6/%d\n", __func__, dev->name, &ifa->addr,
+		       ifa->prefix_len, &addr_info->addr.addr6, addr_info->prefixlen);
+
 
 		break;
 	default:

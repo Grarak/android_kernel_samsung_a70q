@@ -134,7 +134,7 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 			pr_err("%s: Fail to get POWER_SUPPLY_EXT_PROP_HV_DISABLE(%d)\n", __func__, rc);
 			val.intval = rc;
 		}
-		pr_info("%s: HV_DISABLE(%d)\n", __func__, val.intval);
+//		pr_info("%s: HV_DISABLE(%d)\n", __func__, val.intval);
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%d\n",
 				val.intval ? 0 : sec_bat_get_hv_charger_status(battery));
 		break;
@@ -693,12 +693,22 @@ ssize_t sec_bat_show_attrs(struct device *dev,
 		break;
 	case CHARGING_TYPE:
 		rc = power_supply_get_property(battery->psy_usb,
-				POWER_SUPPLY_PROP_REAL_TYPE, &val);
+			POWER_SUPPLY_PROP_PD_ACTIVE, &val);
 		if (rc < 0) {
-			pr_err("%s: Fail to get usb real_type_prop (%d=>%d)\n", __func__, POWER_SUPPLY_PROP_REAL_TYPE, rc);
+			pr_err("%s: Fail to get POWER_SUPPLY_PROP_PD_ACTIVE(%d)\n", __func__, rc);
 			val.intval = 0;
 		}
-		val.strval = sec_cable_type[val.intval];
+		if (val.intval == POWER_SUPPLY_PD_PPS_ACTIVE) 
+			val.strval = "PDIC_APDO"; //APDO
+		else {
+			rc = power_supply_get_property(battery->psy_usb,
+					POWER_SUPPLY_PROP_REAL_TYPE, &val);
+			if (rc < 0) {
+				pr_err("%s: Fail to get usb real_type_prop (%d=>%d)\n", __func__, POWER_SUPPLY_PROP_REAL_TYPE, rc);
+				val.intval = 0;
+			}
+			val.strval = sec_cable_type[val.intval];
+		}
 		pr_info("%s: CHARGING_TYPE = %s\n",__func__, val.strval);
 		i += scnprintf(buf + i, PAGE_SIZE - i, "%s\n", val.strval);
 		break;

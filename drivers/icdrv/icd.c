@@ -50,12 +50,12 @@ enum oemflag_id affected_oemflag_id(const char *path)
 {
 	if (contains_str(tz_drm_list, path))
 		return OEMFLAG_TZ_DRM;
-	if (contains_str(fidd_list, path))
-		return OEMFLAG_FIDD;
+	if (contains_str(fido_list, path))
+		return OEMFLAG_FIDO;
 	if (contains_str(cc_list, path))
 		return OEMFLAG_CC;
-	if (contains_str(sysscope_list, path))
-		return OEMFLAG_SYSSCOPE;
+	if (contains_str(etc_list, path))
+		return OEMFLAG_ETC;
 
 	return OEMFLAG_NONE;
 }

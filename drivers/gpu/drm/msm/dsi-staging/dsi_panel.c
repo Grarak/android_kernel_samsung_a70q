@@ -4706,9 +4706,9 @@ int dsi_panel_enable(struct dsi_panel *panel)
 			pr_err("[%s] failed to send DSI_CMD_SET_ON cmds, rc=%d\n",
 			       panel->name, rc);
 		}
-		else
-			panel->panel_initialized = true;
 	}
+	if (!rc)
+		panel->panel_initialized = true;
 #else
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_ON);
 	if (rc)

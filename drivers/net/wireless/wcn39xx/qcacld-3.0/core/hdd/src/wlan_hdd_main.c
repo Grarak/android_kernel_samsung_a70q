@@ -4466,6 +4466,7 @@ QDF_STATUS hdd_init_station_mode(struct hdd_adapter *adapter)
 	}
 
 	set_bit(WMM_INIT_DONE, &adapter->event_flags);
+	sme_update_oce_flags(mac_handle, true);
 
 	ret_val = sme_cli_set_command(adapter->session_id,
 				      WMI_PDEV_PARAM_BURST_ENABLE,

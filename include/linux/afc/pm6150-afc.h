@@ -9,5 +9,6 @@
 
 extern int is_afc(void);
 extern int afc_set_voltage(int vol);
+extern int get_afc_mode(void);
 
 #endif /* _PM6150_AFC_H */

@@ -78,6 +78,8 @@
 	&& !chg->typec_legacy)
 #endif
 
+#define SUPPORT_RUSTPROOF (0)
+
 #if defined(CONFIG_SEC_A90Q_PROJECT)
 bool pd_charging = false;
 EXPORT_SYMBOL(pd_charging);
@@ -2767,9 +2769,6 @@ int smblib_dp_dm(struct smb_charger *chg, int val)
 				pr_err("Failed to force 9V\n");
 			
 #if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)		
-#if defined(CONFIG_AFC)
-			if ((chg->afc_sts == NOT_AFC) || (chg->afc_sts == AFC_FAIL))
-#endif
 				schedule_delayed_work(&chg->compliant_check_work,
 					msecs_to_jiffies(2000));
 #endif
@@ -5292,9 +5291,11 @@ void smblib_usb_plugin_locked(struct smb_charger *chg)
 #if defined(CONFIG_PM6150_WATER_DETECT)
 		if(chg->water_det_en) {
 			chg->hiccup_mode |= HICCUP_VBUS;
+#if SUPPORT_RUSTPROOF
 			/* If Water + VBUS, enable Hiccup */
 			if(chg->hiccup_mode == HICCUP_MODE)
 				gpio_direction_output(chg->hiccup_gpio, 1);
+#endif
 			
 			pr_info("[HICCUP] hiccup_mode = %x", chg->hiccup_mode);
 		}
@@ -5731,10 +5732,12 @@ void smblib_lpd_notify_dry(struct smb_charger *chg)
 			gpio_direction_output(chg->hiccup_gpio, 0);
 		chg->hiccup_mode &= ~HICCUP_WATER;	
 		
-#if defined(CONFIG_USB_CCIC_NOTIFIER_USING_QC)		
+#if defined(CONFIG_USB_CCIC_NOTIFIER_USING_QC)
+#if SUPPORT_RUSTPROOF
 		/* Notify UI via CCIC notifier */
 		pm6150_ccic_event_work(CCIC_NOTIFY_DEV_BATTERY, \
 			CCIC_NOTIFY_ID_WATER, 0/*attach*/, 0, 0);
+#endif
 #endif //CONFIG_USB_CCIC_NOTIFIER_USING_QC
 
 		chg->lpd_notify = LPD_NOTIFY_DRY;
@@ -5750,17 +5753,21 @@ void smblib_lpd_notify_moisture(struct smb_charger *chg)
 	
 	if(chg->lpd_notify == LPD_NOTIFY_DRY) {
 		chg->hiccup_mode |= HICCUP_WATER;
+#if SUPPORT_RUSTPROOF
 		/* If Water + VBUS, enable Hiccup */
 		if(chg->hiccup_mode == HICCUP_MODE)
 			gpio_direction_output(chg->hiccup_gpio, 1);
+#endif
 
 		pr_info("[HICCUP] Water/moisture - notified, hiccup_mode=%x\n", \
 				chg->hiccup_mode);
 		
-#if defined(CONFIG_USB_CCIC_NOTIFIER_USING_QC)		
+#if defined(CONFIG_USB_CCIC_NOTIFIER_USING_QC)
+#if SUPPORT_RUSTPROOF
 		/* Notify UI via CCIC notifier */
 		pm6150_ccic_event_work(CCIC_NOTIFY_DEV_BATTERY, \
 			CCIC_NOTIFY_ID_WATER, 1/*attach*/, 0, 0);
+#endif
 #endif	// CONFIG_USB_CCIC_NOTIFIER_USING_QC
 
 		chg->lpd_notify = LPD_NOTIFY_MOISTURE;
@@ -7382,6 +7389,8 @@ static void smblib_compliant_check_work(struct work_struct *work)
 			smblib_run_aicl(chg, RESTART_AICL);
 			smblib_hvdcp_set_fsw(chg, QC_5V_BIT);
 			rc = smblib_force_vbus_voltage(chg, FORCE_5V_BIT);
+			if (rc < 0)
+				pr_err("Failed to force 5V\n");
 		}
 	}
 }
@@ -7577,6 +7586,9 @@ int smblib_init(struct smb_charger *chg)
 	chg->sec_chg_selected = POWER_SUPPLY_CHARGER_SEC_NONE;
 	chg->cp_reason = POWER_SUPPLY_CP_NONE;
 	chg->thermal_status = TEMP_BELOW_RANGE;
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	chg->forced_5v_qc30 = false;
+#endif
 
 	switch (chg->mode) {
 	case PARALLEL_MASTER:

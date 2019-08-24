@@ -58,7 +58,7 @@ enum {
 #define	ADC_READ_CNT	5
 
 /* rid_adc channel */
-static struct iio_channel *adc_channel;
+static struct iio_channel *adc_channel = NULL;
 /* jigon */
 static int jigon_gpio = 0;
 #if defined(CONFIG_USB_CCIC_NOTIFIER_USING_QC)
@@ -201,16 +201,19 @@ static int handle_rid_adc(int val)
 	return 0;
 }
 
-static int detect_rid_adc()
+static int detect_rid_adc(struct platform_device *pdev)
 {
 	int i = 0, rid_adc_value = 0, rid_adc_arr[ADC_READ_CNT] = {0,};
 	int min = 0, max = 0, min_idx = 0, max_idx = 0, sum = 0, err = 1;
 
-	if (adc_channel > 0)
-		pr_info("%s\n", __func__);
-	else {
-		pr_info("RID ADC Channel Error.\n");
-		return -1;
+	pr_info("%s\n", __func__);
+
+	if (adc_channel == NULL) {
+		adc_channel = iio_channel_get(&pdev->dev, "rid_adc_channel");
+		if (IS_ERR(adc_channel)) { 
+			pr_info("%s: channel unavailable\n", __func__);
+			return -1;
+		}
 	}
 
 	for (i = 0; i < ADC_READ_CNT; i++) {
@@ -258,18 +261,19 @@ static int detect_rid_adc()
 	return raw_rid_adc;
 }
 
-static int ric_adc_iio_init(struct platform_device *pdev)
+static int rid_adc_iio_init(struct platform_device *pdev)
 {
-	int val = 0, err = -1;
+	int val = 0;
 
 	adc_channel = iio_channel_get(&pdev->dev, "rid_adc_channel");
-	if (adc_channel < 0)
-		return err;
-	else
-		pr_info("%s: ADC Channel: %d\n", __func__, adc_channel);
+	if (IS_ERR(adc_channel)) { 
+		pr_info("%s: channel unavailable\n", __func__);
+		return -1;
+	} else
+		pr_info("%s: channel: %d\n", __func__, adc_channel);
 
 	/* Read once at probe */
-	val = detect_rid_adc();
+	val = detect_rid_adc(pdev);
 	if (val < 0) 
 		return -1;
 
@@ -280,11 +284,12 @@ static int ric_adc_iio_init(struct platform_device *pdev)
 
 static irqreturn_t rid_adc_irq_handler(int irq, void *data)
 {
+	struct platform_device *pdev = data;
 	int val;
 
 	pr_info("%s\n", __func__);
 
-	val = detect_rid_adc();
+	val = detect_rid_adc(pdev);
 	if (val < 0) 
 		return -1;
 
@@ -293,8 +298,9 @@ static irqreturn_t rid_adc_irq_handler(int irq, void *data)
 	return 0;
 }
 
-static int rid_adc_irq_init(struct device *dev)
+static int rid_adc_irq_init(struct platform_device *pdev)
 {
+	struct device *dev = &pdev->dev;
 	struct device_node *np= dev->of_node;
 	int rid_adc_gpio = 0, adc_irq = 0, ret = 0;
 
@@ -310,7 +316,7 @@ static int rid_adc_irq_init(struct device *dev)
 
 	ret = request_threaded_irq(adc_irq, NULL, rid_adc_irq_handler,
 		IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING | IRQF_ONESHOT,
-		"rid_adc_irq", NULL);
+		"rid_adc_irq", pdev);
 
 	pr_info("%s, ret: %d\n", __func__, ret);
 
@@ -453,10 +459,10 @@ static int rid_pm6150l_probe(struct platform_device *pdev)
 	rid_adc_sysfs_init();
 
 	/* iio */
-	ric_adc_iio_init(pdev);
+	rid_adc_iio_init(pdev);
 
 	/* irq */
-	rid_adc_irq_init(dev);
+	rid_adc_irq_init(pdev);
 
     return 0;
 }

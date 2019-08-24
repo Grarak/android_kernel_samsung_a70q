@@ -493,8 +493,6 @@ static int cam_jpeg_mgr_process_cmd(void *priv, void *data)
 			config_args->hw_update_entries[CAM_JPEG_CHBASE].handle);
 
 	mutex_unlock(&hw_mgr->hw_mgr_mutex);
-	CAM_INFO(CAM_JPEG, "Req id submitted = %lld", p_cfg_req->req_id);
-
 	return rc;
 
 rel_cpu_buf:

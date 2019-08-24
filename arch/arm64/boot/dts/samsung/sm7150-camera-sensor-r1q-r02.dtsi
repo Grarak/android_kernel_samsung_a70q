@@ -160,6 +160,67 @@
 		cam,valid = <1>;                // 0 : N , 1 : Y
 	};
 
+	qcom,cam-sensor@8 {
+		cell-index = <8>;
+		compatible = "qcom,cam-sensor";
+		reg = <0x8>;
+		csiphy-sd-index = <2>;
+		sensor-position-roll = <90>;
+		sensor-position-pitch = <0>;
+		sensor-position-yaw = <0>;
+		actuator-src = <&actuator_rear0>;
+		led-flash-src = <&led_flash0>;
+		eeprom-src = <&eeprom1>;
+
+		// LDO
+		cam_vio-supply = <&s2mpb03_l3>;
+		cam_vana-supply = <&s2mpb03_l7>;
+		cam_v_custom1-supply = <&pm6150_l15>;	// Analog 1.85
+		cam_vdig-supply = <&s2mpb03_l1>;
+		cam_v_custom2-supply = <&s2mpb03_l4>;	// Digital PLL 1.15
+		cam_clk-supply = <&titan_top_gdsc>;
+		regulator-names = "cam_vio", "cam_vana", "cam_v_custom1", "cam_vdig", "cam_v_custom2", "cam_clk";
+		rgltr-cntrl-support;
+		rgltr-min-voltage = <1800000 2900000 1850000 1100000 1150000 0>;
+		rgltr-max-voltage = <1800000 2900000 1850000 1100000 1150000 0>;
+		rgltr-load-current = <200000 200000 200000 200000 200000 0>;
+
+		// GPIO
+		gpio-no-mux = <0>;
+		pinctrl-names = "cam_default", "cam_suspend";
+		pinctrl-0 = <&cam_sensor_rear1_active>;
+		pinctrl-1 = <&cam_sensor_rear1_suspend>;
+		gpios = <&tlmm 15 0>,
+			<&tlmm 33 0>,
+			<&expander_gpios 16 0>;
+		gpio-reset = <1>;
+		gpio-vaf = <2>;
+		gpio-req-tbl-num = <0 1 2>;
+		gpio-req-tbl-flags = <1 0 0>;
+		gpio-req-tbl-label = "CAMIF_MCLK2", "CAM_RESET1", "CAM_VAF";
+		use-shared-clk;
+
+		sensor-mode = <0>;
+		cci-device = <1>;
+		cci-master = <0>;
+		status = "ok";
+		clocks = <&clock_camcc CAM_CC_MCLK2_CLK>;
+		clock-names = "cam_clk";
+		clock-cntl-level = "turbo";
+		clock-rates = <24000000>;
+		cam,isp = <0>;                  // 0 : INT , 1 : EXT , 2 : SOC
+		cam,cal_memory = <2>;           // 0 : N , 1 : FROM , 2 : EEPROM , 3 : OTP
+		cam,read_version = <0>;         // 0 : SYSFS , 1 : CAMON
+		cam,core_voltage = <0>;         // 0 : N , 1 : Y
+		cam,upgrade = <0>;              // 0 : N , 1 : SYSFS , 2 : CAMON
+		cam,fw_write = <0>;             // 0 : N , 1 : OS , 2 : SD , 3 : ALL
+		cam,fw_dump = <0>;              // 0 : N , 1 : Y
+		cam,companion_chip = <0>;       // 0 : N , 1 : Y
+		cam,ois = <0>;                  // 0 : N , 1 : Y
+		cam,dual_open = <0>;            // 0 : N , 1 : Y
+		cam,valid = <1>;                // 0 : N , 1 : Y
+	};
+	
 	eeprom0: qcom,eeprom@0 {
 		cell-index = <0>;
 		reg = <0x58>; //QUP use 0xB0

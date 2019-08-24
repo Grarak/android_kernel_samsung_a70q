@@ -212,15 +212,16 @@ struct tc3xxk_data {
 	int grip_num;
 	struct grip_event_val *grip_ev_val;
 	struct delayed_work debug_work;
+	s32 diff;
 
 #ifdef CONFIG_SEC_FACTORY
 	int irq_count;
 	int abnormal_mode;
-	s32 diff;
 	s32 max_diff;
 #endif
 
 #if defined (CONFIG_VBUS_NOTIFIER)
+	bool ignore_vbus_event;
 	struct notifier_block vbus_nb;
 #endif
 };
@@ -359,10 +360,13 @@ static void tc3xxk_reset(struct tc3xxk_data *data)
 {
 	SENSOR_INFO("\n");
 
-	disable_irq_nosync(data->client->irq);
+	if (data->irq_check) {
+		data->irq_check = false;
+		disable_irq_wake(data->client->irq);
+		disable_irq_nosync(data->client->irq);
+	}
 
 	data->pdata->power(data, false);
-
 	msleep(50);
 
 	data->pdata->power(data, true);
@@ -371,13 +375,16 @@ static void tc3xxk_reset(struct tc3xxk_data *data)
 	if (data->sar_enable)
 		tc3xxk_mode_enable(data->client, TC300K_CMD_SAR_ENABLE);
 
-	enable_irq(data->client->irq);
+	if (!data->irq_check) {
+		data->irq_check = true;
+		enable_irq(data->client->irq);
+		enable_irq_wake(data->client->irq);
+	}
 }
 
 static void tc3xxk_reset_probe(struct tc3xxk_data *data)
 {
 	data->pdata->power(data, false);
-
 	msleep(50);
 
 	data->pdata->power(data, true);
@@ -629,23 +636,10 @@ static irqreturn_t tc3xxk_interrupt(int irq, void *dev_id)
 		else
 			grip_handle_flag = (grip_val == data->grip_ev_val[i].grip_bitmap);
 
-		if (grip_handle_flag){
-			if(data->grip_ev_val[i].grip_status == ACTIVE){
-				data->grip_event = ACTIVE;
-				input_report_rel(data->input_dev, REL_MISC, 1);
-			}
-			else{
-				data->grip_event = IDLE;
-				input_report_rel(data->input_dev, REL_MISC, 2);
-			}
-			SENSOR_INFO(
-				"grip %s : %s(0x%02X) ver0x%02x\n",
-				data->grip_ev_val[i].grip_status? "P" : "R",
-				data->grip_ev_val[i].grip_name, grip_val,
-				data->fw_ver);
+		if (grip_handle_flag) {
 
-#ifdef CONFIG_SEC_FACTORY
-			data->diff = read_tc3xxk_register_data(data, TC305K_1GRIP, TC305K_GRIP_DIFF_DATA); 
+			data->diff = read_tc3xxk_register_data(data, TC305K_1GRIP, TC305K_GRIP_DIFF_DATA);
+#ifdef CONFIG_SEC_FACTORY 
 			if (data->abnormal_mode) { 
 				if (data->grip_event) {
 					if (data->max_diff < data->diff) 
@@ -654,6 +648,18 @@ static irqreturn_t tc3xxk_interrupt(int irq, void *dev_id)
 				} 
 			} 
 #endif
+			if(data->grip_ev_val[i].grip_status == ACTIVE){
+				data->grip_event = ACTIVE;
+				input_report_rel(data->input_dev, REL_MISC, 1);
+			} else {
+				data->grip_event = IDLE;
+				input_report_rel(data->input_dev, REL_MISC, 2);
+			}
+
+			SENSOR_INFO("%s : %s(0x%02X), diff : %d, ver0x%02x\n",
+				data->grip_ev_val[i].grip_status? "P" : "R",
+				data->grip_ev_val[i].grip_name, grip_val,
+				data->diff, data->fw_ver);
 		}
 	}
 	input_sync(data->input_dev);
@@ -1072,7 +1078,7 @@ static int tc3xxk_crc_check(struct tc3xxk_data *data)
 	return 0;
 }
 
-static int tc3xxk_fw_update(struct tc3xxk_data *data, u8 fw_path, bool force)
+static int tc3xxk_fw_update(struct tc3xxk_data *data, u8 fw_path, bool force, bool probe)
 {
 	int retry = 4;
 	int ret;
@@ -1086,7 +1092,7 @@ static int tc3xxk_fw_update(struct tc3xxk_data *data, u8 fw_path, bool force)
 		data->md_ver_bin = data->fw_img->second_fw_ver;
 
 		/* read model ver */
-		ret = tc3xxk_get_md_version(data, false);
+		ret = tc3xxk_get_md_version(data, probe);
 		if (ret) {
 			SENSOR_ERR("get md version fail\n");
 			force = 1;
@@ -1118,7 +1124,7 @@ static int tc3xxk_fw_update(struct tc3xxk_data *data, u8 fw_path, bool force)
 			continue;
 		}
 
-		ret = tc3xxk_get_fw_version(data, false);
+		ret = tc3xxk_get_fw_version(data, probe);
 		if (ret) {
 			SENSOR_ERR("tc3xxk_get_fw_version fail (%d)\n", retry);
 			continue;
@@ -1129,7 +1135,7 @@ static int tc3xxk_fw_update(struct tc3xxk_data *data, u8 fw_path, bool force)
 			continue;
 		}
 
-		ret = tc3xxk_get_md_version(data, false);
+		ret = tc3xxk_get_md_version(data, probe);
 		if (ret) {
 			SENSOR_ERR("tc3xxk_get_md_version fail (%d)\n", retry);
 			continue;
@@ -1193,9 +1199,18 @@ static ssize_t tc3xxk_update_store(struct device *dev,
 
 	data->fw_update_status = TK_UPDATE_DOWN;
 
-	disable_irq(client->irq);
-	ret = tc3xxk_fw_update(data, fw_path, fw_update_force);
-	enable_irq(client->irq);
+	if (data->irq_check) {
+		data->irq_check = false;
+		disable_irq_wake(client->irq);
+		disable_irq(client->irq);
+	}
+	ret = tc3xxk_fw_update(data, fw_path, fw_update_force, false);
+	if (!data->irq_check) {
+		data->irq_check = true;
+		enable_irq(client->irq);
+		enable_irq_wake(client->irq);
+	}
+
 	if (ret < 0) {
 		SENSOR_ERR("fail\n");
 		data->fw_update_status = TK_UPDATE_FAIL;
@@ -1658,7 +1673,7 @@ static ssize_t tc3xxk_grip_check_show(struct device *dev,
 {
 	struct tc3xxk_data *data = dev_get_drvdata(dev);
 
-	SENSOR_ERR("event:%d\n", data->grip_event);
+	SENSOR_ERR("event:%d, diff: %d\n", data->grip_event, data->diff);
 
 	return sprintf(buf, "%d\n", data->grip_event);
 }
@@ -1879,8 +1894,18 @@ static int tc3xxk_vbus_notification(struct notifier_block *nb,
 	struct i2c_client *client = tkey_data->client;
 	vbus_status_t vbus_type = *(vbus_status_t *)data;
 	int ret;
+	static int pre_attach;
 
-	SENSOR_INFO("cmd=%lu, vbus_type=%d\n", cmd, vbus_type);
+	if (pre_attach == vbus_type)
+		return 0;
+
+	SENSOR_INFO("cmd=%lu, vbus_type=%d, ignore=%d\n", cmd, vbus_type, tkey_data->ignore_vbus_event);
+
+	if (tkey_data->ignore_vbus_event)
+	{
+		tkey_data->ignore_vbus_event = false;
+		return 0;
+	}
 
 	switch (vbus_type) {
 	case STATUS_VBUS_HIGH:
@@ -1900,6 +1925,8 @@ static int tc3xxk_vbus_notification(struct notifier_block *nb,
 	default:
 		break;
 	}
+
+	pre_attach = vbus_type;
 
 	return 0;
 }
@@ -1928,11 +1955,11 @@ static int tc3xxk_fw_check(struct tc3xxk_data *data)
 	if (data->fw_ver == 0xFF) {
 		SENSOR_INFO(
 			"fw version 0xFF, Excute firmware update!\n");
-		ret = tc3xxk_fw_update(data, FW_INKERNEL, true);
+		ret = tc3xxk_fw_update(data, FW_INKERNEL, true, true);
 		if (ret)
 			return -1;
 	} else {
-		ret = tc3xxk_fw_update(data, FW_INKERNEL, false);
+		ret = tc3xxk_fw_update(data, FW_INKERNEL, false, true);
 		if (ret)
 			return -1;
 	}
@@ -2164,6 +2191,8 @@ static int tc3xxk_probe(struct i2c_client *client,
 	data->dev = &client->dev;	
 
 #if defined (CONFIG_VBUS_NOTIFIER)
+	//ignore the 1st vbus detach event when probe done
+	data->ignore_vbus_event = true;
 	vbus_notifier_register(&data->vbus_nb, tc3xxk_vbus_notification,
 			       VBUS_NOTIFY_DEV_CHARGER);
 #endif

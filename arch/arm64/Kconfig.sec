@@ -131,6 +131,13 @@ config SEC_R1Q_CHN_LDU_PROJECT
         help
           Support for Samsung R1Q CHN LDU Project
 
+config SEC_R1Q_KOR_PROJECT
+        depends on SEC_R1Q_PROJECT
+        default n
+        bool "Samsung A90Q KOR SINGLE Project"
+        help
+          Support for Samsung R1Q KOR SINGLE Project
+
 config SEC_A90Q_PROJECT
         depends on ARCH_SM6150
 	select SEC_R1Q_PROJECT
@@ -170,3 +177,11 @@ config SEC_A90Q_CHN_LDU_PROJECT
         bool "Samsung A90Q CHN LDU Project"
         help
           Support for Samsung A90Q CHN LDU Project
+
+config SEC_A90Q_KOR_PROJECT
+        depends on SEC_A90Q_PROJECT
+	select SEC_R1Q_KOR_PROJECT
+        default n
+        bool "Samsung A90Q KOR SINGLE Project"
+        help
+          Support for Samsung A90Q KOR SINGLE Project

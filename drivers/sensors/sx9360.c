@@ -947,8 +947,14 @@ static ssize_t sx9360_onoff_store(struct device *dev,
 		return ret;
 	}
 
-	if (val == 0)
+	if (val == 0) {
 		data->skip_data = true;
+		if (atomic_read(&data->enable) == ON) {
+			data->state = IDLE;
+			input_report_rel(data->input, REL_MISC, 2);
+			input_sync(data->input);
+		}
+	}
 	else
 		data->skip_data = false;
 

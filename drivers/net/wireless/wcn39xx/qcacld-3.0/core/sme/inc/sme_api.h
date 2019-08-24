@@ -2615,4 +2615,17 @@ QDF_STATUS
 sme_get_roam_scan_stats(tHalHandle hal, roam_scan_stats_cb cb, void *context,
 			uint32_t vdev_id);
 
+/**
+ * sme_update_oce_flags() - Update OCE flags to FW.
+ * @mac_handle: mac handler
+ * @status: qdf status
+ *
+ * For SAP the max self CTS time is 32ms. If STA want's to scan
+ * When OCE is enabled then FW will do probe deferral for 15ms.
+ * So, the 15ms out of 28ms is gone and STA can not scan much AP's
+ * To Improve Scan STA Scan disable OCE only if SAP or GO
+ * has associated clients.
+ */
+QDF_STATUS sme_update_oce_flags(mac_handle_t mac_handle, bool sta_connected);
+
 #endif /* #if !defined( __SME_API_H ) */

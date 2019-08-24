@@ -48,6 +48,9 @@
 
 extern struct device *sec_key;
 
+#define MAX_DEFAULT 3350
+#define MIN_DEFAULT 1950
+
 static bool digital_reverse_hall_status = 1;
 
 #ifdef REQUEST_FW
@@ -60,6 +63,7 @@ int g_reverse_hall_addr=0x2;
 int g_reverse_hall_to_dist = 0;
 int g_reverse_hall_sector = 0;
 int g_reverse_hall_max_point;
+int g_reverse_hall_min_point;
 int g_reverse_hall_slope;
 int g_reverse_fw_version;
 
@@ -226,8 +230,12 @@ int dw772x_reverse_hall_out(void)
 		g_reverse_hall_sector = 2;		   
 	}
 
-	g_reverse_hall_to_dist = (g_reverse_hall_slope * (g_reverse_hall_max_point - tmp) + 512) / 1024;
-	
+	//g_reverse_hall_to_dist = (g_reverse_hall_slope * (g_reverse_hall_max_point - tmp) + 512) / 1024;
+	//g_reverse_hall_to_dist = (g_reverse_hall_slope * (g_reverse_hall_max_point - tmp)) / 1024; // dwa jks-20190412
+	g_reverse_hall_to_dist = (4 * (g_reverse_hall_max_point - tmp)) / (g_reverse_hall_max_point - g_reverse_hall_min_point); // dwa jks-20190412	
+
+	if (g_reverse_hall_to_dist < 0)
+		g_reverse_hall_to_dist = 0;
 	pr_info("%s : Hall Read Out: %d\n", __func__, tmp);
 
 	return tmp;
@@ -251,12 +259,13 @@ static int dw772x_reverse_magnet_cal_set(void)
 	#if 1
 	tmp[0] = dw772x_reverse_byte_read(0x5E);
 	tmp[1] = dw772x_reverse_byte_read(0x5F);
-	hall_min_point = (tmp[0] << 8) | tmp[1];
+	g_reverse_hall_min_point = hall_min_point = (tmp[0] << 8) | tmp[1];
 	#else
 	hall_min_point = 2000;
 	#endif
 
-	g_reverse_hall_slope=(1024*4)/(g_reverse_hall_max_point-hall_min_point);
+//	g_reverse_hall_slope=(1024*4)/(g_reverse_hall_max_point-hall_min_point);
+	g_reverse_hall_slope=(1024*3)/(g_reverse_hall_max_point-hall_min_point);	// dwa jks 20190412
 
 	if(g_reverse_hall_max_point < hall_min_point) {
 		pr_info("%s : Hall load failed: %d, %d\n", __func__, g_reverse_hall_max_point, hall_min_point);
@@ -265,6 +274,72 @@ static int dw772x_reverse_magnet_cal_set(void)
 		pr_info("%s : hall_max: %d hall_min: %d\n", __func__, g_reverse_hall_max_point, hall_min_point);
 	
 	return 0;
+}
+
+/* =====================================================================================
+function : dw772x reverse calibration back up
+descript : back up cal data
+version  : 1.0
+release  : 2019.05.18
+====================================================================================== */
+void dw772x_reverse_cal_backup(void)
+{
+	int cal_max=0,cal_min=0;
+	int read_max=0,read_min=0;
+
+	cal_max = dw772x_reverse_word_read(0x5C);
+	cal_min = dw772x_reverse_word_read(0x5E);
+
+	if(cal_max==0) {
+		gprint("dw772x_cal_max_0-1\n");
+		cal_max = dw772x_reverse_word_read(0x64);
+		if(cal_max == 0) {
+			gprint("dw772x_cal_max_0-2\n");
+			cal_max = dw772x_reverse_word_read(0x68);
+			if(cal_max==0) {
+				gprint("dw772x_cal_max_0-default\n");
+				cal_max = MAX_DEFAULT;
+			}
+		}
+		dw772x_reverse_word_write(0x5C, cal_max);
+
+		dw772x_reverse_magnet_cal_set();		// Reapply the formula
+		dw772x_reverse_byte_write(0x03, 0x01);	// STORE
+		mdelay(15);
+		dw772x_reverse_byte_write(0x04, 0x01);	// SW RESET
+		mdelay(10);
+		dw772x_reverse_init_mode_sel(ACTIVE_MODE, 0);
+		
+		read_max = dw772x_reverse_word_read(0x5C);
+		if(read_max != cal_max)
+			gprint("read_max=%d , cal_max=%d\n", read_max, cal_max);
+	}
+	if(cal_min==0) {
+		gprint("dw772x_cal_min_0-1\n");
+		cal_min = dw772x_reverse_word_read(0x66);
+		if(cal_min == 0) {
+			gprint("dw772x_cal_min_0-2\n");
+			cal_min = dw772x_reverse_word_read(0x6A);
+			if(cal_min==0) {
+				gprint("dw772x_cal_min_0-default\n");
+				cal_min = MIN_DEFAULT;
+			}
+		}
+		dw772x_reverse_word_write(0x5E, cal_min);
+
+		dw772x_reverse_magnet_cal_set();		// Reapply the formula
+		dw772x_reverse_byte_write(0x03, 0x01);	// STORE
+		mdelay(15);
+		dw772x_reverse_byte_write(0x04, 0x01);	// SW RESET
+		mdelay(10);
+		dw772x_reverse_init_mode_sel(ACTIVE_MODE, 0);
+		
+		read_min = dw772x_reverse_word_read(0x5E);
+		if(read_min != cal_min)
+			gprint("read_min=%d , cal_min=%d\n", read_min, cal_min);
+	}
+
+	return;
 }
 
 /* =====================================================================================
@@ -278,7 +353,7 @@ static int dw772x_reverse_device_init(struct i2c_client *client)
 	int ret=0;
 
 	dw772x_reverse_init_mode_sel(INT_MODE, 0);
-	mdelay(5);
+	//mdelay(5);	// 190401 jks
 	dw772x_reverse_init_mode_sel(ACTIVE_MODE, 0);
 	dw772x_reverse_init_mode_sel(HALL_CAL_MODE, 0);
 
@@ -333,6 +408,10 @@ int dw772x_reverse_init_mode_sel(int mode, u32 data)
 				dw772x_reverse_byte_write(0x63, 0x2C);
 			}
 			else {
+				dw772x_reverse_byte_write(0x54, 0x32);
+				dw772x_reverse_byte_write(0x55, 0x64);
+				dw772x_reverse_byte_write(0x56, 0x14);
+				
 				dw772x_reverse_byte_write(0x60, 0x3E);
 				dw772x_reverse_byte_write(0x61, 0x5E);
 				dw772x_reverse_byte_write(0x62, 0x01);
@@ -341,12 +420,16 @@ int dw772x_reverse_init_mode_sel(int mode, u32 data)
 
 			// cal flag check! ------------------
 			if(dw772x_reverse_byte_read(0x5B) == 0) {
-				dw772x_reverse_word_write(0x4A, 2500);
-				dw772x_reverse_word_write(0x4C, 2300);
-				dw772x_reverse_word_write(0x4E, 2500);
-				dw772x_reverse_word_write(0x50, 2300);
+				dw772x_reverse_word_write(0x4A, 0);	//2500
+				dw772x_reverse_word_write(0x4C, 0);	//2300
+				dw772x_reverse_word_write(0x4E, 0);	//2500
+				dw772x_reverse_word_write(0x50, 0);	//2300
+
 			}
-			
+
+			g_reverse_hall_max_point = dw772x_reverse_word_read(0x5C);	// dwa jks - 20190429
+			g_reverse_hall_min_point = dw772x_reverse_word_read(0x5E);	// dwa jks - 20190429
+
 			//add register hall chopping
 			dw772x_reverse_byte_write(0x2F, 0xDA);
 			dw772x_reverse_byte_write(0x98, 0x27);
@@ -419,6 +502,7 @@ static struct workqueue_struct *rtp_reverse_workqueue;
 
 static void dw772x_reverse_irq_work(struct work_struct *reverse_work)
 {
+#if 0
 	u32 hall, comp, detach;
 
 	gprint("irq_rtp_work\n");
@@ -438,6 +522,7 @@ static void dw772x_reverse_irq_work(struct work_struct *reverse_work)
 	input_report_switch(dw772x_reverse->input,
 			SW_DIGITALDOWNHALL, dw772x_reverse->digital_reverse_hall);
 	input_sync(dw772x_reverse->input);
+#endif	
 }
 
 DECLARE_WORK(reverse_work, dw772x_reverse_irq_work);
@@ -506,7 +591,7 @@ static int dw772x_reverse_seq_write(u32 addr, u32 ram_addr, u32 ram_bit, u8* dat
 
 	memset(xbuf, 0, sizeof(xbuf));
 
-	if(size > 1024) { 
+	if(size > 1023) {
 		ret = -1;
 		pr_info("%s : The transferable size has been exceeded.\n", __func__);		
 		return ret;
@@ -542,12 +627,10 @@ static int dw772x_reverse_seq_read(u32 addr, u32 ram_addr, u32 ram_bit, u8* data
 {
 	int ret=0;
 	u8 xbuf[3];
-//	u8 rbuf[1028];
 	struct i2c_msg xfer[2];
 	struct i2c_client *i2c_fnc = dw772x_reverse->dwclient;
 
 	memset(xbuf, 0, sizeof(xbuf));
-//	memset(rbuf, 0, sizeof(rbuf));
 
 	if(ram_bit == RAM_ADDR8) { 
 		xbuf[0] = (u8)addr;	
@@ -767,16 +850,29 @@ static ssize_t calDW772x_reverse_set (struct device *dev, struct device_attribut
 {
 	int mode=0, value=0, diff_e=0;
 	int max=0, max_th, min_th;
+	int min_val=0, max_val=0;
+	unsigned char cal_cnt=0;
 
 	pm_runtime_get_sync(dw772x_reverse->dev);
 
 	sscanf(buf, "%d %d", &mode, &value);
 
+	gprint("dw772x_cal_check - mode:%d, val:%d\n", mode, value);
+
+	if(value == 0) {
+		gprint(" trying to set cal value as zero! it'll return without setting\n");			
+		return count;
+	}
+
 	if(mode == 1) { 		// cal 1point
 		dw772x_reverse_word_write(0x5C, value);
+		dw772x_reverse_word_write(0x64, value);
+		dw772x_reverse_word_write(0x68, value);
 	}
 	else if(mode == 2) {	// cal 2point
 		dw772x_reverse_word_write(0x5E, value);
+		dw772x_reverse_word_write(0x66, value);
+		dw772x_reverse_word_write(0x6A, value);		
 
 		max = dw772x_reverse_word_read(0x5C);
 
@@ -785,32 +881,41 @@ static ssize_t calDW772x_reverse_set (struct device *dev, struct device_attribut
 			max_th = (max - (max - value) / 2) + diff_e;
 			min_th = (max - (max - value) / 2) - diff_e;
 
-			dw772x_reverse_word_write(0x4A, max_th);
-			dw772x_reverse_word_write(0x4C, min_th);
-			dw772x_reverse_word_write(0x4E, max_th);
-			dw772x_reverse_word_write(0x50, min_th);
+			dw772x_reverse_word_write(0x4A, 0); //max_th	// for test jks 190409
+			dw772x_reverse_word_write(0x4C, 0); //min_th
+			dw772x_reverse_word_write(0x4E, 0); //max_th
+			dw772x_reverse_word_write(0x50, 0); //min_th
 			dw772x_reverse_byte_write(0x5B, 0x01);	// cAL Flag Set
 		}
 		else {
-			dw772x_reverse_word_write(0x4A, 2500);
-			dw772x_reverse_word_write(0x4C, 2300);
-			dw772x_reverse_word_write(0x4E, 2500);
-			dw772x_reverse_word_write(0x50, 2300);
+			dw772x_reverse_word_write(0x4A, 0); //2500
+			dw772x_reverse_word_write(0x4C, 0); //2300
+			dw772x_reverse_word_write(0x4E, 0); //2500
+			dw772x_reverse_word_write(0x50, 0); //2300
 			dw772x_reverse_byte_write(0x5B, 0x00);	// cAL Flag Set
 		}			
 	}
-	else if(mode == 12) {	// cal clear
-		dw772x_reverse_word_write(0x5C, 0);
-		dw772x_reverse_word_write(0x5E, 0);
-	}
+//	else if(mode == 12) {	// cal clear
+//		dw772x_reverse_word_write(0x5C, 0);
+//		dw772x_reverse_word_write(0x5E, 0);
+//	}
 
-	if(mode==1 || mode==2 || mode==12) {
+	if(mode==1 || mode==2 /*|| mode==12*/) {
 		dw772x_reverse_magnet_cal_set();		// Reapply the formula
 		dw772x_reverse_byte_write(0x03, 0x01);	// STORE
 		mdelay(15);
 		dw772x_reverse_byte_write(0x04, 0x01);	// SW RESET
 		mdelay(10);
 		dw772x_reverse_init_mode_sel(ACTIVE_MODE, 0);
+
+		max_val = dw772x_reverse_word_read(0x5C);
+		min_val = dw772x_reverse_word_read(0x5E);
+		if(max_val==0 || min_val==0) {
+			gprint("dw772x_cal_error - max:%d, min:%d\n", max_val, min_val);
+		}
+		cal_cnt = dw772x_reverse_byte_read(0x5A);
+		cal_cnt++;
+		dw772x_reverse_byte_write(0x5A, cal_cnt);
 	}
 	
 	gprint("write mode: %d	value: %d\n", mode, value);
@@ -1131,7 +1236,7 @@ static int dw772x_reverse_probe(struct i2c_client *client, const struct i2c_devi
 	int ret = 0;
 	struct input_dev *input;
 
-	pr_info("%s: dw772x_reverse haptic driver probe start....190318A\n", __func__);
+	gprint("dw772x reverse Hall driver probe start....190518\n");	// DW772x Kernel Version!
 
 	dw772x_reverse = kzalloc(sizeof(struct dw772x_reverse_priv), GFP_KERNEL);
 
@@ -1167,6 +1272,7 @@ static int dw772x_reverse_probe(struct i2c_client *client, const struct i2c_devi
 
 	dw772x_reverse_device_init(client);
 	pr_info("%s: dw772x_reverse_device_init!\n", __func__);
+	dw772x_reverse_cal_backup();
 
 	input = input_allocate_device();
 	if (!input) {

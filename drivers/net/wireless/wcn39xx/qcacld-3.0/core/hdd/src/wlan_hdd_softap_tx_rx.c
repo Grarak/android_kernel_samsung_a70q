@@ -950,11 +950,14 @@ QDF_STATUS hdd_softap_deregister_sta(struct hdd_adapter *adapter,
 {
 	QDF_STATUS qdf_status = QDF_STATUS_SUCCESS;
 	struct hdd_context *hdd_ctx;
+	mac_handle_t mac_handle;
 
 	if (NULL == adapter) {
 		hdd_err("NULL adapter");
 		return QDF_STATUS_E_INVAL;
 	}
+
+	mac_handle = hdd_adapter_get_mac_handle(adapter);
 
 	if (WLAN_HDD_ADAPTER_MAGIC != adapter->magic) {
 		hdd_err("Invalid adapter magic");
@@ -992,6 +995,7 @@ QDF_STATUS hdd_softap_deregister_sta(struct hdd_adapter *adapter,
 	}
 
 	hdd_ctx->sta_to_adapter[sta_id] = NULL;
+	sme_update_oce_flags(mac_handle, false);
 
 	return qdf_status;
 }
@@ -1009,6 +1013,7 @@ QDF_STATUS hdd_softap_register_sta(struct hdd_adapter *adapter,
 	struct ol_txrx_ops txrx_ops;
 	void *soc = cds_get_context(QDF_MODULE_ID_SOC);
 	void *pdev = cds_get_context(QDF_MODULE_ID_TXRX);
+	mac_handle_t mac_handle = hdd_adapter_get_mac_handle(adapter);
 
 	hdd_info("STA:%u, Auth:%u, Priv:%u, WMM:%u",
 		 sta_id, auth_required, privacy_required, wmm_enabled);
@@ -1086,6 +1091,7 @@ QDF_STATUS hdd_softap_register_sta(struct hdd_adapter *adapter,
 	wlan_hdd_netif_queue_control(adapter,
 				   WLAN_START_ALL_NETIF_QUEUE_N_CARRIER,
 				   WLAN_CONTROL_PATH);
+	sme_update_oce_flags(mac_handle, true);
 
 	return qdf_status;
 }

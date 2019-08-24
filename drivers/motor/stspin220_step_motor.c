@@ -36,34 +36,36 @@
 #define UP	1
 #define DOWN	-1
 
-#define STARTING_SPEED	10416
+#define STARTING_SPEED	13333
 #define FULL_SPEED	10416
-#define ENDING_SPEED	19531
+#define ENDING_SPEED	40000
 
-#define STARTING_SPEED_LOW_TEMP	1052631
-#define FULL_SPEED_LOW_TEMP	533333
-#define ENDING_SPEED_LOW_TEMP	625000
+#define STARTING_SPEED_LOW_TEMP	1280000
+#define FULL_SPEED_LOW_TEMP	640000
+#define ENDING_SPEED_LOW_TEMP	426667
 
 /*
- * starting time: 100ms
- * full speed time: 740ms
- * ending time: 60ms
+ * starting time: 30ms
+ * full speed time: 800ms
+ * ending time: 170ms
  * 
  * FULL_SPEED_TIME	starting time 
  * ENDING_TIME		starting time + full speed time
  * TIMEOUT_TIME		starting time + full speed time + ending time
  */
-#define FULL_SPEED_TIME		100	/* starting time */
-#define ENDING_TIME		800	/* starting time + full speed time*/
-#define TIMEOUT_TIME		950	/* starting time + full speed time + ending time */
+#define FULL_SPEED_TIME		30	/* starting time */
+#define ENDING_TIME		860	/* starting time + full speed time*/
+#define TIMEOUT_TIME		910	/* starting time + full speed time + ending time */
 
-#define FULL_SPEED_TIME_LOW_TEMP	100	/* starting time */
-#define ENDING_TIME_LOW_TEMP		1500	/* starting time + full speed time*/
-#define TIMEOUT_TIME_LOW_TEMP		1600	/* starting time + full speed time + ending time */
+#define FULL_SPEED_TIME_LOW_TEMP	1000		/* starting time */
+#define ENDING_TIME_LOW_TEMP		2150	/* starting time + full speed time*/
+#define TIMEOUT_TIME_LOW_TEMP		2225	/* starting time + full speed time + ending time */
 
 int starting_period = 33333;
 int full_speed_period = 12987;
 int ending_period = 166666;
+
+int cold = false;
 
 enum step_mode {
 	FULL_STEP,
@@ -75,10 +77,12 @@ struct stspin220_data {
 	struct pwm_device *pwm_dev;
 	struct work_struct work_motor_off;
 	struct work_struct work_change_speed;
+	struct work_struct work_motor_retry_on;
 	struct workqueue_struct *queue;
 	struct hrtimer full_speed_timer;
 	struct hrtimer ending_timer;
 	struct hrtimer off_timer;
+	struct hrtimer retry_on_timer;
 	struct mutex lock;
 	struct pinctrl *pinctrl;
 	struct pinctrl_state *pin_active;
@@ -100,6 +104,7 @@ struct stspin220_data {
 	int full_speed_change_time;
 	int ending_speed_change_time;
 	int timeout_speed_change_time;
+	int is_retry;
 
 	u64 period;
 	u64 duty;
@@ -178,7 +183,8 @@ static void motor_check_temp(struct stspin220_data *data)
 	else
 		pr_info("[MOT] %s: temp: %d\n", __func__, temp);
 
-	if (temp <= (-70)) {
+	if (temp <= 80) {
+		cold = true;
 		stspin220_set_step_mode(data, FULL_STEP);
 		data->starting_speed = STARTING_SPEED_LOW_TEMP;
 		data->full_speed = FULL_SPEED_LOW_TEMP;
@@ -187,6 +193,7 @@ static void motor_check_temp(struct stspin220_data *data)
 		data->ending_speed_change_time = ENDING_TIME_LOW_TEMP;
 		data->timeout_speed_change_time = TIMEOUT_TIME_LOW_TEMP;
 	} else {
+		cold = false;
 		stspin220_set_step_mode(data, ONE_THIRTYTWO_STEP);
 		data->starting_speed = STARTING_SPEED;
 		data->full_speed = FULL_SPEED;
@@ -268,6 +275,59 @@ static void set_motor(struct stspin220_data *data, int enable)
 		stspin220_set_rst(data, ON);
 		stspin220_enable(data, ON);
 		stspin220_set_dir(data, set_dir);
+		
+	pr_info("[MOTOR] set_motor: data->is_retry(%d), cold(%d)\n", data->is_retry, cold);
+		if(data->is_retry)
+		{
+			if(data->is_retry == 3)
+			{
+				if(cold)
+				{
+					stspin220_set_stck(data, data->starting_speed);
+					hrtimer_start(&data->retry_on_timer, ktime_set(200 / 1000,
+					(200 % 1000) * 1000000), HRTIMER_MODE_REL);
+				}
+				else
+				{
+					stspin220_set_stck(data, 20000);
+					hrtimer_start(&data->retry_on_timer, ktime_set(100 / 1000,
+					(100 % 1000) * 1000000), HRTIMER_MODE_REL);
+				}
+			}
+			if(data->is_retry == 2)
+			{
+				if(cold)
+				{
+					stspin220_set_stck(data, data->starting_speed);
+					hrtimer_start(&data->retry_on_timer, ktime_set(200 / 1000,
+					(200 % 1000) * 1000000), HRTIMER_MODE_REL);
+				}
+				else
+				{
+					stspin220_set_stck(data, 20000);
+					hrtimer_start(&data->retry_on_timer, ktime_set(200 / 1000,
+					(200 % 1000) * 1000000), HRTIMER_MODE_REL);
+				}
+			}
+			if(data->is_retry == 1)
+			{
+				if(cold)
+				{
+					stspin220_set_stck(data, data->starting_speed);
+					hrtimer_start(&data->retry_on_timer, ktime_set(200 / 1000,
+					(200 % 1000) * 1000000), HRTIMER_MODE_REL);
+				}
+				else
+				{
+					stspin220_set_stck(data, 20000);
+					hrtimer_start(&data->retry_on_timer, ktime_set(50 / 1000,
+					(50 % 1000) * 1000000), HRTIMER_MODE_REL);
+				}
+			}
+
+		}
+		else
+		{
 		stspin220_set_stck(data, data->starting_speed);
 
 		hrtimer_start(&data->full_speed_timer, ktime_set(data->full_speed_change_time / 1000,
@@ -276,6 +336,7 @@ static void set_motor(struct stspin220_data *data, int enable)
 					(data->ending_speed_change_time % 1000) * 1000000), HRTIMER_MODE_REL);
 		hrtimer_start(&data->off_timer, ktime_set(data->timeout_speed_change_time / 1000,
 					(data->timeout_speed_change_time % 1000) * 1000000), HRTIMER_MODE_REL);
+		}
 	} else {
 		stspin220_set_stck(data, OFF);
 		stspin220_set_dir(data, DOWN);
@@ -283,6 +344,8 @@ static void set_motor(struct stspin220_data *data, int enable)
 		stspin220_set_rst(data, OFF);
 		stspin220_set_power(data, OFF);
 		wake_unlock(&data->motor_wake_lock);
+
+		data->is_retry = false;
 	}
 
 	pr_info("[MOTOR] is %s, direction is %s\n",
@@ -423,6 +486,48 @@ static ssize_t test_store(struct device *dev, struct device_attribute *attr,
 }
 static DEVICE_ATTR(test, 0660, test_show, test_store);
 
+static ssize_t retry_show(struct device *dev, struct device_attribute *attr,
+		char *buf)
+{
+/*
+	struct stspin220_data *data = dev_get_drvdata(dev);
+	struct hrtimer *timer = &data->motor_timer;
+	int remaining = 0;
+
+	if (hrtimer_active(timer)) {
+		ktime_t remain = hrtimer_get_remaining(timer);
+		struct timeval t = ktime_to_timeval(remain);
+
+		remaining = t.tv_sec * 1000 + t.tv_usec / 1000;
+	}
+
+	return sprintf(buf, "%d\n", remaining);
+*/
+	return 0;
+}
+static ssize_t retry_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t size)
+{
+	struct stspin220_data *data = dev_get_drvdata(dev);
+	int time = 0, direction = 0;
+	int ret;
+
+	pr_info("[MOTOR] retry function called\n");
+
+	ret = sscanf(buf, "%d %d", &time, &direction);
+	if (ret == 0)
+		return -EINVAL;
+
+	data->is_retry = 3;
+	
+	motor_enable(data, time, -direction);
+
+	return size;
+}
+
+static DEVICE_ATTR(retry, 0660, retry_show, retry_store);
+
+
 static ssize_t enable_show(struct device *dev, struct device_attribute *attr,
 		char *buf)
 {
@@ -454,6 +559,7 @@ static ssize_t enable_store(struct device *dev, struct device_attribute *attr,
 	if (ret == 0)
 		return -EINVAL;
 
+	data->is_retry = false;
 	motor_check_temp(data);
 	motor_enable(data, value, direction);
 
@@ -478,6 +584,18 @@ static void stspin220_set_motor_off(struct work_struct *work)
 	pr_info("[MOTOR] %s\n",__func__);
 
 	set_motor(data, OFF);
+}
+
+static void stspin220_set_motor_retry_on(struct work_struct *work)
+{
+	struct stspin220_data *data = container_of(work, struct stspin220_data,
+					 work_motor_retry_on);
+
+	pr_info("[MOTOR] %s\n",__func__);
+
+	data->is_retry--;
+	
+	motor_enable(data, data->timeout_speed_change_time, -(data->direction));
 }
 
 static enum hrtimer_restart full_speed_timer_func(struct hrtimer *timer)
@@ -516,6 +634,18 @@ static enum hrtimer_restart off_timer_func(struct hrtimer *timer)
 	pr_info("[MOTOR] %s\n",__func__);
 
 	queue_work(data->queue, &data->work_motor_off);
+
+	return HRTIMER_NORESTART;
+}
+
+static enum hrtimer_restart retry_on_timer_func(struct hrtimer *timer)
+{
+	struct stspin220_data *data = container_of(timer, struct stspin220_data,
+							 retry_on_timer);
+
+	pr_info("[MOTOR] %s\n",__func__);
+
+	queue_work(data->queue, &data->work_motor_retry_on);
 
 	return HRTIMER_NORESTART;
 }
@@ -657,6 +787,7 @@ static int stspin220_probe(struct platform_device *pdev)
 
 	INIT_WORK(&pdata->work_motor_off, stspin220_set_motor_off);
 	INIT_WORK(&pdata->work_change_speed, stspin220_update_pwm);
+	INIT_WORK(&pdata->work_motor_retry_on, stspin220_set_motor_retry_on);
 
 	mutex_init(&pdata->lock);
 	wake_lock_init(&pdata->motor_wake_lock, WAKE_LOCK_SUSPEND, "CAMERA SLIDING MOTOR WAKELOCK");
@@ -676,6 +807,9 @@ static int stspin220_probe(struct platform_device *pdev)
 	hrtimer_init(&pdata->off_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	pdata->off_timer.function = off_timer_func;
 
+	hrtimer_init(&pdata->retry_on_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	pdata->retry_on_timer.function = retry_on_timer_func;
+
 	pdata->dev = sec_device_create(0, pdata, "sliding_motor");
 	if (pdata->dev == NULL) {
 		dev_err(&pdev->dev, "Failed to create device for motor\n");
@@ -691,6 +825,10 @@ static int stspin220_probe(struct platform_device *pdev)
 		pr_err("[MOTOR]: Failed to register sysfs enable: %d\n", rc);
 
 	rc = sysfs_create_file(&pdata->dev->kobj, &dev_attr_pwm_active.attr);
+	if (rc < 0)
+		pr_err("[MOTOR]: Failed to register sysfs enable: %d\n", rc);
+
+	rc = sysfs_create_file(&pdata->dev->kobj, &dev_attr_retry.attr);
 	if (rc < 0)
 		pr_err("[MOTOR]: Failed to register sysfs enable: %d\n", rc);
 

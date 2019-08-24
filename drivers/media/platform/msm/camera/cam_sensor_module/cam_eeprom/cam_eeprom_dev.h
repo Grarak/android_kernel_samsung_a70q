@@ -131,7 +131,7 @@
 #if defined(CONFIG_SAMSUNG_REAR_TRIPLE)
 //#define FROM_REAR3_PAF_CAL_DATA_START_ADDR      0x0900
 //rear2
-#define FROM_REAR3_AF_CAL_D50_ADDR		0x0814
+//#define FROM_REAR3_AF_CAL_D50_ADDR		0x0814
 /*#define FROM_REAR3_AF_CAL_D20_ADDR*/
 /*#define FROM_REAR3_AF_CAL_D30_ADDR*/
 /*#define FROM_REAR3_AF_CAL_D40_ADDR            0x754C*/
@@ -139,8 +139,8 @@
 /*#define FROM_REAR3_AF_CAL_D60_ADDR*/
 /*#define FROM_REAR3_AF_CAL_D70_ADDR*/
 /*#define FROM_REAR3_AF_CAL_D80_ADDR            0x7540*/
-#define FROM_REAR3_AF_CAL_MACRO_ADDR            0x0818
-#define FROM_REAR3_AF_CAL_PAN_ADDR              0x081C
+//#define FROM_REAR3_AF_CAL_MACRO_ADDR            0x0818
+//#define FROM_REAR3_AF_CAL_PAN_ADDR              0x081C
 
 #if defined(CONFIG_SEC_A90Q_PROJECT)
 #define REAR2_MODULE_ID_ADDR                    0x32B6

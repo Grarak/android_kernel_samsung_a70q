@@ -1465,13 +1465,13 @@ static int cam_icp_mgr_handle_frame_process(uint32_t *msg_ptr, int flag)
 	mutex_lock(&ctx_data->ctx_mutex);
 	cam_icp_ctx_timer_reset(ctx_data);
 	if (ctx_data->state != CAM_ICP_CTX_STATE_ACQUIRED) {
-		CAM_INFO(CAM_ICP, "ctx %u is in %d state",
+		CAM_DBG(CAM_ICP, "ctx %u is in %d state",
 			ctx_data->ctx_id, ctx_data->state);
 		mutex_unlock(&ctx_data->ctx_mutex);
 		return 0;
 	}
 
-	CAM_INFO(CAM_REQ,
+	CAM_DBG(CAM_REQ,
 		"ctx_id : %u, request_id :%lld dev_type: %d",
 		ctx_data->ctx_id, request_id,
 		ctx_data->icp_dev_acquire_info->dev_type);
@@ -3208,7 +3208,7 @@ static int cam_icp_mgr_config_hw(void *hw_mgr_priv, void *config_hw_args)
 	rc = cam_icp_mgr_enqueue_config(hw_mgr, config_args);
 	if (rc)
 		goto config_err;
-	CAM_INFO(CAM_REQ,
+	CAM_DBG(CAM_REQ,
 		"req_id = %lld on ctx_id %u for dev %d queued to FW",
 		req_id, ctx_data->ctx_id,
 		ctx_data->icp_dev_acquire_info->dev_type);
@@ -4149,8 +4149,6 @@ static int cam_icp_mgr_flush_all(struct cam_icp_hw_ctx_data *ctx_data,
 		}
 		clear_bit(idx, ctx_data->hfi_frame_process.bitmap);
 		clear_in_resource = true;
-		CAM_INFO(CAM_ICP, "flush icp: request = %lld",
-			hfi_frame_process->request_id[idx]);
 	}
 
 	if (clear_in_resource)
@@ -4185,8 +4183,6 @@ static int cam_icp_mgr_flush_req(struct cam_icp_hw_ctx_data *ctx_data,
 		}
 		clear_bit(idx, ctx_data->hfi_frame_process.bitmap);
 		clear_in_resource = true;
-		CAM_INFO(CAM_ICP, "flush icp: request = %lld",
-			hfi_frame_process->request_id[idx]);
 	}
 
 	if (clear_in_resource)

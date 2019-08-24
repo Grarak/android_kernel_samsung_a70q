@@ -17,7 +17,6 @@
 /* TODO: This file should be generated automatically */
 
 static const char * const tz_drm_list[] = {
-	"/system/etc/icd_test",
 	"/system/bin/mediaserver",
 	"/system/bin/drmserver",
 	"/system/bin/scranton_RD",
@@ -28,8 +27,7 @@ static const char * const tz_drm_list[] = {
 	NULL,
 };
 
-static const char * const fidd_list[] = {
-	"/system/etc/icd_test",
+static const char * const fido_list[] = {
 	"/system/bin/qseecomd",
 	"/system/vendor/bin/qseecomd",
 	"/vendor/bin/qseecomd",
@@ -68,7 +66,7 @@ static const char * const cc_list[] = {
 	NULL,
 };
 
-static const char * const sysscope_list[] = {
+static const char * const etc_list[] = {
 	"/system/bin/icd_etc",
 	NULL,
 };

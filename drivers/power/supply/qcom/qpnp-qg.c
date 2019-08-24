@@ -50,7 +50,12 @@ int can_shipmode;
 extern int get_rid_type(void);
 #endif
 
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+static int qg_debug_mask = QG_DEBUG_PON|QG_DEBUG_STATUS|QG_DEBUG_IRQ|QG_DEBUG_SOC;
+#else
 static int qg_debug_mask = 0xCFF;
+#endif
+
 module_param_named(
 	debug_mask, qg_debug_mask, int, 0600
 );
@@ -2152,7 +2157,7 @@ static int qg_charge_full_update(struct qpnp_qg *chip)
 	int rc, recharge_soc, health;
 #if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 	struct sec_battery_info *battery = get_sec_battery();
-	int charge_status, voltage_now, recharge_vbat;
+	int charge_status, voltage_now, recharge_vbat, fixed_recharge_vbat;
 #endif
 
 	if (!chip->dt.hold_soc_while_full)
@@ -2169,6 +2174,14 @@ static int qg_charge_full_update(struct qpnp_qg *chip)
 #if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 	if ((battery != NULL) && (battery->current_event & SEC_BAT_CURRENT_EVENT_HIGH_TEMP_SWELLING))
 		health = POWER_SUPPLY_HEALTH_WARM;
+
+	power_supply_get_property(chip->batt_psy,
+		POWER_SUPPLY_PROP_VOLTAGE_NOW, &prop);
+	voltage_now = prop.intval;
+
+	power_supply_get_property(chip->usb_psy,
+		(enum power_supply_property)POWER_SUPPLY_EXT_FIXED_RECHARGE_VBAT, &prop);
+	fixed_recharge_vbat = prop.intval * 1000;
 #endif
 
 	rc = power_supply_get_property(chip->batt_psy,
@@ -2185,7 +2198,11 @@ static int qg_charge_full_update(struct qpnp_qg *chip)
 				chip->msoc, health, chip->charge_full,
 				chip->charge_done);
 	if (chip->charge_done && !chip->charge_full) {
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+		if (chip->msoc >= 99 && health == POWER_SUPPLY_HEALTH_GOOD && voltage_now > fixed_recharge_vbat) {
+#else
 		if (chip->msoc >= 99 && health == POWER_SUPPLY_HEALTH_GOOD) {
+#endif
 			chip->charge_full = true;
 			qg_dbg(chip, QG_DEBUG_STATUS, "Setting charge_full (0->1) @ msoc=%d\n",
 					chip->msoc);
@@ -2208,10 +2225,6 @@ static int qg_charge_full_update(struct qpnp_qg *chip)
 				POWER_SUPPLY_PROP_CHARGE_TYPE, &prop);
 		charge_status = prop.intval;
 		
-		rc = power_supply_get_property(chip->batt_psy,
-				POWER_SUPPLY_PROP_VOLTAGE_NOW, &prop);
-		voltage_now = prop.intval;
-
 		rc = power_supply_get_property(chip->batt_psy,
 				POWER_SUPPLY_PROP_RECHARGE_VBAT, &prop);
 		recharge_vbat = prop.intval;

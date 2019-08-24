@@ -20,6 +20,7 @@
 
 #if defined(CONFIG_QPNP_SMB5)
 #include "../power/supply/qcom/smb5-lib.h"
+#include "../power/supply/qcom/smb5-reg.h"
 #endif
 #include <linux/pmic-voter.h>
 #if defined(CONFIG_AFC)
@@ -148,7 +149,7 @@ static int get_cable_type(struct sec_battery_info *battery)
 		pr_err("%s: Fail to get usb real_type_prop (%d=>%d)\n", __func__, POWER_SUPPLY_PROP_REAL_TYPE, rc);
 		return POWER_SUPPLY_TYPE_UNKNOWN;
 	} else { 
-		pr_info("%s: cable_type(%d)\n", __func__, value.intval);
+		//pr_info("%s: cable_type(%d)\n", __func__, value.intval);
 		return value.intval;
 	}
 }
@@ -182,63 +183,6 @@ int get_pd_active(struct sec_battery_info *battery)
 	} else { 
 		pr_info("%s: pd active (%d)\n", __func__, value.intval);
 		return value.intval;
-	}
-}
-
-void sec_bat_set_cable_type_current(int real_cable_type, bool attached)
-{
-	struct sec_battery_info *battery = get_sec_battery();
-	struct smb_charger *chg;
-	u32 input_current = 0, charging_current = 0;
-	int jig_type = 0;
-
-	if (!battery) {
-		pr_info("%s: battery is NULL\n", __func__);
-		return;
-	}
-
-	chg = power_supply_get_drvdata(battery->psy_bat);
-
-	if (attached) {
-		jig_type = get_rid_type();
-		/* jig cable */
-		if((jig_type >= 2 /* RID_ADC_56K */) && (jig_type <= 6 /* RID_ADC_619K */)) {
-#if defined(CONFIG_BATTERY_CISD)
-			battery->skip_cisd = true;
-#endif
-			if (jig_type == 6 /* RID_ADC_619K */) {
-				input_current = battery->charging_current[POWER_SUPPLY_TYPE_USB_DCP].input_current_limit;
-				charging_current = battery->charging_current[POWER_SUPPLY_TYPE_USB_DCP].fast_charging_current;
-				vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, false, 0);
-				vote(chg->usb_icl_votable, USB_PSY_VOTER, false, 0);
-				vote(chg->usb_icl_votable, SEC_BATTERY_CABLE_TYPE_VOTER, true, (input_current * 1000));
-			}
-		}
-		/* normal cable */
-		else {
-			input_current = battery->charging_current[real_cable_type].input_current_limit;
-			charging_current = battery->charging_current[real_cable_type].fast_charging_current ;
-
-			if ((real_cable_type == POWER_SUPPLY_TYPE_USB_PD) && (chg->pd_active == POWER_SUPPLY_PD_ACTIVE)) {
-#if defined(CONFIG_AFC)
-				input_current = battery->charging_current[POWER_SUPPLY_TYPE_AFC].input_current_limit;
-				charging_current = battery->charging_current[POWER_SUPPLY_TYPE_AFC].fast_charging_current ;
-#else
-				input_current = battery->charging_current[POWER_SUPPLY_TYPE_USB_HVDCP].input_current_limit;
-				charging_current = battery->charging_current[POWER_SUPPLY_TYPE_USB_HVDCP].fast_charging_current;
-#endif
-			}
-		}
-		pr_info("%s: cable(%s) PD(%d) attached, icl(%d), fcc(%d)\n", __func__, 
-			sec_cable_type[real_cable_type], chg->pd_active, input_current, charging_current);
-
-		vote(chg->fcc_votable, SEC_BATTERY_CABLE_TYPE_VOTER, true, (charging_current * 1000));
-	}
-	else {
-		pr_info("%s: cable(%s) PD(%d) detached\n", __func__, sec_cable_type[real_cable_type], chg->pd_active);
-
-		vote(chg->usb_icl_votable, SEC_BATTERY_CABLE_TYPE_VOTER, false, 0);
-		vote(chg->fcc_votable, SEC_BATTERY_CABLE_TYPE_VOTER, false, 0);
 	}
 }
 
@@ -280,6 +224,83 @@ void disable_charge_pump(struct smb_charger *chg, bool disable, const char *clie
 	}
 }
 
+void force_vbus_voltage_QC30(struct smb_charger *chg, int val)
+{
+	union power_supply_propval value = {0, };
+
+	if ((val == MICRO_5V) && !chg->forced_5v_qc30) {
+		value.intval = 1;
+		power_supply_set_property(chg->usb_main_psy, POWER_SUPPLY_PROP_FLASH_ACTIVE, &value);
+		chg->forced_5v_qc30 = true;
+	} else if ((val == MICRO_12V) && chg->forced_5v_qc30) {
+		value.intval = 0;
+		power_supply_set_property(chg->usb_main_psy, POWER_SUPPLY_PROP_FLASH_ACTIVE, &value);
+		chg->forced_5v_qc30 = false;
+	}
+	return;
+}
+
+void sec_bat_set_cable_type_current(int real_cable_type, bool attached)
+{
+	struct sec_battery_info *battery = get_sec_battery();
+	struct smb_charger *chg;
+	u32 input_current = 0, charging_current = 0;
+	int jig_type = 0;
+
+	if (!battery) {
+		pr_info("%s: battery is NULL\n", __func__);
+		return;
+	}
+
+	chg = power_supply_get_drvdata(battery->psy_bat);
+
+	if (attached) {
+		jig_type = get_rid_type();
+		/* jig cable */
+		if((jig_type >= 2 /* RID_ADC_56K */) && (jig_type <= 6 /* RID_ADC_619K */)) {
+#if defined(CONFIG_BATTERY_CISD)
+			battery->skip_cisd = true;
+#endif
+			if (jig_type == 6 /* RID_ADC_619K */) {
+				input_current = battery->charging_current[POWER_SUPPLY_TYPE_USB_DCP].input_current_limit;
+				charging_current = battery->charging_current[POWER_SUPPLY_TYPE_USB_DCP].fast_charging_current;
+				vote(chg->usb_icl_votable, SW_ICL_MAX_VOTER, false, 0);
+				vote(chg->usb_icl_votable, USB_PSY_VOTER, false, 0);
+				vote(chg->usb_icl_votable, SEC_BATTERY_CABLE_TYPE_VOTER, true, (input_current * 1000));
+			}
+		}
+		/* normal cable */
+		else {
+			if (real_cable_type == POWER_SUPPLY_TYPE_USB_HVDCP_3)
+				disable_charge_pump(chg, true, SEC_BATTERY_QC3P0_VOTER, 0);
+
+			input_current = battery->charging_current[real_cable_type].input_current_limit;
+			charging_current = battery->charging_current[real_cable_type].fast_charging_current ;
+
+			if ((real_cable_type == POWER_SUPPLY_TYPE_USB_PD) && (chg->pd_active == POWER_SUPPLY_PD_ACTIVE)) {
+#if defined(CONFIG_AFC)
+				input_current = battery->charging_current[POWER_SUPPLY_TYPE_AFC].input_current_limit;
+				charging_current = battery->charging_current[POWER_SUPPLY_TYPE_AFC].fast_charging_current ;
+#else
+				input_current = battery->charging_current[POWER_SUPPLY_TYPE_USB_HVDCP].input_current_limit;
+				charging_current = battery->charging_current[POWER_SUPPLY_TYPE_USB_HVDCP].fast_charging_current;
+#endif
+			}
+		}
+		pr_info("%s: cable(%s) PD(%d) attached, icl(%d), fcc(%d)\n", __func__, 
+			sec_cable_type[real_cable_type], chg->pd_active, input_current, charging_current);
+
+		vote(chg->fcc_votable, SEC_BATTERY_CABLE_TYPE_VOTER, true, (charging_current * 1000));
+	}
+	else {
+		pr_info("%s: cable(%s) PD(%d) detached\n", __func__, sec_cable_type[real_cable_type], chg->pd_active);
+
+		vote(chg->usb_icl_votable, SEC_BATTERY_CABLE_TYPE_VOTER, false, 0);
+		vote(chg->fcc_votable, SEC_BATTERY_CABLE_TYPE_VOTER, false, 0);
+		disable_charge_pump(chg, false, SEC_BATTERY_QC3P0_VOTER, 0);
+	}
+}
+
 static void sec_bat_siop_work(struct work_struct *work)
 {
 	struct sec_battery_info *battery = container_of(work,
@@ -300,8 +321,7 @@ static void sec_bat_siop_work(struct work_struct *work)
 
 		voltage_now = get_usb_voltage_now(battery);
 #if defined(CONFIG_DIRECT_CHARGING)
-		if ((get_pd_active(battery) == POWER_SUPPLY_PD_PPS_ACTIVE) 
-				|| (cable_type == POWER_SUPPLY_TYPE_USB_HVDCP_3)) {
+		if (get_pd_active(battery) == POWER_SUPPLY_PD_PPS_ACTIVE) {
 			pr_info("%s : siop level: %d, cable_type: %d, votlage: %d\n",__func__, siop_level, cable_type, voltage_now);
 			current_val = battery->siop_input_limit_current * 1000;
 
@@ -323,29 +343,39 @@ static void sec_bat_siop_work(struct work_struct *work)
 			current_val = battery->siop_input_limit_current * 1000;
 		}
 
-		#if defined(CONFIG_AFC_SET_VOLTAGE_BY_SIOP)
+#if defined(CONFIG_AFC_SET_VOLTAGE_BY_SIOP)
 		if(chg->afc_sts == AFC_9V)
 			afc_set_voltage(SET_5V);
-		#endif
+#endif
 		value.intval = MICRO_5V;
-		power_supply_set_property(battery->psy_usb,
+		if (cable_type == POWER_SUPPLY_TYPE_USB_HVDCP_3)
+			force_vbus_voltage_QC30(chg, value.intval);
+		else
+			power_supply_set_property(battery->psy_usb,
 				POWER_SUPPLY_PROP_VOLTAGE_MAX_LIMIT, &value);
+
 		vote(chg->usb_icl_votable, SEC_BATTERY_SIOP_VOTER, true, current_val);
 	} else {
 		vote(chg->usb_icl_votable, SEC_BATTERY_SIOP_VOTER, false, 0);
 		if(!chg->vbus_chg_by_full) {
-		#if defined(CONFIG_AFC_SET_VOLTAGE_BY_SIOP)
+#if defined(CONFIG_AFC_SET_VOLTAGE_BY_SIOP)
 			if (chg->afc_sts == AFC_5V)
 				afc_set_voltage(SET_9V);
-		#endif
-			value.intval = MICRO_12V;
-			power_supply_set_property(battery->psy_usb,
-					POWER_SUPPLY_PROP_VOLTAGE_MAX_LIMIT, &value);
+#endif
+			if (battery->store_mode)
+				value.intval = MICRO_5V;
+			else
+				value.intval = MICRO_12V;
+			if (cable_type == POWER_SUPPLY_TYPE_USB_HVDCP_3)
+				force_vbus_voltage_QC30(chg, value.intval);
+			else
+				power_supply_set_property(battery->psy_usb,
+						POWER_SUPPLY_PROP_VOLTAGE_MAX_LIMIT, &value);
 		}
 		disable_charge_pump(chg, false, SEC_BATTERY_SIOP_VOTER, 1000);
 
 #if defined(CONFIG_DIRECT_CHARGING)
-		if (((get_pd_active(battery) == POWER_SUPPLY_PD_PPS_ACTIVE) || (cable_type == POWER_SUPPLY_TYPE_USB_HVDCP_3))
+		if ((get_pd_active(battery) == POWER_SUPPLY_PD_PPS_ACTIVE)
 				&& (chg->pdp_limit_w > 0)) {
 			value.intval = chg->default_pdp_limit_w;
 			power_supply_set_property(battery->psy_usb,
@@ -530,7 +560,7 @@ int is_dc_wire_type(struct sec_battery_info *battery)
 	
 	is_dc = value.intval;
 	
-	if ((is_dc == POWER_SUPPLY_PD_PPS_ACTIVE) || (battery->cable_real_type == POWER_SUPPLY_TYPE_USB_HVDCP_3))
+	if (is_dc == POWER_SUPPLY_PD_PPS_ACTIVE)
 		return 1;
 
 	return 0;
@@ -672,6 +702,7 @@ static void sec_bat_monitor_work(struct work_struct *work)
 	int rc = 0, full_condi_soc = 0;
 	const char *usb_icl_voter, *fcc_voter = NULL;
 	static int term_cur_cnt = 0;
+	int recharge_vbat = 0;
 	
 	chg = power_supply_get_drvdata(battery->psy_bat);
 
@@ -879,9 +910,13 @@ static void sec_bat_monitor_work(struct work_struct *work)
 		full_condi_soc = val.intval;
 	}
 
+	rc = power_supply_get_property(battery->psy_usb,
+			(enum power_supply_property)POWER_SUPPLY_EXT_FIXED_RECHARGE_VBAT, &val);
+	recharge_vbat = val.intval;
+	
 	/* check 1st termination current */
 	if ((battery->soc >= full_condi_soc) && (battery->status == POWER_SUPPLY_STATUS_CHARGING)
-		&& (battery->i_now <= battery->full_check_current_1st) && (battery->i_now > 0)) {
+		&& (battery->i_now <= battery->full_check_current_1st) && (battery->i_now > 0) && (battery->v_now >=  recharge_vbat)) {
 		pr_info("%s: (soc >= %d) && (0 < i_now <= %d) : count(%d)\n", __func__, full_condi_soc, battery->full_check_current_1st, term_cur_cnt++);
 
 		if (term_cur_cnt == 3) {
@@ -895,11 +930,8 @@ static void sec_bat_monitor_work(struct work_struct *work)
 		term_cur_cnt = 0;
 	}
 
-	rc = power_supply_get_property(battery->psy_usb,
-			(enum power_supply_property)POWER_SUPPLY_EXT_FIXED_RECHARGE_VBAT, &val);
-
-	if ((battery->status == POWER_SUPPLY_STATUS_FULL) && (battery->v_now < (val.intval - 50))
-		&& (battery->i_now < 0)) {
+	if ((battery->status == POWER_SUPPLY_STATUS_FULL) && (battery->v_now < (recharge_vbat - 50))
+		&& ((battery->i_now < 0) || (battery->current_event & SEC_BAT_CURRENT_EVENT_SWELLING_MODE))) {
 		pr_info("%s: change recharging UI\n", __func__);
 
 		val.intval = 0;
@@ -999,8 +1031,12 @@ void sec_bat_set_slate_mode(struct sec_battery_info *battery)
 		disable_charge_pump(chg, true, SEC_BATTERY_SLATE_MODE_VOTER, 0);
 
 		val.intval = MICRO_5V;
-		power_supply_set_property(battery->psy_usb,
+		if (get_cable_type(battery) == POWER_SUPPLY_TYPE_USB_HVDCP_3)
+			force_vbus_voltage_QC30(chg, val.intval);
+		else
+			power_supply_set_property(battery->psy_usb,
 				POWER_SUPPLY_PROP_VOLTAGE_MAX_LIMIT, &val);
+
 		vote(chg->chg_disable_votable, SEC_BATTERY_SLATE_MODE_VOTER, true, 0);
 		vote(chg->usb_icl_votable, SEC_BATTERY_SLATE_MODE_VOTER, true, 0);
 
@@ -1025,9 +1061,16 @@ void sec_bat_set_slate_mode(struct sec_battery_info *battery)
 			(enum power_supply_property)POWER_SUPPLY_EXT_PROP_CHARGE_FULL, &val);
 	} else {
 		vote(chg->chg_disable_votable, SEC_BATTERY_SLATE_MODE_VOTER, false, 0);
-		val.intval = MICRO_12V;
-		power_supply_set_property(battery->psy_usb,
-				POWER_SUPPLY_PROP_VOLTAGE_MAX_LIMIT, &val);
+		if (battery->store_mode)
+			val.intval = MICRO_5V;
+		else
+			val.intval = MICRO_12V;
+		if (get_cable_type(battery) == POWER_SUPPLY_TYPE_USB_HVDCP_3)
+			force_vbus_voltage_QC30(chg, val.intval);
+		else
+			power_supply_set_property(battery->psy_usb,
+					POWER_SUPPLY_PROP_VOLTAGE_MAX_LIMIT, &val);
+
 		if (get_cable_type(battery) == POWER_SUPPLY_TYPE_USB_PD) {
 			cancel_delayed_work(&battery->slate_work);
 			wake_lock(&battery->slate_wake_lock);
@@ -1087,7 +1130,7 @@ int sec_bat_get_hv_charger_status(struct sec_battery_info *battery)
 			else 
 			{ 
 				pd_enabled = value.intval;	
-				pr_info("%s: PD Active(%d) \n", __func__, pd_enabled);				
+				//pr_info("%s: PD Active(%d) \n", __func__, pd_enabled);				
 			}
 			
 			ret = power_supply_get_property(battery->psy_usb, POWER_SUPPLY_PROP_TYPEC_MODE, &value);
@@ -1099,7 +1142,7 @@ int sec_bat_get_hv_charger_status(struct sec_battery_info *battery)
 			else 
 			{ 
 				src_rp = value.intval;	
-				pr_info("%s: TYPE C Mode(%d) \n", __func__, src_rp);				
+				//pr_info("%s: TYPE C Mode(%d) \n", __func__, src_rp);				
 			}
 			
 			if(cable == POWER_SUPPLY_TYPE_USB_HVDCP)
@@ -1140,7 +1183,7 @@ int sec_bat_get_hv_charger_status(struct sec_battery_info *battery)
 		}		
 	}
 	
-	pr_info("%s: Hv_charger_status(%d) input_curr_mA:%d\n", __func__, check_val, input_curr_mA);
+	//pr_info("%s: Hv_charger_status(%d) input_curr_mA:%d\n", __func__, check_val, input_curr_mA);
 	return check_val;
 }
 
@@ -1293,7 +1336,21 @@ bool is_store_mode(void)
 void sec_start_store_mode(void)
 {
 	struct sec_battery_info *battery = get_sec_battery();
+#if !defined(CONFIG_SEC_FACTORY)
+	union power_supply_propval value = {0, };
+	struct smb_charger *chg;
 
+	chg = power_supply_get_drvdata(battery->psy_bat);
+
+	disable_charge_pump(chg, true, SEC_BATTERY_STORE_MODE_VOTER, 0);
+
+	value.intval = MICRO_5V;
+	if (get_cable_type(battery) == POWER_SUPPLY_TYPE_USB_HVDCP_3)
+		force_vbus_voltage_QC30(chg, value.intval);
+	else
+		power_supply_set_property(battery->psy_usb,
+				POWER_SUPPLY_PROP_VOLTAGE_MAX_LIMIT, &value);
+#endif
 	battery->store_mode = true;
 	battery->last_poll_time = ktime_get_boottime();
 	sec_bat_program_alarm(battery, 1);
@@ -1302,6 +1359,21 @@ void sec_start_store_mode(void)
 void sec_stop_store_mode(void)
 {
 	struct sec_battery_info *battery = get_sec_battery();
+#if !defined(CONFIG_SEC_FACTORY)
+	union power_supply_propval value = {0, };
+	struct smb_charger *chg;
+
+	chg = power_supply_get_drvdata(battery->psy_bat);
+
+	value.intval = MICRO_12V;
+	if (get_cable_type(battery) == POWER_SUPPLY_TYPE_USB_HVDCP_3)
+		force_vbus_voltage_QC30(chg, value.intval);
+	else
+		power_supply_set_property(battery->psy_usb,
+				POWER_SUPPLY_PROP_VOLTAGE_MAX_LIMIT, &value);
+
+	disable_charge_pump(chg, false, SEC_BATTERY_STORE_MODE_VOTER, 1000);
+#endif
 
 	battery->store_mode = false;
 	alarm_cancel(&battery->polling_alarm);
@@ -1392,11 +1464,15 @@ static void sec_usb_changed_work(
 	
 	cable_type = get_cable_type(battery);
 	if (cable_type == POWER_SUPPLY_TYPE_USB_FLOAT
-		&& (get_rid_type() != 6 /* RID_ADC_619K */)
-	)
+		&& (get_rid_type() != 6 /* RID_ADC_619K */)) {
+		union power_supply_propval pval = {0};
+		pval.intval = -ETIMEDOUT;
+		power_supply_set_property(battery->psy_usb,
+				POWER_SUPPLY_PROP_SDP_CURRENT_MAX, &pval);
 		set_val = BATT_MISC_EVENT_TIMEOUT_OPEN_TYPE;
-	else
+	} else {
 		set_val = 0;
+	}
 	sec_bat_set_misc_event(set_val, BATT_MISC_EVENT_TIMEOUT_OPEN_TYPE);
 
 	wake_unlock(&battery->usb_changed_wake_lock);
@@ -1683,7 +1759,7 @@ static int vbus_handle_notification(struct notifier_block *nb,
 	case STATUS_VBUS_HIGH:
 		pr_info("%s: cable is inserted\n", __func__);
 #if defined(CONFIG_DIRECT_CHARGING)
-		if (((get_pd_active(battery) == POWER_SUPPLY_PD_PPS_ACTIVE) || (get_cable_type(battery) == POWER_SUPPLY_TYPE_USB_HVDCP_3))
+		if ((get_pd_active(battery) == POWER_SUPPLY_PD_PPS_ACTIVE)
 				&& (chg->pdp_limit_w > 0)) {
 			val.intval = chg->default_pdp_limit_w;
 			power_supply_set_property(battery->psy_usb,
@@ -1712,17 +1788,17 @@ static int vbus_handle_notification(struct notifier_block *nb,
 #endif
 
 		chg->float_type_recheck = false;
-		#if defined(CONFIG_AFC)
+#if defined(CONFIG_AFC)
 		chg->afc_sts = AFC_INIT;
 		chg->vbus_chg_by_full = false;
 		vote(chg->usb_icl_votable, SEC_BATTERY_AFC_VOTER, false, 0);
-		#endif
+#endif
 		vote(chg->usb_icl_votable, SEC_BATTERY_OVERHEATLIMIT_VOTER, false, 0);
 		battery->batt_temp_overheat_check = false;
-	#if defined(CONFIG_BATTERY_CISD)
+#if defined(CONFIG_BATTERY_CISD)
 		battery->cisd.ab_vbat_check_count = 0;
 		battery->cisd.state &= ~CISD_STATE_OVER_VOLTAGE;
-	#endif
+#endif
 		
 		if (battery->store_mode) {
 			pr_info("%s: [store_mode] release STORE_MODE_VOTER\n", __func__);
@@ -2091,6 +2167,17 @@ static int sec_battery_probe(struct platform_device *pdev)
 		dev_err(battery->dev,
 			"%s: Failed to Register psy_usb\n", __func__);
 		goto err_supply_unreg_usb;
+	}else{
+                /*Check charging option for wired charging*/
+                if(get_afc_mode())
+		    value.intval = HV_DISABLE;
+		else
+		    value.intval = HV_ENABLE;
+		ret = power_supply_set_property(battery->psy_usb,
+				(enum power_supply_property)POWER_SUPPLY_EXT_PROP_HV_DISABLE, &value);
+		if(ret < 0) {
+			pr_err("%s: Fail to set voltage max limit%d\n", __func__, ret);
+		}
 	}
 
 	battery->psy_bms = power_supply_get_by_name("bms");

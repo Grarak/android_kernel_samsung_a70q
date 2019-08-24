@@ -129,7 +129,7 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&motor_default_pins>;
 		samsung,vib_type = "LINEAR_RCVMOT";
-		haptic-fw-intensity-max = <42>;
+		haptic-fw-intensity-max = <39>;
 	};
 };
 
