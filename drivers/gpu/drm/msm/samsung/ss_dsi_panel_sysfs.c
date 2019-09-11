@@ -3681,6 +3681,41 @@ static ssize_t ss_finger_hbm_updated_show(struct device *dev,
 	return strlen(buf);
 }
 
+static ssize_t ss_finger_mask_mode_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t size)
+{
+	struct samsung_display_driver_data *vdd =
+		(struct samsung_display_driver_data *)dev_get_drvdata(dev);
+	int value;
+
+	if (IS_ERR_OR_NULL(vdd)) {
+		LCD_ERR("no vdd");
+		return size;
+	}
+
+	sscanf(buf, "%d", &value);
+
+	mutex_lock(&vdd->finger_mask_lock);
+	vdd->finger_mask_updated = false;
+	if (vdd->finger_mask != value) {
+		vdd->finger_mask = value;
+		vdd->finger_mask_updated = true;
+		LCD_INFO("[FINGER_MASK]updated finger mask mode %d\n", vdd->finger_mask_updated);
+	}
+	mutex_unlock(&vdd->finger_mask_lock);
+
+	return size;
+}
+
+static ssize_t ss_finger_mask_mode_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct samsung_display_driver_data *vdd =
+		(struct samsung_display_driver_data *)dev_get_drvdata(dev);
+	sprintf(buf, "%d\n", vdd->finger_mask);
+	return strlen(buf);
+}
+
 static DEVICE_ATTR(lcd_type, S_IRUGO, ss_disp_lcdtype_show, NULL);
 static DEVICE_ATTR(cell_id, S_IRUGO, ss_disp_cell_id_show, NULL);
 static DEVICE_ATTR(octa_id, S_IRUGO, ss_disp_octa_id_show, NULL);
@@ -3748,6 +3783,7 @@ static DEVICE_ATTR(stm, S_IRUGO | S_IWUSR | S_IWGRP, NULL, ss_stm_store);
 static DEVICE_ATTR(mask_brightness, S_IRUGO | S_IWUSR | S_IWGRP, NULL, ss_finger_hbm_store);
 static DEVICE_ATTR(actual_mask_brightness, S_IRUGO | S_IWUSR | S_IWGRP, ss_finger_hbm_updated_show, NULL);
 static DEVICE_ATTR(reading_mode, S_IRUGO | S_IWUSR | S_IWGRP, ss_reading_mode_show, ss_reading_mode_store);
+static DEVICE_ATTR(finger_mask_mode, S_IRUGO | S_IWUSR | S_IWGRP, ss_finger_mask_mode_show, ss_finger_mask_mode_store);
 
 
 static struct attribute *panel_sysfs_attributes[] = {
@@ -3813,6 +3849,7 @@ static struct attribute *panel_sysfs_attributes[] = {
 	&dev_attr_mask_brightness.attr,
 	&dev_attr_actual_mask_brightness.attr,
 	&dev_attr_reading_mode.attr,
+	&dev_attr_finger_mask_mode.attr,
 	NULL
 };
 static const struct attribute_group panel_sysfs_group = {

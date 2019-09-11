@@ -7225,8 +7225,10 @@ int dsi_display_pre_kickoff(struct drm_connector *connector,
 #if defined(CONFIG_DISPLAY_SAMSUNG)
 	/* SAMSUNG_FINGERPRINT */
 	if (vdd->support_optical_fingerprint) {
+		mutex_lock(&vdd->finger_mask_lock);
 		if (vdd->finger_mask_updated)
 			ss_send_hbm_fingermask_image_tx(vdd, vdd->finger_mask);
+		mutex_unlock(&vdd->finger_mask_lock);
 	}
 #endif
 	/* dynamic DSI clock setting */
