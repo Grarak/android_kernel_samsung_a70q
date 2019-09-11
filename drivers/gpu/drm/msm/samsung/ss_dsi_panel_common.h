@@ -1043,6 +1043,7 @@ struct samsung_display_driver_data {
 	bool support_optical_fingerprint;
 	bool finger_mask_updated;
 	int finger_mask;
+	struct mutex finger_mask_lock;
 	int panel_hbm_entry_delay; //hbm entry delay/ unit = vsync
 	struct lcd_device *lcd_dev;
 

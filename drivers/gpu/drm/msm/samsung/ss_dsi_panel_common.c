@@ -5304,6 +5304,8 @@ void ss_panel_init(struct dsi_panel *panel)
 	/* To guarantee dynamic MIPI clock change*/
 	mutex_init(&vdd->rf_info.vdd_dyn_mipi_lock);
 
+	mutex_init(&vdd->finger_mask_lock);
+
 	if (ss_is_cmd_mode(vdd)) {
 		vdd->panel_func.ss_event_osc_te_fitting =
 			ss_event_osc_te_fitting;
