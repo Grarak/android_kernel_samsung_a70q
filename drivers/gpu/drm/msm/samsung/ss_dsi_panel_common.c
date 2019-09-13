@@ -4914,6 +4914,7 @@ skip_bl_update:
 			SDE_ERROR("finger_mask_updated/ sysfs_notify finger_mask_state = %d\n", vdd->finger_mask);
 			sysfs_notify(&vdd->lcd_dev->dev.kobj, NULL, "actual_mask_brightness");
 			vdd->finger_mask_updated = 0;
+			vdd->finger_mask_prop_updated = 0;
 		}
 	}
 	mutex_unlock(&vdd->bl_lock);
