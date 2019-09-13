@@ -1041,6 +1041,8 @@ struct samsung_display_driver_data {
 
 	/* SAMSUNG_FINGERPRINT */
 	bool support_optical_fingerprint;
+	bool finger_mask_prop_updated;
+	int finger_mask_prop;
 	bool finger_mask_updated;
 	int finger_mask;
 	struct mutex finger_mask_lock;
