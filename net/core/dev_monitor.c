@@ -73,7 +73,7 @@ void dev_monitor_cleanup_sock(struct net_device *dev)
 	for (slot = 0; slot <= tcp_hashinfo.ehash_mask; slot++) {
 		head = &tcp_hashinfo.ehash[slot];
 		sk_nulls_for_each_rcu(sk, node, &head->chain) {
-			pr_err("family = %d, sk state = %d\n", sk->sk_family, sk->sk_state);
+			pr_err("Found socket: family = %d, sk state = %d\n", sk->sk_family, sk->sk_state);
 			if (sk->sk_family == AF_INET)
 				pr_err("%pI4 %pI4\n", &sk->sk_rcv_saddr, &sk->sk_daddr);
 			else
@@ -82,24 +82,23 @@ void dev_monitor_cleanup_sock(struct net_device *dev)
 			if (addr_info && sk->sk_family == AF_INET) {
 				prefixlen = addr_info->prefixlen;
 				mask = inet_make_mask(prefixlen);
-				pr_err("family = %d, sk state = %d\n", sk->sk_family, sk->sk_state);
-				pr_err("addr4:%pI4 sk_rcv_saddr:%pI4\n", &addr4, &sk->sk_rcv_saddr);
-				pr_err("verdict: %d %d\n", addr4 == sk->sk_rcv_saddr, ((addr4 ^ sk->sk_rcv_saddr) & mask));
+				pr_err("Saved %s addr4: %pI4, matching? %d %d\n", 
+						dev->name, &addr4, addr4 == sk->sk_rcv_saddr, ((addr4 ^ sk->sk_rcv_saddr) & mask));
 				if (addr4 == sk->sk_rcv_saddr ||
-				    !((addr4 ^ sk->sk_rcv_saddr) & mask)) {					
+				    !((addr4 ^ sk->sk_rcv_saddr) & mask)) {
 					if (sk->sk_state == TCP_FIN_WAIT1 ||
-					    sk->sk_state == TCP_ESTABLISHED) {
+					    sk->sk_state == TCP_ESTABLISHED ||
+					    sk->sk_state == TCP_LAST_ACK) {
 							sk->sk_prot->disconnect(sk, 0);
-							pr_err("disconnected\n", sk);
+							pr_err("disconnected\n");
 					}
 				}
 			}
 
 			if (addr6_info && sk->sk_family == AF_INET6) {
 				prefixlen = addr6_info->prefixlen;
-				pr_err("family = %d, sk state = %d\n", sk->sk_family, sk->sk_state);
-				pr_err("addr6:%pI6 sk_v6_rcv_saddr:%pI6\n", &addr6, &sk->sk_v6_rcv_saddr);
-				pr_err("verdict: %d %d\n", ipv6_addr_equal(&addr6,&sk->sk_v6_rcv_saddr), 
+				pr_err("Saved %s addr6: %pI6, matching? %d %d\n", 
+						dev->name, &addr6, ipv6_addr_equal(&addr6,&sk->sk_v6_rcv_saddr), 
 											ipv6_prefix_equal(&addr6, &sk->sk_v6_rcv_saddr, prefixlen));
 				if (ipv6_addr_equal(&addr6,
 						    &sk->sk_v6_rcv_saddr) ||
@@ -107,9 +106,10 @@ void dev_monitor_cleanup_sock(struct net_device *dev)
 						      &sk->sk_v6_rcv_saddr,
 						      prefixlen)) {
 					if (sk->sk_state == TCP_FIN_WAIT1 ||
-					    sk->sk_state == TCP_ESTABLISHED) {
+					    sk->sk_state == TCP_ESTABLISHED ||
+					    sk->sk_state == TCP_LAST_ACK) {
 							sk->sk_prot->disconnect(sk, 0);
-							pr_err("disconnected\n", sk);
+							pr_err("disconnected\n");
 						}
 				}
 			}
@@ -120,17 +120,27 @@ void dev_monitor_cleanup_sock(struct net_device *dev)
 static int dev_monitor_notifier_cb(struct notifier_block *nb,
 				   unsigned long event, void *info) {
 	struct net_device *dev = netdev_notifier_info_to_dev(info);
+	int refcnt;
 
 	pr_err("dev : %s : event : %d\n", dev->name, event);
 	switch (event) {
-	case NETDEV_DOWN:
+//	case NETDEV_DOWN:
 	case NETDEV_UNREGISTER_FINAL:
 		/* for given net device, address matched sock will be closed */
 		dev_monitor_cleanup_sock(dev);
 		/* remove dev info from the list */
-		if (!netdev_refcnt_read(dev)) {
+		del_dev_info(&dev_info, dev);
+		refcnt = netdev_refcnt_read(dev);
+
+		if (!refcnt)
 			pr_err("dev : %s all refcnt has gone\n", dev->name);
-			del_dev_info(&dev_info, dev);
+		else if (strstr(dev->name, "rmnet_data") && refcnt > 0) {
+			pr_err("dev : %s still has %d, decrease forcely\n", dev->name, refcnt);
+			dev_put(dev);
+		}
+		else if (strstr(dev->name, "rmnet_data") && refcnt < 0) {
+			pr_err("dev : %s mismatching suspected, %d, hold it\n", dev->name, refcnt);
+			dev_hold(dev);
 		}
 		break;
 	default:

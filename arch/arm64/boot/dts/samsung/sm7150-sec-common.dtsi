@@ -83,7 +83,7 @@
 };
 
 &removed_region {
-	reg = <0 0x86200000 0 0x4900000>;
+	reg = <0 0x86200000 0 0x5100000>;
 };
 
 &pil_camera_mem{
@@ -394,4 +394,10 @@
 			};
 		};
 	};
+};
+
+&pil_modem {
+	/* Outputs to mss */
+	qcom,smem-states = <&modem_smp2p_out 0>, <&modem_smp2p_out 4>, <&modem_smp2p_out 5>;
+	qcom,smem-state-names = "qcom,force-stop", "qcom,stop-reason-0", "qcom,stop-reason-1";
 };

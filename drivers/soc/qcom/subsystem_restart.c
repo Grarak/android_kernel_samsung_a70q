@@ -56,6 +56,7 @@ static int enable_debug;
 module_param(enable_debug, int, 0644);
 
 static bool silent_ssr;
+static unsigned long silent_ssr_bit, silent_ssr_bit_mask;
 
 /* The maximum shutdown timeout is the product of MAX_LOOPS and DELAY_MS. */
 #define SHUTDOWN_ACK_MAX_LOOPS	100
@@ -1241,6 +1242,29 @@ static void device_restart_work_hdlr(struct work_struct *work)
 							dev->desc->name);
 }
 
+void subsys_set_reset_reason(const char *name, int val)
+{
+	struct subsys_device *dev = find_subsys_device(name);
+
+	if (!dev || !dev->desc)
+		return;
+
+	if (dev->desc->stop_reason_0_bit &&
+	    dev->desc->stop_reason_1_bit) {
+		if (val == 0x10) {
+			silent_ssr_bit |= BIT(dev->desc->stop_reason_0_bit);
+			silent_ssr_bit &= ~BIT(dev->desc->stop_reason_1_bit);
+		} else if (val == 0x20) {
+			silent_ssr_bit &= ~BIT(dev->desc->stop_reason_0_bit);
+			silent_ssr_bit |= BIT(dev->desc->stop_reason_1_bit);
+		} else {
+			silent_ssr_bit &= ~BIT(dev->desc->stop_reason_0_bit);
+			silent_ssr_bit &= ~BIT(dev->desc->stop_reason_1_bit);
+		}
+		pr_err("set restart reason .. to 0x%x\n", silent_ssr_bit);
+	}
+}
+
 int subsystem_restart_dev(struct subsys_device *dev)
 {
 	const char *name;
@@ -1281,9 +1305,13 @@ int subsystem_restart_dev(struct subsys_device *dev)
 	if (!strncmp(name, "modem", 5)) {
 		if (silent_ssr)  /* qcrtr ioctl force silent ssr */
 			dev->restart_level = RESET_SUBSYS_COUPLED;
-		
+
+		subsys_set_reset_reason(name, 0);	
+		silent_ssr_bit &= ~BIT(dev->desc->force_stop_bit);	
+
+		/* clear force stop bit */
 		qcom_smem_state_update_bits(dev->desc->state,
-				BIT(dev->desc->force_stop_bit), 0);
+				silent_ssr_bit_mask, silent_ssr_bit);
 		silent_ssr = 0;
 	}
 
@@ -1353,10 +1381,10 @@ int subsystem_crash(const char *name)
 
 	if (!subsys_get_crash_status(dev)) {
 		pr_err("%s: set force_stop_bit\n", __func__);
+		silent_ssr_bit |= BIT(dev->desc->force_stop_bit);
 		
 		qcom_smem_state_update_bits(dev->desc->state,
-				BIT(dev->desc->force_stop_bit),
-				BIT(dev->desc->force_stop_bit));
+				silent_ssr_bit_mask, silent_ssr_bit);
 	}
 	return 0;
 }
@@ -1370,6 +1398,7 @@ void subsys_force_stop(const char *name, bool val)
 	}
 	silent_ssr = val;
 	pr_err("silent_ssr %s: %d\n", name, silent_ssr);
+	subsys_set_reset_reason(name, silent_ssr ? 0x20 : 0x10);
 	subsystem_crash(name);
 }
 EXPORT_SYMBOL(subsys_force_stop);
@@ -1725,6 +1754,19 @@ static int subsys_parse_devicetree(struct subsys_desc *desc)
 	ret = __get_smem_state(desc, "qcom,force-stop", &desc->force_stop_bit);
 	if (ret && ret != -ENOENT)
 		return ret;
+	silent_ssr_bit_mask |= BIT(desc->force_stop_bit);
+
+	if(!strncmp(desc->name, "modem", 5)) {
+		ret = __get_smem_state(desc, "qcom,stop-reason-0", &desc->stop_reason_0_bit);
+		if (ret && ret != -ENOENT) 
+			pr_err("%s failed to register stop-reason-0\n", __func__);	
+		silent_ssr_bit_mask |= BIT(desc->stop_reason_0_bit);
+		
+		ret = __get_smem_state(desc, "qcom,stop-reason-1", &desc->stop_reason_1_bit);
+		if (ret && ret != -ENOENT)
+			pr_err("%s failed to register stop-reason-1\n", __func__);				
+		silent_ssr_bit_mask |= BIT(desc->stop_reason_1_bit);
+	}
 
 	if (of_property_read_bool(pdev->dev.of_node,
 					"qcom,pil-generic-irq-handler")) {

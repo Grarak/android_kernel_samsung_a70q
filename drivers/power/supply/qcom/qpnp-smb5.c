@@ -1498,12 +1498,8 @@ static int smb5_usb_main_set_prop(struct power_supply *psy,
 		rc = smblib_set_icl_current(chg, val->intval);
 		break;
 	case POWER_SUPPLY_PROP_FLASH_ACTIVE:
-#if !defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 		if ((chg->smb_version == PMI632_SUBTYPE)
 				&& (chg->flash_active != val->intval)) {
-#else
-		if (chg->flash_active != val->intval) {
-#endif
 			chg->flash_active = val->intval;
 
 			rc = smblib_get_prop_usb_present(chg, &pval);
@@ -1556,9 +1552,6 @@ static int smb5_usb_main_prop_is_writeable(struct power_supply *psy,
 	switch (psp) {
 	case POWER_SUPPLY_PROP_TOGGLE_STAT:
 	case POWER_SUPPLY_PROP_MAIN_FCC_MAX:
-#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
-	case POWER_SUPPLY_PROP_FLASH_ACTIVE:
-#endif
 		rc = 1;
 		break;
 	default:
