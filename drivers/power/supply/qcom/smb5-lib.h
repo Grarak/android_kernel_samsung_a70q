@@ -678,8 +678,7 @@ struct smb_charger {
 	int			 vbus_chg_by_full;
 	int			 now_icl;
 
-	bool		float_type_recheck;
-	bool		forced_5v_qc30;
+	bool			float_type_recheck;
 #endif
 };
 

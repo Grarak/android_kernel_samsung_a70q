@@ -224,22 +224,6 @@ void disable_charge_pump(struct smb_charger *chg, bool disable, const char *clie
 	}
 }
 
-void force_vbus_voltage_QC30(struct smb_charger *chg, int val)
-{
-	union power_supply_propval value = {0, };
-
-	if ((val == MICRO_5V) && !chg->forced_5v_qc30) {
-		value.intval = 1;
-		power_supply_set_property(chg->usb_main_psy, POWER_SUPPLY_PROP_FLASH_ACTIVE, &value);
-		chg->forced_5v_qc30 = true;
-	} else if ((val == MICRO_12V) && chg->forced_5v_qc30) {
-		value.intval = 0;
-		power_supply_set_property(chg->usb_main_psy, POWER_SUPPLY_PROP_FLASH_ACTIVE, &value);
-		chg->forced_5v_qc30 = false;
-	}
-	return;
-}
-
 void sec_bat_set_cable_type_current(int real_cable_type, bool attached)
 {
 	struct sec_battery_info *battery = get_sec_battery();
@@ -311,7 +295,7 @@ static void sec_bat_siop_work(struct work_struct *work)
 	int siop_level = battery->siop_level;
 	struct smb_charger *chg;
 	union power_supply_propval value = {0, };
-	int cable_type = 0;
+	int cable_type = 0, rc = 0;
 	
 	chg = power_supply_get_drvdata(battery->psy_bat);
 	cable_type = get_cable_type(battery);
@@ -321,7 +305,8 @@ static void sec_bat_siop_work(struct work_struct *work)
 
 		voltage_now = get_usb_voltage_now(battery);
 #if defined(CONFIG_DIRECT_CHARGING)
-		if (get_pd_active(battery) == POWER_SUPPLY_PD_PPS_ACTIVE) {
+		if ((get_pd_active(battery) == POWER_SUPPLY_PD_PPS_ACTIVE) 
+				|| (cable_type == POWER_SUPPLY_TYPE_USB_HVDCP_3)) {
 			pr_info("%s : siop level: %d, cable_type: %d, votlage: %d\n",__func__, siop_level, cable_type, voltage_now);
 			current_val = battery->siop_input_limit_current * 1000;
 
@@ -347,13 +332,20 @@ static void sec_bat_siop_work(struct work_struct *work)
 		if(chg->afc_sts == AFC_9V)
 			afc_set_voltage(SET_5V);
 #endif
-		value.intval = MICRO_5V;
-		if (cable_type == POWER_SUPPLY_TYPE_USB_HVDCP_3)
-			force_vbus_voltage_QC30(chg, value.intval);
-		else
+		if (cable_type == POWER_SUPPLY_TYPE_USB_HVDCP_3) {
+			rc = smblib_force_vbus_voltage(chg, FORCE_5V_BIT); 
+			if (rc < 0) 
+				pr_err("Failed to force 5V\n"); 
+			else 
+				chg->pulse_cnt = 0; 
+
+			if (chg->batt_psy) 
+				power_supply_changed(chg->batt_psy); 
+		} else {
+			value.intval = MICRO_5V;
 			power_supply_set_property(battery->psy_usb,
 				POWER_SUPPLY_PROP_VOLTAGE_MAX_LIMIT, &value);
-
+		}
 		vote(chg->usb_icl_votable, SEC_BATTERY_SIOP_VOTER, true, current_val);
 	} else {
 		vote(chg->usb_icl_votable, SEC_BATTERY_SIOP_VOTER, false, 0);
@@ -366,16 +358,25 @@ static void sec_bat_siop_work(struct work_struct *work)
 				value.intval = MICRO_5V;
 			else
 				value.intval = MICRO_12V;
-			if (cable_type == POWER_SUPPLY_TYPE_USB_HVDCP_3)
-				force_vbus_voltage_QC30(chg, value.intval);
-			else
+			if (cable_type == POWER_SUPPLY_TYPE_USB_HVDCP_3) {
+				rc = smblib_force_vbus_voltage(chg,
+					(value.intval == MICRO_5V) ? FORCE_5V_BIT : IDLE_BIT); 
+				if (rc < 0) 
+					pr_err("Failed to force 5V or IDLE\n"); 
+				else 
+					chg->pulse_cnt = 0; 
+
+				if (chg->batt_psy) 
+					power_supply_changed(chg->batt_psy); 
+			} else {
 				power_supply_set_property(battery->psy_usb,
 						POWER_SUPPLY_PROP_VOLTAGE_MAX_LIMIT, &value);
+			}
 		}
 		disable_charge_pump(chg, false, SEC_BATTERY_SIOP_VOTER, 1000);
 
 #if defined(CONFIG_DIRECT_CHARGING)
-		if ((get_pd_active(battery) == POWER_SUPPLY_PD_PPS_ACTIVE)
+		if (((get_pd_active(battery) == POWER_SUPPLY_PD_PPS_ACTIVE) || (cable_type == POWER_SUPPLY_TYPE_USB_HVDCP_3))
 				&& (chg->pdp_limit_w > 0)) {
 			value.intval = chg->default_pdp_limit_w;
 			power_supply_set_property(battery->psy_usb,
@@ -560,7 +561,7 @@ int is_dc_wire_type(struct sec_battery_info *battery)
 	
 	is_dc = value.intval;
 	
-	if (is_dc == POWER_SUPPLY_PD_PPS_ACTIVE)
+	if ((is_dc == POWER_SUPPLY_PD_PPS_ACTIVE) || (battery->cable_real_type == POWER_SUPPLY_TYPE_USB_HVDCP_3))
 		return 1;
 
 	return 0;
@@ -1022,6 +1023,7 @@ void sec_bat_set_slate_mode(struct sec_battery_info *battery)
 {
 	struct smb_charger *chg;
 	union power_supply_propval val = {0, };
+	int rc = 0;
 
 	chg = power_supply_get_drvdata(battery->psy_bat);
 
@@ -1030,13 +1032,20 @@ void sec_bat_set_slate_mode(struct sec_battery_info *battery)
 		wake_unlock(&battery->slate_wake_lock);
 		disable_charge_pump(chg, true, SEC_BATTERY_SLATE_MODE_VOTER, 0);
 
-		val.intval = MICRO_5V;
-		if (get_cable_type(battery) == POWER_SUPPLY_TYPE_USB_HVDCP_3)
-			force_vbus_voltage_QC30(chg, val.intval);
-		else
+		if (get_cable_type(battery) == POWER_SUPPLY_TYPE_USB_HVDCP_3) {
+			rc = smblib_force_vbus_voltage(chg, FORCE_5V_BIT); 
+			if (rc < 0) 
+				pr_err("Failed to force 5V\n"); 
+			else 
+				chg->pulse_cnt = 0; 
+
+			if (chg->batt_psy) 
+				power_supply_changed(chg->batt_psy); 
+		} else {
+			val.intval = MICRO_5V;
 			power_supply_set_property(battery->psy_usb,
 				POWER_SUPPLY_PROP_VOLTAGE_MAX_LIMIT, &val);
-
+		}
 		vote(chg->chg_disable_votable, SEC_BATTERY_SLATE_MODE_VOTER, true, 0);
 		vote(chg->usb_icl_votable, SEC_BATTERY_SLATE_MODE_VOTER, true, 0);
 
@@ -1065,12 +1074,20 @@ void sec_bat_set_slate_mode(struct sec_battery_info *battery)
 			val.intval = MICRO_5V;
 		else
 			val.intval = MICRO_12V;
-		if (get_cable_type(battery) == POWER_SUPPLY_TYPE_USB_HVDCP_3)
-			force_vbus_voltage_QC30(chg, val.intval);
-		else
+		if (get_cable_type(battery) == POWER_SUPPLY_TYPE_USB_HVDCP_3) {
+			rc = smblib_force_vbus_voltage(chg,
+				(val.intval == MICRO_5V) ? FORCE_5V_BIT : IDLE_BIT); 
+			if (rc < 0) 
+				pr_err("Failed to force 5V or IDLE\n"); 
+			else 
+				chg->pulse_cnt = 0; 
+
+			if (chg->batt_psy) 
+				power_supply_changed(chg->batt_psy); 
+		} else {
 			power_supply_set_property(battery->psy_usb,
 					POWER_SUPPLY_PROP_VOLTAGE_MAX_LIMIT, &val);
-
+		}
 		if (get_cable_type(battery) == POWER_SUPPLY_TYPE_USB_PD) {
 			cancel_delayed_work(&battery->slate_work);
 			wake_lock(&battery->slate_wake_lock);
@@ -1339,17 +1356,25 @@ void sec_start_store_mode(void)
 #if !defined(CONFIG_SEC_FACTORY)
 	union power_supply_propval value = {0, };
 	struct smb_charger *chg;
-
+	int rc = 0;
 	chg = power_supply_get_drvdata(battery->psy_bat);
 
 	disable_charge_pump(chg, true, SEC_BATTERY_STORE_MODE_VOTER, 0);
 
-	value.intval = MICRO_5V;
-	if (get_cable_type(battery) == POWER_SUPPLY_TYPE_USB_HVDCP_3)
-		force_vbus_voltage_QC30(chg, value.intval);
-	else
+	if (get_cable_type(battery) == POWER_SUPPLY_TYPE_USB_HVDCP_3) {
+		rc = smblib_force_vbus_voltage(chg, FORCE_5V_BIT); 
+		if (rc < 0) 
+			pr_err("Failed to force 5V\n"); 
+		else 
+			chg->pulse_cnt = 0; 
+ 
+		if (chg->batt_psy) 
+			power_supply_changed(chg->batt_psy); 
+	} else {
+		value.intval = MICRO_5V;
 		power_supply_set_property(battery->psy_usb,
 				POWER_SUPPLY_PROP_VOLTAGE_MAX_LIMIT, &value);
+	}
 #endif
 	battery->store_mode = true;
 	battery->last_poll_time = ktime_get_boottime();
@@ -1362,15 +1387,23 @@ void sec_stop_store_mode(void)
 #if !defined(CONFIG_SEC_FACTORY)
 	union power_supply_propval value = {0, };
 	struct smb_charger *chg;
-
+	int rc = 0;
 	chg = power_supply_get_drvdata(battery->psy_bat);
 
-	value.intval = MICRO_12V;
-	if (get_cable_type(battery) == POWER_SUPPLY_TYPE_USB_HVDCP_3)
-		force_vbus_voltage_QC30(chg, value.intval);
-	else
+	if (get_cable_type(battery) == POWER_SUPPLY_TYPE_USB_HVDCP_3) {
+		rc = smblib_force_vbus_voltage(chg, IDLE_BIT); 
+		if (rc < 0) 
+			pr_err("Failed to force IDLE\n"); 
+		else 
+			chg->pulse_cnt = 0; 
+
+		if (chg->batt_psy) 
+			power_supply_changed(chg->batt_psy); 
+	} else {
+		value.intval = MICRO_12V;
 		power_supply_set_property(battery->psy_usb,
 				POWER_SUPPLY_PROP_VOLTAGE_MAX_LIMIT, &value);
+	}
 
 	disable_charge_pump(chg, false, SEC_BATTERY_STORE_MODE_VOTER, 1000);
 #endif
@@ -1759,7 +1792,7 @@ static int vbus_handle_notification(struct notifier_block *nb,
 	case STATUS_VBUS_HIGH:
 		pr_info("%s: cable is inserted\n", __func__);
 #if defined(CONFIG_DIRECT_CHARGING)
-		if ((get_pd_active(battery) == POWER_SUPPLY_PD_PPS_ACTIVE)
+		if (((get_pd_active(battery) == POWER_SUPPLY_PD_PPS_ACTIVE) || (get_cable_type(battery) == POWER_SUPPLY_TYPE_USB_HVDCP_3))
 				&& (chg->pdp_limit_w > 0)) {
 			val.intval = chg->default_pdp_limit_w;
 			power_supply_set_property(battery->psy_usb,

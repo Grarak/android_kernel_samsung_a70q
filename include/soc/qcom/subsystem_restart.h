@@ -110,6 +110,8 @@ struct subsys_desc {
 	unsigned int wdog_bite_irq;
 	unsigned int generic_irq;
 	int force_stop_bit;
+	int stop_reason_0_bit;
+	int stop_reason_1_bit;
 	int ramdump_disable_irq;
 	int shutdown_ack_irq;
 	int ramdump_disable;

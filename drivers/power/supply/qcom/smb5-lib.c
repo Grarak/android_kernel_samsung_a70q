@@ -7586,9 +7586,6 @@ int smblib_init(struct smb_charger *chg)
 	chg->sec_chg_selected = POWER_SUPPLY_CHARGER_SEC_NONE;
 	chg->cp_reason = POWER_SUPPLY_CP_NONE;
 	chg->thermal_status = TEMP_BELOW_RANGE;
-#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
-	chg->forced_5v_qc30 = false;
-#endif
 
 	switch (chg->mode) {
 	case PARALLEL_MASTER:

@@ -1596,6 +1596,9 @@ int msm_vidc_private(void *vidc_inst, unsigned int cmd,
 		return -EINVAL;
 	}
 
+	if(cmd != VIDIOC_VIDEO_CMD)
+		return -ENOIOCTLCMD;
+
 	if (inst->session_type == MSM_VIDC_CVP) {
 		rc = msm_vidc_cvp(inst, arg);
 	} else {
