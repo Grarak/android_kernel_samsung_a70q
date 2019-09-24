@@ -31,6 +31,7 @@
 #define GSI_CHAN_MAX      31
 #define GSI_EVT_RING_MAX  24
 #define GSI_NO_EVT_ERINDEX 31
+#define MAX_DEBUG_CHAN_CNT 15
 
 #define gsi_readl(c)	({ u32 __v = readl_relaxed(c); __iormb(); __v; })
 #define gsi_writel(v, c)	({ __iowmb(); writel_relaxed((v), (c)); })
@@ -220,6 +221,9 @@ struct gsi_ctx {
 	u32 intcntrlr_mem_size;
 	irq_handler_t intcntrlr_gsi_isr;
 	irq_handler_t intcntrlr_client_isr;
+	u32 debug_chan;
+	u32 ctx_channel[MAX_DEBUG_CHAN_CNT];
+	u32 event_channel[MAX_DEBUG_CHAN_CNT];
 };
 
 enum gsi_re_type {

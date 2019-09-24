@@ -2881,7 +2881,7 @@ static int cam_vfe_bus_update_wm(void *priv, void *cmd_args,
 		val = ALIGNUP(val, 16);
 		if (val != io_cfg->planes[i].plane_stride &&
 			val != wm_data->stride)
-			CAM_WARN(CAM_ISP,
+			CAM_DBG(CAM_ISP,
 				"Warning stride %u expected %u",
 				io_cfg->planes[i].plane_stride,
 				val);

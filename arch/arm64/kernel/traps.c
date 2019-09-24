@@ -51,6 +51,10 @@
 #include <asm/sysreg.h>
 #include <trace/events/exception.h>
 
+#include <linux/sec_debug.h>
+#include <linux/sec_debug_summary.h>
+#include <linux/sec_debug_user_reset.h>
+
 static const char *handler[]= {
 	"Synchronous Abort",
 	"IRQ",
@@ -59,6 +63,57 @@ static const char *handler[]= {
 };
 
 int show_unhandled_signals = 0;
+
+#ifdef CONFIG_SEC_DEBUG
+/*
+ * Dump out the contents of some kernel memory nicely...
+ */
+static void dump_mem(const char *lvl, const char *str, unsigned long bottom,
+		     unsigned long top)
+{
+	unsigned long first;
+	mm_segment_t fs;
+	int i;
+
+	/*
+	 * We need to switch to kernel mode so that we can use __get_user
+	 * to safely read from kernel space.
+	 */
+	fs = get_fs();
+	set_fs(KERNEL_DS);
+
+	printk("%s%s(0x%016lx to 0x%016lx)\n", lvl, str, bottom, top);
+
+	if (!IS_ENABLED(CONFIG_SEC_DEBUG_DUMP_TASK_STACK)) {
+		pr_warn("CONFIG_SEC_DEBUG_DUMP_TASK_STACK is not enabled!\n");
+		goto done;
+	}
+
+	for (first = bottom & ~31; first < top; first += 32) {
+		unsigned long p;
+		char str[sizeof(" 12345678") * 8 + 1];
+
+		memset(str, ' ', sizeof(str));
+		str[sizeof(str) - 1] = '\0';
+
+		for (p = first, i = 0; i < (32 / 8)
+					&& p < top; i++, p += 8) {
+			if (p >= bottom && p < top) {
+				unsigned long val;
+
+				if (__get_user(val, (unsigned long *)p) == 0)
+					sprintf(str + i * 17, " %016lx", val);
+				else
+					sprintf(str + i * 17, " ????????????????");
+			}
+		}
+		printk("%s%04lx:%s\n", lvl, first & 0xffff, str);
+	}
+
+done:
+	set_fs(fs);
+}
+#endif
 
 static void dump_backtrace_entry(unsigned long where)
 {
@@ -103,6 +158,10 @@ void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 	struct stackframe frame;
 	int skip;
 
+#ifdef CONFIG_SEC_DEBUG
+	unsigned long prev_fp = 0;
+#endif
+
 	pr_debug("%s(regs = %p tsk = %p)\n", __func__, regs, tsk);
 
 	if (!tsk)
@@ -142,6 +201,20 @@ void dump_backtrace(struct pt_regs *regs, struct task_struct *tsk)
 			 */
 			dump_backtrace_entry(regs->pc);
 		}
+
+#ifdef CONFIG_SEC_DEBUG
+		if (prev_fp >= frame.fp) {
+			if (on_accessible_stack(tsk, frame.fp)) {
+				printk("FP looks invalid : "
+					"0x%016lx state(0x%016lx) "
+					"on_cpu(%d)@cpu%u\n",
+					frame.fp, tsk->state,
+					tsk->on_cpu, tsk->cpu);
+			}
+			break;
+		}
+		prev_fp = frame.fp;
+#endif
 	} while (!unwind_frame(tsk, &frame));
 
 	put_task_stack(tsk);
@@ -181,6 +254,20 @@ static int __die(const char *str, int err, struct pt_regs *regs)
 		 end_of_stack(tsk));
 
 	if (!user_mode(regs)) {
+#ifdef CONFIG_SEC_DEBUG
+		unsigned long bottom = regs->sp;
+		if (!object_is_on_stack((void *)bottom)) {
+			unsigned long irq_stack =
+				(unsigned long)this_cpu_read(irq_stack_ptr);
+			if ((irq_stack <= bottom) &&
+			    (bottom < irq_stack + IRQ_STACK_SIZE))
+				dump_mem(KERN_EMERG, "Stack: ", bottom,
+					 irq_stack + IRQ_STACK_SIZE);
+			bottom = (unsigned long)task_stack_page(tsk);
+		}
+		dump_mem(KERN_EMERG, "Stack: ", bottom,
+			 THREAD_SIZE + (unsigned long)task_stack_page(tsk));
+#endif
 		dump_backtrace(regs, tsk);
 		dump_instr(KERN_EMERG, regs);
 	}
@@ -201,7 +288,12 @@ void die(const char *str, struct pt_regs *regs, int err)
 	raw_spin_lock_irqsave(&die_lock, flags);
 
 	oops_enter();
-
+#ifdef CONFIG_SEC_DEBUG_SCHED_LOG
+	secdbg_sched_msg("!!die!!");
+#endif
+#ifdef CONFIG_SEC_DEBUG
+	sec_debug_save_die_info(str, regs);
+#endif
 	console_verbose();
 	bust_spinlocks(1);
 	ret = __die(str, err, regs);
@@ -576,6 +668,11 @@ const char *esr_get_class_string(u32 esr)
 asmlinkage void bad_mode(struct pt_regs *regs, int reason, unsigned int esr)
 {
 	console_verbose();
+
+#ifdef CONFIG_USER_RESET_DEBUG
+	sec_debug_save_badmode_info(reason, handler[reason],
+			esr, esr_get_class_string(esr));
+#endif
 
 	pr_crit("Bad mode in %s handler detected on CPU%d, code 0x%08x -- %s\n",
 		handler[reason], smp_processor_id(), esr,

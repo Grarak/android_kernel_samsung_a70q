@@ -131,7 +131,7 @@ static int dsi_pwr_enable_vregs(struct dsi_regulator_info *regs, bool enable)
 		for (i = 0; i < regs->count; i++) {
 			vreg = &regs->vregs[i];
 			if (vreg->pre_on_sleep)
-				msleep(vreg->pre_on_sleep);
+				usleep_range(vreg->pre_on_sleep*1000, vreg->pre_on_sleep*1000);
 
 			rc = regulator_set_load(vreg->vreg,
 						vreg->enable_load);
@@ -160,19 +160,18 @@ static int dsi_pwr_enable_vregs(struct dsi_regulator_info *regs, bool enable)
 			}
 
 			if (vreg->post_on_sleep)
-				msleep(vreg->post_on_sleep);
+				usleep_range(vreg->post_on_sleep*1000, vreg->post_on_sleep*1000);
 		}
 	} else {
 		for (i = (regs->count - 1); i >= 0; i--) {
 			if (regs->vregs[i].pre_off_sleep)
-				msleep(regs->vregs[i].pre_off_sleep);
-
+				usleep_range(regs->vregs[i].pre_off_sleep*1000, regs->vregs[i].pre_off_sleep*1000);
 			(void)regulator_set_load(regs->vregs[i].vreg,
 						regs->vregs[i].disable_load);
 			(void)regulator_disable(regs->vregs[i].vreg);
 
 			if (regs->vregs[i].post_off_sleep)
-				msleep(regs->vregs[i].post_off_sleep);
+				usleep_range(regs->vregs[i].post_off_sleep*1000, regs->vregs[i].post_off_sleep*1000);
 		}
 	}
 

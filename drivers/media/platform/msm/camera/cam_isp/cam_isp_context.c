@@ -104,7 +104,7 @@ static void __cam_isp_ctx_dump_state_monitor_array(
 	uint64_t index;
 
 	state_head = atomic64_read(&ctx_isp->state_monitor_head);
-	CAM_ERR_RATE_LIMIT(CAM_ISP,
+	CAM_DBG(CAM_ISP,
 		"Dumping state information for preceding requests");
 
 	for (i = CAM_ISP_CTX_STATE_MONITOR_MAX_ENTRIES - 1; i >= 0;
@@ -112,7 +112,7 @@ static void __cam_isp_ctx_dump_state_monitor_array(
 		index = (((state_head - i) +
 			CAM_ISP_CTX_STATE_MONITOR_MAX_ENTRIES) %
 			CAM_ISP_CTX_STATE_MONITOR_MAX_ENTRIES);
-		CAM_ERR_RATE_LIMIT(CAM_ISP,
+		CAM_DBG(CAM_ISP,
 		"time[0x%llx] req_id[%u] state[%s] evt_type[%s]",
 		ctx_isp->cam_isp_ctx_state_monitor[index].evt_time_stamp,
 		ctx_isp->cam_isp_ctx_state_monitor[index].req_id,
@@ -2541,6 +2541,8 @@ static int __cam_isp_ctx_release_dev_in_top_state(struct cam_context *ctx,
 	ctx_isp->reported_req_id = 0;
 	ctx_isp->hw_acquired = false;
 	ctx_isp->init_received = false;
+	/* reset rdi_only_context */
+	ctx_isp->rdi_only_context = false;
 
 	/*
 	 * Ideally, we should never have any active request here.
@@ -2855,6 +2857,8 @@ static int __cam_isp_ctx_acquire_dev_in_available(struct cam_context *ctx,
 			cam_isp_ctx_activated_state_machine_irq;
 		ctx_isp->substate_machine =
 			cam_isp_ctx_activated_state_machine;
+		/* this is not rdi only context, so reset the variable value */
+		ctx_isp->rdi_only_context = false;
 	}
 
 	ctx_isp->hw_ctx = param.ctxt_to_hw_map;
@@ -3007,6 +3011,8 @@ static int __cam_isp_ctx_acquire_hw_v1(struct cam_context *ctx,
 			cam_isp_ctx_activated_state_machine_irq;
 		ctx_isp->substate_machine =
 			cam_isp_ctx_activated_state_machine;
+		/* this is not rdi only context, so reset the variable value */
+		ctx_isp->rdi_only_context = false;
 	}
 
 	ctx_isp->hw_ctx = param.ctxt_to_hw_map;
@@ -3173,6 +3179,9 @@ static int __cam_isp_ctx_start_dev_in_ready(struct cam_context *ctx,
 		(req_isp->num_fence_map_out) ? CAM_ISP_CTX_ACTIVATED_EPOCH :
 		CAM_ISP_CTX_ACTIVATED_SOF;
 
+	trace_printk("rdi_only_context = %d\n", ctx_isp->rdi_only_context);
+	trace_printk("num_fence_map_out = %d\n", req_isp->num_fence_map_out);
+
 	/*
 	 * Only place to change state before calling the hw due to
 	 * hardware tasklet has higher priority that can cause the
@@ -3189,10 +3198,9 @@ static int __cam_isp_ctx_start_dev_in_ready(struct cam_context *ctx,
 		trace_cam_context_state("ISP", ctx);
 		goto end;
 	}
-	CAM_DBG(CAM_ISP, "start device success ctx %u", ctx->ctx_id);
-
+	/* CAM_DBG(CAM_ISP, "start device success ctx %u", ctx->ctx_id); */
+	trace_printk( "start device success ctx %u\n", ctx->ctx_id);
 	list_del_init(&req->list);
-
 	if (req_isp->num_fence_map_out) {
 		list_add_tail(&req->list, &ctx->active_req_list);
 		ctx_isp->active_req_cnt++;
@@ -3200,6 +3208,8 @@ static int __cam_isp_ctx_start_dev_in_ready(struct cam_context *ctx,
 		list_add_tail(&req->list, &ctx->wait_req_list);
 	}
 end:
+	trace_printk( "start_dev: active_cnt = %d start sub_state %d\n",
+		      ctx_isp->active_req_cnt, ctx_isp->substate_activated);
 	return rc;
 }
 

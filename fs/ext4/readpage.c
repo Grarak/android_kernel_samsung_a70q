@@ -51,6 +51,10 @@
 static inline bool ext4_bio_encrypted(struct bio *bio)
 {
 #ifdef CONFIG_EXT4_FS_ENCRYPTION
+	/* REQ_CRYPT is used for diskcipher */
+	if (bio->bi_opf & REQ_CRYPT)
+		return false;
+
 	return unlikely(bio->bi_private != NULL);
 #else
 	return false;
@@ -282,7 +286,8 @@ int ext4_mpage_readpages(struct address_space *mapping,
 			struct fscrypt_ctx *ctx = NULL;
 
 			if (ext4_encrypted_inode(inode) &&
-			    S_ISREG(inode->i_mode)) {
+			    S_ISREG(inode->i_mode) &&
+			    !fscrypt_inline_encrypted(inode)) {
 				ctx = fscrypt_get_ctx(inode, GFP_NOFS);
 				if (IS_ERR(ctx))
 					goto set_error_page;
@@ -298,8 +303,13 @@ int ext4_mpage_readpages(struct address_space *mapping,
 			bio->bi_iter.bi_sector = blocks[0] << (blkbits - 9);
 			bio->bi_end_io = mpage_end_io;
 			bio->bi_private = ctx;
-			bio_set_op_attrs(bio, REQ_OP_READ,
-					 ctx ? REQ_NOENCRYPT : 0);
+			bio_set_op_attrs(bio, REQ_OP_READ, 0);
+			if (fscrypt_inline_encrypted(inode)) {
+				fscrypt_set_bio_cryptd(inode, bio);
+#if defined(CONFIG_CRYPTO_DISKCIPHER_DEBUG)
+				crypto_diskcipher_debug(FS_READP, bio->bi_opf);
+#endif
+			}
 		}
 
 		length = first_hole << blkbits;

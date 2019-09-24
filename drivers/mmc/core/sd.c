@@ -29,6 +29,12 @@
 #include "sd.h"
 #include "sd_ops.h"
 
+#ifdef CONFIG_MMC_SUPPORT_STLOG
+#include <linux/fslog.h>
+#else
+#define ST_LOG(fmt, ...)
+#endif
+
 #define UHS_SDR104_MIN_DTR	(100 * 1000 * 1000)
 #define UHS_DDR50_MIN_DTR	(50 * 1000 * 1000)
 #define UHS_SDR50_MIN_DTR	(50 * 1000 * 1000)
@@ -746,6 +752,8 @@ MMC_DEV_ATTR(name, "%s\n", card->cid.prod_name);
 MMC_DEV_ATTR(oemid, "0x%04x\n", card->cid.oemid);
 MMC_DEV_ATTR(serial, "0x%08x\n", card->cid.serial);
 MMC_DEV_ATTR(ocr, "0x%08x\n", card->ocr);
+MMC_DEV_ATTR(caps, "0x%08x\n", (unsigned int)(card->host->caps));
+MMC_DEV_ATTR(caps2, "0x%08x\n", card->host->caps2);
 
 
 static ssize_t mmc_dsr_show(struct device *dev,
@@ -780,6 +788,8 @@ static struct attribute *sd_std_attrs[] = {
 	&dev_attr_serial.attr,
 	&dev_attr_ocr.attr,
 	&dev_attr_dsr.attr,
+	&dev_attr_caps.attr,
+	&dev_attr_caps2.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(sd_std);
@@ -1152,6 +1162,9 @@ static void mmc_sd_remove(struct mmc_host *host)
  */
 static int mmc_sd_alive(struct mmc_host *host)
 {
+	if (host->ops->get_cd && !host->ops->get_cd(host))
+		return -ENOMEDIUM;
+
 	return mmc_send_status(host->card, NULL);
 }
 
@@ -1163,6 +1176,20 @@ static void mmc_sd_detect(struct mmc_host *host)
 	int err = 0;
 #ifdef CONFIG_MMC_PARANOID_SD_INIT
 	int retries = 5;
+#endif
+
+#if defined(CONFIG_SEC_HYBRID_TRAY)
+	if (host->ops->get_cd && host->ops->get_cd(host) == 0) {
+		mmc_card_set_removed(host->card);
+		mmc_sd_remove(host);
+
+		mmc_claim_host(host);
+		mmc_detach_bus(host);
+		mmc_power_off(host);
+		mmc_release_host(host);
+		pr_err("%s: card(tray) is removed...\n", mmc_hostname(host));
+		return;
+	}
 #endif
 
 	/*
@@ -1306,7 +1333,6 @@ static int _mmc_sd_resume(struct mmc_host *host)
 	} else if (err) {
 		goto out;
 	}
-	mmc_card_clr_suspended(host->card);
 
 	err = mmc_resume_clk_scaling(host);
 	if (err) {
@@ -1316,6 +1342,7 @@ static int _mmc_sd_resume(struct mmc_host *host)
 	}
 
 out:
+	mmc_card_clr_suspended(host->card);
 	mmc_release_host(host);
 	return err;
 }
@@ -1361,6 +1388,9 @@ static int mmc_sd_runtime_suspend(struct mmc_host *host)
 static int mmc_sd_runtime_resume(struct mmc_host *host)
 {
 	int err;
+
+	if (!(host->caps & (MMC_CAP_AGGRESSIVE_PM)))
+		return 0;
 
 	err = _mmc_sd_resume(host);
 	if (err && err != -ENOMEDIUM)
@@ -1483,6 +1513,8 @@ err:
 	mmc_detach_bus(host);
 
 	pr_err("%s: error %d whilst initialising SD card\n",
+		mmc_hostname(host), err);
+	ST_LOG("%s: error %d whilst initialising SD card\n",
 		mmc_hostname(host), err);
 
 	return err;

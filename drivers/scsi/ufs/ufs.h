@@ -133,12 +133,19 @@ enum {
 	UPIU_TASK_ATTR_ORDERED	= 0x01,
 	UPIU_TASK_ATTR_HEADQ	= 0x02,
 	UPIU_TASK_ATTR_ACA	= 0x03,
+#ifdef CUSTOMIZE_UPIU_FLAGS
+	UPIU_COMMAND_PRIORITY_HIGH      = 0x4,
+#endif
 };
 
 /* UPIU Query request function */
 enum {
 	UPIU_QUERY_FUNC_STANDARD_READ_REQUEST           = 0x01,
 	UPIU_QUERY_FUNC_STANDARD_WRITE_REQUEST          = 0x81,
+};
+
+enum {
+	UPIU_QUERY_FUNC_VENDOR_TOSHIBA_FATALMODE        = 0xC2,
 };
 
 enum desc_header_offset {
@@ -153,6 +160,12 @@ enum ufs_desc_def_size {
 	QUERY_DESC_INTERCONNECT_DEF_SIZE	= 0x06,
 	QUERY_DESC_GEOMETRY_DEF_SIZE		= 0x44,
 	QUERY_DESC_POWER_DEF_SIZE		= 0x62,
+	/*
+	 * Max. 126 UNICODE characters (2 bytes per character) plus 2 bytes
+	 * of descriptor header.
+	 */
+	QUERY_DESC_STRING_MAX_SIZE		= 0xFE,
+	QUERY_DESC_HEALTH_MAX_SIZE		= 0x25
 };
 
 /* Unit descriptor parameters offsets in bytes*/
@@ -204,6 +217,15 @@ enum device_desc_param {
 	DEVICE_DESC_PARAM_UD_LEN		= 0x1B,
 	DEVICE_DESC_PARAM_RTT_CAP		= 0x1C,
 	DEVICE_DESC_PARAM_FRQ_RTC		= 0x1D,
+};
+
+enum health_device_desc_param {
+	HEALTH_DEVICE_DESC_PARAM_LEN		= 0x0,
+	HEALTH_DEVICE_DESC_PARAM_IDN		= 0x1,
+	HEALTH_DEVICE_DESC_PARAM_INFO		= 0x2,
+	HEALTH_DEVICE_DESC_PARAM_LIFETIMEA	= 0x3,
+	HEALTH_DEVICE_DESC_PARAM_LIFETIMEB	= 0x4,
+	HEALTH_DEVICE_DESC_PARAM_RESERVED	= 0x5,
 };
 
 /*
@@ -505,8 +527,10 @@ struct ufs_dev_info {
 	/* device descriptor info */
 	u8	b_device_sub_class;
 	u16	w_manufacturer_id;
+	u16	w_manufacturer_date;
 	u8	i_product_name;
 	u16	w_spec_version;
+	u8	i_lt;
 
 	/* query flags */
 	bool f_power_on_wp_en;

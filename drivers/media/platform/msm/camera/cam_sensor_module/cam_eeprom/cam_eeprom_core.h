@@ -23,6 +23,13 @@ int32_t cam_eeprom_parse_read_memory_map(struct device_node *of_node,
  * This API handles the shutdown ioctl/close
  */
 void cam_eeprom_shutdown(struct cam_eeprom_ctrl_t *e_ctrl);
+int32_t cam_eeprom_check_firmware_cal(uint32_t camera_cal_crc, uint8_t cal_map_version, cam_eeprom_idx_type idx);
+
+#if defined(CONFIG_SEC_A90Q_PROJECT)
+#define TOF_UID_FRONT_PARTRON_1     0xCA16     // Partron 80Mhz~20Mhz 2.1A
+#define TOF_UID_FRONT_PARTRON_2     0xCA26     // Partron 80Mhz~20Mhz 1.5A
+#define TOF_UID_FRONT_SEC           0xAA26     // Samsung 80Mhz~20Mhz 1.5A
+#endif
 
 #endif
 /* _CAM_EEPROM_CORE_H_ */

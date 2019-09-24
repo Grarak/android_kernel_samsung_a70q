@@ -10,16 +10,8 @@
  * GNU General Public License for more details.
  */
 
+#include <linux/blk-crypt.h>
 #include "fscrypt_ice.h"
-
-int fscrypt_using_hardware_encryption(const struct inode *inode)
-{
-	struct fscrypt_info *ci = inode->i_crypt_info;
-
-	return S_ISREG(inode->i_mode) && ci &&
-		ci->ci_data_mode == FS_ENCRYPTION_MODE_PRIVATE;
-}
-EXPORT_SYMBOL(fscrypt_using_hardware_encryption);
 
 /*
  * Retrieves encryption key from the inode
@@ -35,7 +27,7 @@ char *fscrypt_get_ice_encryption_key(const struct inode *inode)
 	if (!ci)
 		return NULL;
 
-	return &(ci->ci_raw_key[0]);
+	return blk_crypt_get_key(ci->ci_private);
 }
 
 /*
@@ -44,6 +36,7 @@ char *fscrypt_get_ice_encryption_key(const struct inode *inode)
 char *fscrypt_get_ice_encryption_salt(const struct inode *inode)
 {
 	struct fscrypt_info *ci = NULL;
+	unsigned char *key;
 
 	if (!inode)
 		return NULL;
@@ -52,7 +45,11 @@ char *fscrypt_get_ice_encryption_salt(const struct inode *inode)
 	if (!ci)
 		return NULL;
 
-	return &(ci->ci_raw_key[fscrypt_get_ice_encryption_key_size(inode)]);
+	key = blk_crypt_get_key(ci->ci_private);
+	if (!key)
+		return NULL;
+
+	return &key[fscrypt_get_ice_encryption_key_size(inode)];
 }
 
 /*

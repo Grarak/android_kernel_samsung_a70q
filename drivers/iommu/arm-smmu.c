@@ -65,6 +65,9 @@
 #include "io-pgtable.h"
 #include "arm-smmu-regs.h"
 
+#include <linux/sec_debug.h>
+#include <linux/sec_debug_user_reset.h>
+
 #define ARM_MMU500_ACTLR_CPRE		(1 << 1)
 
 #define ARM_MMU500_ACR_CACHE_LOCK	(1 << 26)
@@ -1499,6 +1502,10 @@ static irqreturn_t arm_smmu_context_fault(int irq, void *dev)
 	bool non_fatal_fault = !!(smmu_domain->attributes &
 					(1 << DOMAIN_ATTR_NON_FATAL_FAULTS));
 
+#ifdef CONFIG_USER_RESET_DEBUG
+	ex_info_smmu_t sec_dbg_smmu;
+#endif
+
 	static DEFINE_RATELIMIT_STATE(_rs,
 				      DEFAULT_RATELIMIT_INTERVAL,
 				      DEFAULT_RATELIMIT_BURST);
@@ -1519,6 +1526,13 @@ static irqreturn_t arm_smmu_context_fault(int irq, void *dev)
 	if (fatal_asf && (fsr & FSR_ASF)) {
 		dev_err(smmu->dev,
 			"Took an address size fault.  Refusing to recover.\n");
+#ifdef CONFIG_USER_RESET_DEBUG
+		snprintf(sec_dbg_smmu.dev_name, sizeof(sec_dbg_smmu.dev_name), "%s", dev_name(smmu->dev));
+		sec_dbg_smmu.fsr = fsr;
+
+		sec_debug_save_smmu_info(&sec_dbg_smmu);
+#endif
+
 		BUG();
 	}
 
@@ -1548,11 +1562,12 @@ static irqreturn_t arm_smmu_context_fault(int irq, void *dev)
 		ret = IRQ_HANDLED;
 		resume = RESUME_TERMINATE;
 	} else {
-		if (__ratelimit(&_rs)) {
-			phys_addr_t phys_atos;
+		phys_addr_t phys_atos = arm_smmu_verify_fault(domain,
+							      iova,
+							      fsr);
 
+		if (__ratelimit(&_rs)) {
 			print_ctx_regs(smmu, cfg, fsr);
-			phys_atos = arm_smmu_verify_fault(domain, iova, fsr);
 			dev_err(smmu->dev,
 				"Unhandled context fault: iova=0x%08lx, cb=%d, fsr=0x%x, fsynr0=0x%x, fsynr1=0x%x\n",
 				iova, cfg->cbndx, fsr, fsynr0, fsynr1);
@@ -1580,6 +1595,24 @@ static irqreturn_t arm_smmu_context_fault(int irq, void *dev)
 		if (!non_fatal_fault) {
 			dev_err(smmu->dev,
 				"Unhandled arm-smmu context fault!\n");
+#ifdef CONFIG_USER_RESET_DEBUG
+			snprintf(sec_dbg_smmu.dev_name, sizeof(sec_dbg_smmu.dev_name), "%s", dev_name(smmu->dev));
+			sec_dbg_smmu.fsr = fsr;
+			sec_dbg_smmu.fsynr0 = fsynr0;
+			sec_dbg_smmu.fsynr1 = fsynr1;
+			sec_dbg_smmu.iova = iova;
+			sec_dbg_smmu.far = (unsigned long)iova;
+/*
+			snprintf(sec_dbg_smmu.mas_name, sizeof(sec_dbg_smmu.mas_name),
+					"%s", master ? master->of_node->name : "Unknown SID");
+*/
+			sec_dbg_smmu.cbndx = cfg->cbndx;
+			sec_dbg_smmu.phys_soft = phys_soft;
+			sec_dbg_smmu.phys_atos = phys_atos;
+			sec_dbg_smmu.sid = frsynra;
+
+			sec_debug_save_smmu_info(&sec_dbg_smmu);
+#endif
 			BUG();
 		}
 	}

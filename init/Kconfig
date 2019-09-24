@@ -740,6 +740,11 @@ config MEMCG_SWAP_ENABLED
 	  select this option (if, for some reason, they need to disable it
 	  then swapaccount=0 does the trick).
 
+config MEMCG_FORCE_USE_VM_SWAPPINESS
+	bool "Force to use vm_swappiness instead of memcg->swappiness"
+	depends on MEMCG_SWAP
+	default y
+
 config BLK_CGROUP
 	bool "IO controller"
 	depends on BLOCK
@@ -1754,6 +1759,12 @@ config SYSTEM_DATA_VERIFICATION
 	  trusted keyring to provide public keys.  This then can be used for
 	  module verification, kexec image verification and firmware blob
 	  verification.
+	  
+config DEFERRED_INITCALLS
+       bool "Deferred initcalls support"
+       default n
+       help
+         Say Y here to include support for deferred initcalls.
 
 config PROFILING
 	bool "Profiling support"

@@ -28,6 +28,19 @@
 
 #define INVALID_VREG 100
 
+#define CONFIG_CAMERA_DYNAMIC_MIPI 1
+
+
+#if defined(CONFIG_CAMERA_DYNAMIC_MIPI)
+#define SENSOR_ID_IMX316 0x0316
+#define STREAM_ON_ADDR_IMX316   0x1001
+#define INVALID_MIPI_INDEX -1
+#endif
+
+#if defined(CONFIG_SAMSUNG_FRONT_TOF) || defined(CONFIG_SAMSUNG_REAR_TOF)
+#define TOF_SENSOR_ID_IMX316 0x0316
+#endif
+
 int cam_get_dt_power_setting_data(struct device_node *of_node,
 	struct cam_hw_soc_info *soc_info,
 	struct cam_sensor_power_ctrl_t *power_info);

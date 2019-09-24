@@ -17,6 +17,7 @@
 #include "fscrypt_private.h"
 
 #if IS_ENABLED(CONFIG_FS_ENCRYPTION)
+#define FS_AES_256_XTS_KEY_SIZE 64
 static inline bool fscrypt_should_be_processed_by_ice(const struct inode *inode)
 {
 	if (!inode->i_sb->s_cop)

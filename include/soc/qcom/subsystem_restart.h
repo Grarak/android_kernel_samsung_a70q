@@ -110,6 +110,8 @@ struct subsys_desc {
 	unsigned int wdog_bite_irq;
 	unsigned int generic_irq;
 	int force_stop_bit;
+	int stop_reason_0_bit;
+	int stop_reason_1_bit;
 	int ramdump_disable_irq;
 	int shutdown_ack_irq;
 	int ramdump_disable;
@@ -149,6 +151,8 @@ struct notif_data {
 extern int subsys_get_restart_level(struct subsys_device *dev);
 extern int subsystem_restart_dev(struct subsys_device *dev);
 extern int subsystem_restart(const char *name);
+extern int subsystem_crash(const char *name);
+extern void subsys_force_stop(const char *name, bool val);
 extern int subsystem_crashed(const char *name);
 
 extern void *subsystem_get(const char *name);
@@ -185,7 +189,8 @@ static inline int subsystem_restart(const char *name)
 {
 	return 0;
 }
-
+static inline subsystem_crash(const char *name) { }
+static inline void subsys_force_stop(const char *name, bool val) { }
 static inline int subsystem_crashed(const char *name)
 {
 	return 0;

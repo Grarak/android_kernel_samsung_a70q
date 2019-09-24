@@ -552,6 +552,10 @@ static void msm_atomic_helper_commit_modeset_enables(struct drm_device *dev,
 	SDE_ATRACE_END("msm_enable");
 }
 
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+int ss_get_vdd_ndx_from_state(struct drm_atomic_state *old_state);
+#endif
+
 /* The (potentially) asynchronous part of the commit.  At this point
  * nothing can fail short of armageddon.
  */
@@ -570,6 +574,18 @@ static void complete_commit(struct msm_commit *c)
 
 	drm_atomic_helper_commit_planes(dev, state, 0);
 
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	/* TODO: check if _sde_encoder_trigger_start() is suitable
+	 * for ss_callback called..
+	 */
+	if (!kms->funcs->ss_callback) {
+		DRM_ERROR("No ss_callback function...\n");
+	} else {
+		kms->funcs->ss_callback(ss_get_vdd_ndx_from_state(state), SS_EVENT_PANEL_ESD_RECOVERY, NULL);
+		kms->funcs->ss_callback(ss_get_vdd_ndx_from_state(state), SS_EVENT_FRAME_UPDATE_PRE, NULL);
+	}
+#endif
+
 	msm_atomic_helper_commit_modeset_enables(dev, state);
 
 	/* NOTE: _wait_for_vblanks() only waits for vblank on
@@ -586,6 +602,14 @@ static void complete_commit(struct msm_commit *c)
 	 */
 
 	msm_atomic_wait_for_commit_done(dev, state);
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	if (!kms->funcs->ss_callback) {
+		DRM_ERROR("No ss_callback function...\n");
+	} else {
+		kms->funcs->ss_callback(ss_get_vdd_ndx_from_state(state), SS_EVENT_FRAME_UPDATE_POST, NULL);
+	}
+#endif
 
 	drm_atomic_helper_cleanup_planes(dev, state);
 

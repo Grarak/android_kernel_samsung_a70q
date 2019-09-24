@@ -37,7 +37,7 @@
 #include <linux/uio.h>
 #include <linux/atomic.h>
 #include <linux/prefetch.h>
-#define __FS_HAS_ENCRYPTION IS_ENABLED(CONFIG_F2FS_FS_ENCRYPTION)
+#define __FS_HAS_ENCRYPTION IS_ENABLED(CONFIG_FS_ENCRYPTION)
 #include <linux/fscrypt.h>
 
 /*
@@ -466,6 +466,15 @@ static inline void dio_bio_submit(struct dio *dio, struct dio_submit *sdio)
 	spin_lock_irqsave(&dio->bio_lock, flags);
 	dio->refcount++;
 	spin_unlock_irqrestore(&dio->bio_lock, flags);
+
+#ifdef CONFIG_FS_INLINE_ENCRYPTION
+	if (fscrypt_inline_encrypted(dio->inode)) {
+		fscrypt_set_bio_cryptd(dio->inode, bio);
+#if defined(CONFIG_CRYPTO_DISKCIPHER_DEBUG)
+		crypto_diskcipher_debug(FS_DIO, bio->bi_opf);
+#endif
+	}
+#endif
 
 	if (dio->is_async && dio->op == REQ_OP_READ && dio->should_dirty)
 		bio_set_pages_dirty(bio);

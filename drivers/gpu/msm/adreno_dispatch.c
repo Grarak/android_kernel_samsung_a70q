@@ -1681,6 +1681,17 @@ static void adreno_fault_header(struct kgsl_device *device,
 	struct kgsl_drawobj *drawobj = DRAWOBJ(cmdobj);
 	unsigned int status, rptr, wptr, ib1sz, ib2sz;
 	uint64_t ib1base, ib2base;
+	
+	/*
+	* GPU registers can't be accessed if the gx headswitch is off.
+	* During the gx off case access to GPU gx blocks will show data
+	* as 0x5c00bd00. Hence skip adreno fault header dump.
+	*/
+	if (!gx_on) {
+		dev_err(device->dev, "%s fault and gx is off\n",
+				fault & ADRENO_GMU_FAULT ? "GMU" : "GPU");
+		return;
+	}
 
 	/*
 	 * GPU registers can't be accessed if the gx headswitch is off.

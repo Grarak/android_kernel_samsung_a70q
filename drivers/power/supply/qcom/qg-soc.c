@@ -36,7 +36,15 @@ module_param_named(
 	soc_interval_ms, qg_delta_soc_interval_ms, int, 0600
 );
 
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+#if defined(CONFIG_SEC_A90Q_PROJECT)
+static int qg_delta_soc_cold_interval_ms = 40000;
+#else
+static int qg_delta_soc_cold_interval_ms = 30000;
+#endif
+#else
 static int qg_delta_soc_cold_interval_ms = 4000;
+#endif
 module_param_named(
 	soc_cold_interval_ms, qg_delta_soc_cold_interval_ms, int, 0600
 );
@@ -60,6 +68,11 @@ int qg_adjust_sys_soc(struct qpnp_qg *chip)
 			soc = 1;
 		else
 			soc = 0;
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	} else if (chip->ss_rescale_soc > 0) {
+		pr_info("%s: ss_rescale_soc(%d)\n", __func__, chip->ss_rescale_soc);
+		soc = chip->ss_rescale_soc;
+#endif
 	} else if (chip->sys_soc == QG_MAX_SOC) {
 		soc = FULL_SOC;
 	} else if (chip->sys_soc >= (QG_MAX_SOC - 100)) {
@@ -122,6 +135,11 @@ static bool is_scaling_required(struct qpnp_qg *chip)
 
 	if (!chip->profile_loaded)
 		return false;
+
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC) && defined(CONFIG_SEC_FACTORY)
+	if (chip->is_smd)
+		return false;
+#endif
 
 	if (chip->maint_soc > 0 &&
 		(abs(chip->maint_soc - chip->msoc) >= chip->dt.delta_soc))

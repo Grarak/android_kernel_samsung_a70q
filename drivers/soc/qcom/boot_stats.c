@@ -22,6 +22,7 @@
 #include <linux/sched.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
+#include <soc/qcom/boot_stats.h>
 
 struct boot_stats {
 	uint32_t bootloader_start;
@@ -29,6 +30,13 @@ struct boot_stats {
 	uint32_t bootloader_display;
 	uint32_t bootloader_load_kernel;
 };
+
+#ifdef CONFIG_SEC_BSP
+uint32_t bs_linuxloader_start;
+uint32_t bs_linux_start;
+uint32_t bs_uefi_start;
+uint32_t bs_bootloader_load_kernel;
+#endif
 
 static void __iomem *mpm_counter_base;
 static uint32_t mpm_counter_freq;
@@ -74,6 +82,14 @@ static int mpm_parse_dt(void)
 
 static void print_boot_stats(void)
 {
+#ifdef CONFIG_SEC_BSP
+	bs_linuxloader_start = readl_relaxed(&boot_stats->bootloader_start);
+	bs_linux_start = readl_relaxed(&boot_stats->bootloader_end);
+	bs_uefi_start = readl_relaxed(&boot_stats->bootloader_display);
+	bs_bootloader_load_kernel = readl_relaxed(
+					&boot_stats->bootloader_load_kernel);
+#endif
+
 	pr_info("KPI: Bootloader start count = %u\n",
 		readl_relaxed(&boot_stats->bootloader_start));
 	pr_info("KPI: Bootloader end count = %u\n",
@@ -88,6 +104,53 @@ static void print_boot_stats(void)
 		mpm_counter_freq);
 }
 
+#ifdef CONFIG_SEC_BSP
+unsigned int get_boot_stat_time(void)
+{
+	return readl_relaxed(mpm_counter_base);
+}
+unsigned int get_boot_stat_freq(void)
+{
+	return mpm_counter_freq;
+}
+#endif
+
+unsigned long long int msm_timer_get_sclk_ticks(void)
+{
+	unsigned long long int t1, t2;
+	int loop_count = 10;
+	int loop_zero_count = 3;
+	int tmp = USEC_PER_SEC;
+	void __iomem *sclk_tick;
+
+	do_div(tmp, TIMER_KHZ);
+	tmp /= (loop_zero_count-1);
+	sclk_tick = mpm_counter_base;
+	if (!sclk_tick)
+		return -EINVAL;
+	while (loop_zero_count--) {
+		t1 = __raw_readl_no_log(sclk_tick);
+		do {
+			udelay(1);
+			t2 = t1;
+			t1 = __raw_readl_no_log(sclk_tick);
+		} while ((t2 != t1) && --loop_count);
+		if (!loop_count) {
+			pr_err("boot_stats: SCLK  did not stabilize\n");
+			return 0;
+		}
+		if (t1)
+			break;
+
+		udelay(tmp);
+	}
+	if (!loop_zero_count) {
+		pr_err("boot_stats: SCLK reads zero\n");
+		return 0;
+	}
+	return t1;
+}
+
 int boot_stats_init(void)
 {
 	int ret;
@@ -98,9 +161,17 @@ int boot_stats_init(void)
 
 	print_boot_stats();
 
-	iounmap(boot_stats);
-	iounmap(mpm_counter_base);
+	if (!(boot_marker_enabled()))
+		boot_stats_exit();
+	return 0;
+}
 
+int boot_stats_exit(void)
+{
+	iounmap(boot_stats);
+#ifndef CONFIG_SEC_BSP
+	iounmap(mpm_counter_base);
+#endif
 	return 0;
 }
 

@@ -59,6 +59,16 @@
 #define MSM_VERSION_MINOR	2
 #define MSM_VERSION_PATCHLEVEL	0
 
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+#if 0
+int __msm_drm_notifier_call_chain(unsigned long event, void *data)
+{
+	return blocking_notifier_call_chain(&msm_drm_notifier_list,
+					event, data);
+}
+#endif
+#endif
+
 static void msm_fb_output_poll_changed(struct drm_device *dev)
 {
 	struct msm_drm_private *priv = NULL;
@@ -1907,6 +1917,12 @@ static int add_display_components(struct device *dev,
 			if (!node)
 				break;
 
+#ifndef CONFIG_SEC_DISPLAYPORT
+			if (!strncmp(node->name, "qcom,dp_display", 15)) {
+				pr_info("[drm-dp] disabled displayport!\n");
+				continue;
+			}
+#endif
 			component_match_add(dev, matchptr, compare_of, node);
 		}
 

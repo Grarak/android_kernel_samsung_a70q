@@ -28,7 +28,7 @@ static struct i2c_settings_list*
 	struct i2c_settings_list *tmp;
 
 	tmp = (struct i2c_settings_list *)
-		kzalloc(sizeof(struct i2c_settings_list), GFP_KERNEL);
+		kvzalloc(sizeof(struct i2c_settings_list), GFP_KERNEL);
 
 	if (tmp != NULL)
 		list_add_tail(&(tmp->list),
@@ -37,11 +37,11 @@ static struct i2c_settings_list*
 		return NULL;
 
 	tmp->i2c_settings.reg_setting = (struct cam_sensor_i2c_reg_array *)
-		kcalloc(size, sizeof(struct cam_sensor_i2c_reg_array),
+		kvzalloc(size * sizeof(struct cam_sensor_i2c_reg_array),
 			GFP_KERNEL);
 	if (tmp->i2c_settings.reg_setting == NULL) {
 		list_del(&(tmp->list));
-		kfree(tmp);
+		kvfree(tmp);
 		return NULL;
 	}
 	tmp->i2c_settings.size = size;
@@ -61,9 +61,9 @@ int32_t delete_request(struct i2c_settings_array *i2c_array)
 
 	list_for_each_entry_safe(i2c_list, i2c_next,
 		&(i2c_array->list_head), list) {
-		kfree(i2c_list->i2c_settings.reg_setting);
+		kvfree(i2c_list->i2c_settings.reg_setting);
 		list_del(&(i2c_list->list));
-		kfree(i2c_list);
+		kvfree(i2c_list);
 	}
 	INIT_LIST_HEAD(&(i2c_array->list_head));
 	i2c_array->is_settings_valid = 0;
@@ -1126,6 +1126,10 @@ int cam_get_dt_power_setting_data(struct device_node *of_node,
 			ps[i].seq_type = SENSOR_VIO;
 		} else if (!strcmp(seq_name, "cam_vana")) {
 			ps[i].seq_type = SENSOR_VANA;
+ 		} else if (!strcmp(seq_name, "cam_vdig")) {
+			ps[i].seq_type = SENSOR_VDIG;
+		} else if (!strcmp(seq_name, "cam_vaf")) {
+			ps[i].seq_type = SENSOR_VAF;
 		} else if (!strcmp(seq_name, "cam_clk")) {
 			ps[i].seq_type = SENSOR_MCLK;
 		} else {
@@ -1703,6 +1707,7 @@ int cam_sensor_core_power_up(struct cam_sensor_power_ctrl_t *ctrl,
 		case SENSOR_VAF_PWDM:
 		case SENSOR_CUSTOM_REG1:
 		case SENSOR_CUSTOM_REG2:
+#ifdef NEVER
 			if (power_setting->seq_val == INVALID_VREG)
 				break;
 
@@ -1712,6 +1717,7 @@ int cam_sensor_core_power_up(struct cam_sensor_power_ctrl_t *ctrl,
 					CAM_VREG_MAX);
 				goto power_up_failed;
 			}
+#endif /* NEVER */
 			if (power_setting->seq_val < num_vreg) {
 				CAM_DBG(CAM_SENSOR, "Enable Regulator");
 				vreg_idx = power_setting->seq_val;
@@ -1987,8 +1993,10 @@ int cam_sensor_util_power_down(struct cam_sensor_power_ctrl_t *ctrl,
 		case SENSOR_VAF_PWDM:
 		case SENSOR_CUSTOM_REG1:
 		case SENSOR_CUSTOM_REG2:
+#ifdef NEVER
 			if (pd->seq_val == INVALID_VREG)
 				break;
+#endif /* NEVER */
 
 			ps = msm_camera_get_power_settings(
 				ctrl, pd->seq_type,

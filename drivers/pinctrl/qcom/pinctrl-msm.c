@@ -40,8 +40,22 @@
 #include "pinctrl-msm.h"
 #include "../pinctrl-utils.h"
 
+#ifdef CONFIG_SEC_PM_DEBUG
+#include <linux/sec-pinmux.h>
+#endif
+
 #define MAX_NR_GPIO 300
 #define PS_HOLD_OFFSET 0x820
+
+#ifdef CONFIG_MST_LDO
+#ifdef CONFIG_SEC_A70Q_PROJECT
+#define MST_GPIO_D_EN 38
+#define MST_GPIO_D_DATA 37
+#elif defined(CONFIG_SEC_A90Q_PROJECT)
+#define MST_GPIO_D_EN 84
+#define MST_GPIO_D_DATA 83
+#endif
+#endif
 
 /**
  * struct msm_pinctrl - state for a pinctrl-msm device
@@ -149,6 +163,28 @@ static const struct pinctrl_ops msm_pinctrl_ops = {
 	.dt_free_map		= pinctrl_utils_free_map,
 };
 
+static int msm_pinmux_request(struct pinctrl_dev *pctldev, unsigned offset)
+{
+	struct msm_pinctrl *pctrl = pinctrl_dev_get_drvdata(pctldev);
+	struct gpio_chip *chip = &pctrl->chip;
+
+#ifdef CONFIG_ESE_SECURE
+	if (offset >= CONFIG_ESE_SPI_GPIO_START
+		&& offset <= CONFIG_ESE_SPI_GPIO_END)
+		return 0;
+#endif
+#ifdef CONFIG_MST_LDO
+	if (offset == MST_GPIO_D_EN || offset == MST_GPIO_D_DATA)
+		return 0;
+#endif
+#ifdef ENABLE_SENSORS_FPRINT_SECURE
+	if (offset >= CONFIG_SENSORS_FP_SPI_GPIO_START
+		&& offset <= CONFIG_SENSORS_FP_SPI_GPIO_END)
+		return 0;
+#endif
+	return gpiochip_line_is_valid(chip, offset) ? 0 : -EINVAL;
+}
+
 static int msm_get_functions_count(struct pinctrl_dev *pctldev)
 {
 	struct msm_pinctrl *pctrl = pinctrl_dev_get_drvdata(pctldev);
@@ -181,11 +217,30 @@ static int msm_pinmux_set_mux(struct pinctrl_dev *pctldev,
 			      unsigned group)
 {
 	struct msm_pinctrl *pctrl = pinctrl_dev_get_drvdata(pctldev);
+	struct gpio_chip *chip = &pctrl->chip;
 	const struct msm_pingroup *g;
 	unsigned long flags;
 	void __iomem *base;
 	u32 val, mask;
 	int i;
+
+#ifdef CONFIG_ESE_SECURE
+	if (group >= CONFIG_ESE_SPI_GPIO_START
+		&& group <= CONFIG_ESE_SPI_GPIO_END)
+		return 0;
+#endif
+#ifdef CONFIG_MST_LDO
+	if (group == MST_GPIO_D_EN || group == MST_GPIO_D_DATA)
+		return 0;
+#endif
+#ifdef ENABLE_SENSORS_FPRINT_SECURE
+	if (group >= CONFIG_SENSORS_FP_SPI_GPIO_START
+		&& group <= CONFIG_SENSORS_FP_SPI_GPIO_END)
+		return 0;
+#endif
+
+	if (!gpiochip_line_is_valid(chip, group))
+		return -EINVAL;
 
 	g = &pctrl->soc->groups[group];
 	base = reassign_pctrl_reg(pctrl->soc, group);
@@ -216,6 +271,7 @@ static int msm_pinmux_set_mux(struct pinctrl_dev *pctldev,
 }
 
 static const struct pinmux_ops msm_pinmux_ops = {
+	.request		= msm_pinmux_request,
 	.get_functions_count	= msm_get_functions_count,
 	.get_function_name	= msm_get_function_name,
 	.get_function_groups	= msm_get_function_groups,
@@ -269,6 +325,7 @@ static int msm_config_group_get(struct pinctrl_dev *pctldev,
 {
 	const struct msm_pingroup *g;
 	struct msm_pinctrl *pctrl = pinctrl_dev_get_drvdata(pctldev);
+	struct gpio_chip *chip = &pctrl->chip;
 	unsigned param = pinconf_to_config_param(*config);
 	unsigned mask;
 	unsigned arg;
@@ -276,6 +333,25 @@ static int msm_config_group_get(struct pinctrl_dev *pctldev,
 	void __iomem *base;
 	int ret;
 	u32 val;
+
+#ifdef CONFIG_ESE_SECURE
+	if (group >= CONFIG_ESE_SPI_GPIO_START
+		&& group <= CONFIG_ESE_SPI_GPIO_END)
+		return 0;
+#endif
+#ifdef CONFIG_MST_LDO
+	if (group == MST_GPIO_D_EN || group == MST_GPIO_D_DATA)
+		return 0;
+#endif
+#ifdef ENABLE_SENSORS_FPRINT_SECURE
+	if (group >= CONFIG_SENSORS_FP_SPI_GPIO_START
+		&& group <= CONFIG_SENSORS_FP_SPI_GPIO_END)
+		return 0;
+#endif
+
+	if (group < chip->ngpio &&	/* FIXME: 124-130 of SM6150 are not assigned for gpio */
+	    !gpiochip_line_is_valid(chip, group))
+		return -EINVAL;
 
 	g = &pctrl->soc->groups[group];
 	base = reassign_pctrl_reg(pctrl->soc, group);
@@ -348,6 +424,7 @@ static int msm_config_group_set(struct pinctrl_dev *pctldev,
 {
 	const struct msm_pingroup *g;
 	struct msm_pinctrl *pctrl = pinctrl_dev_get_drvdata(pctldev);
+	struct gpio_chip *chip = &pctrl->chip;
 	unsigned long flags;
 	void __iomem *base;
 	unsigned param;
@@ -357,6 +434,25 @@ static int msm_config_group_set(struct pinctrl_dev *pctldev,
 	int ret;
 	u32 val;
 	int i;
+
+#ifdef CONFIG_ESE_SECURE
+	if (group >= CONFIG_ESE_SPI_GPIO_START
+		&& group <= CONFIG_ESE_SPI_GPIO_END)
+		return 0;
+#endif
+#ifdef CONFIG_MST_LDO
+	if (group == MST_GPIO_D_EN || group == MST_GPIO_D_DATA)
+		return 0;
+#endif
+#ifdef ENABLE_SENSORS_FPRINT_SECURE
+	if (group >= CONFIG_SENSORS_FP_SPI_GPIO_START
+		&& group <= CONFIG_SENSORS_FP_SPI_GPIO_END)
+		return 0;
+#endif
+
+	if (group < chip->ngpio &&	/* FIXME: 124-130 of SM6150 are not assigned for gpio */
+	    !gpiochip_line_is_valid(chip, group))
+		return -EINVAL;
 
 	g = &pctrl->soc->groups[group];
 	base = reassign_pctrl_reg(pctrl->soc, group);
@@ -554,6 +650,146 @@ static void msm_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 	raw_spin_unlock_irqrestore(&pctrl->lock, flags);
 }
 
+#ifdef CONFIG_SEC_PM_DEBUG
+int msm_set_gpio_status(struct gpio_chip *chip, uint pin_no, uint id, bool level)
+{
+	const struct msm_pingroup *g;
+	struct msm_pinctrl *pctrl = container_of(chip, struct msm_pinctrl, chip);
+	u32 cfg_val, inout_val;
+	u32 mask = 0, shft = 0, data;
+
+#ifdef CONFIG_ESE_SECURE
+	if (pin_no >= CONFIG_ESE_SPI_GPIO_START
+		&& pin_no <= CONFIG_ESE_SPI_GPIO_END)
+		return 0;
+#endif
+#ifdef CONFIG_MST_LDO
+	if (pin_no == MST_GPIO_D_EN || pin_no == MST_GPIO_D_DATA)
+		return 0;
+#endif
+#ifdef ENABLE_SENSORS_FPRINT_SECURE
+	if (pin_no >= CONFIG_SENSORS_FP_SPI_GPIO_START
+		&& pin_no <= CONFIG_SENSORS_FP_SPI_GPIO_END)
+		return 0;
+#endif
+
+	if (!gpiochip_line_is_valid(chip, pin_no))
+		return -EINVAL;
+
+	g = &pctrl->soc->groups[pin_no];
+
+	inout_val = readl(pctrl->regs + g->io_reg);
+	cfg_val = readl(pctrl->regs + g->ctl_reg);
+
+	/* Get mask and shft values for this config type */
+	switch (id) {
+	case GPIO_DVS_CFG_PULL_DOWN:
+		mask = GPIOMUX_PULL_MASK;
+		shft = GPIOMUX_PULL_SHFT;
+		data = GPIOMUX_PULL_DOWN;
+		break;
+	case GPIO_DVS_CFG_PULL_UP:
+		mask = GPIOMUX_PULL_MASK;
+		shft = GPIOMUX_PULL_SHFT;
+		data = GPIOMUX_PULL_UP;
+		break;
+	case GPIO_DVS_CFG_PULL_NONE:
+		mask = GPIOMUX_PULL_MASK;
+		shft = GPIOMUX_PULL_SHFT;
+		data = GPIOMUX_PULL_NONE;
+		break;
+	case GPIO_DVS_CFG_OUTPUT:
+		mask = GPIOMUX_DIR_MASK;
+		shft = GPIOMUX_DIR_SHFT;
+		data = level;
+		inout_val = dir_to_inout_val(data);
+		writel(inout_val, pctrl->regs + g->io_reg);
+		data = mask;
+		break;
+	default:
+		return -EINVAL;
+	};
+
+	cfg_val &= ~(mask << shft);
+	cfg_val |= (data << shft);
+	writel(cfg_val, pctrl->regs + g->ctl_reg);
+
+	return 0;
+}
+
+void msm_gp_get_cfg(struct gpio_chip *chip, uint pin_no, struct gpiomux_setting *val)
+{
+	const struct msm_pingroup *g;
+	struct msm_pinctrl *pctrl = container_of(chip, struct msm_pinctrl, chip);
+	u32 cfg_val, inout_val;
+	g = &pctrl->soc->groups[pin_no];
+
+#ifdef CONFIG_ESE_SECURE
+	if (pin_no >= CONFIG_ESE_SPI_GPIO_START
+		&& pin_no <= CONFIG_ESE_SPI_GPIO_END) {
+		memset(val, 0, sizeof(struct gpiomux_setting));
+		return;
+	}
+#endif
+#ifdef CONFIG_MST_LDO
+	if (pin_no == MST_GPIO_D_EN || pin_no == MST_GPIO_D_DATA)
+		return;
+#endif
+#ifdef ENABLE_SENSORS_FPRINT_SECURE
+	if (pin_no >= CONFIG_SENSORS_FP_SPI_GPIO_START
+		&& pin_no <= CONFIG_SENSORS_FP_SPI_GPIO_END)
+		return;
+#endif
+
+	if (!gpiochip_line_is_valid(chip, pin_no))
+		return;
+
+	inout_val = readl(pctrl->regs + g->io_reg);
+	cfg_val = readl(pctrl->regs + g->ctl_reg);
+	val->pull = cfg_val & 0x3;
+	val->func = (cfg_val >> 2) & 0xf;
+	val->drv = (cfg_val >> 6) & 0x7;
+	val->dir = cfg_val & BIT_MASK(9) ? 1 : GPIOMUX_IN;
+	if ((val->func == GPIOMUX_FUNC_GPIO) && (val->dir))
+		val->dir = inout_val & BIT_MASK(1) ?
+		GPIOMUX_OUT_HIGH : GPIOMUX_OUT_LOW;
+}
+
+int msm_gp_get_value(struct gpio_chip *chip, uint pin_no, int in_out_type)
+{
+	const struct msm_pingroup *g;
+	struct msm_pinctrl *pctrl = container_of(chip, struct msm_pinctrl, chip);
+	u32 inout_val;
+
+#ifdef CONFIG_ESE_SECURE
+	if (pin_no >= CONFIG_ESE_SPI_GPIO_START
+		&& pin_no <= CONFIG_ESE_SPI_GPIO_END)
+		return 0;
+#endif
+#ifdef CONFIG_MST_LDO
+	if (pin_no == MST_GPIO_D_EN || pin_no == MST_GPIO_D_DATA)
+		return 0;
+#endif
+#ifdef ENABLE_SENSORS_FPRINT_SECURE
+	if (pin_no >= CONFIG_SENSORS_FP_SPI_GPIO_START
+		&& pin_no <= CONFIG_SENSORS_FP_SPI_GPIO_END)
+		return 0;
+#endif
+
+	if (!gpiochip_line_is_valid(chip, pin_no))
+		return 0;
+
+	g = &pctrl->soc->groups[pin_no];
+
+	inout_val = readl(pctrl->regs + g->io_reg);
+
+	if(in_out_type == GPIOMUX_IN)
+		return (inout_val & BIT(GPIO_IN_BIT)) >> GPIO_IN_BIT;
+
+	return (inout_val & BIT(GPIO_OUT_BIT)) >> GPIO_OUT_BIT;
+}
+#endif
+
 #ifdef CONFIG_DEBUG_FS
 #include <linux/seq_file.h>
 
@@ -578,6 +814,24 @@ static void msm_gpio_dbg_show_one(struct seq_file *s,
 		"keeper",
 		"pull up"
 	};
+
+#ifdef CONFIG_ESE_SECURE
+	if (offset >= CONFIG_ESE_SPI_GPIO_START
+		&& offset <= CONFIG_ESE_SPI_GPIO_END)
+		return;
+#endif
+#ifdef CONFIG_MST_LDO
+	if (offset == MST_GPIO_D_EN || offset == MST_GPIO_D_DATA)
+		return;
+#endif
+#ifdef ENABLE_SENSORS_FPRINT_SECURE
+	if (offset >= CONFIG_SENSORS_FP_SPI_GPIO_START
+		&& offset <= CONFIG_SENSORS_FP_SPI_GPIO_END)
+		return;
+#endif
+
+	if (!gpiochip_line_is_valid(chip, offset))
+		return;
 
 	g = &pctrl->soc->groups[offset];
 	base = reassign_pctrl_reg(pctrl->soc, offset);

@@ -344,15 +344,18 @@ static int cam_vfe_camif_reg_dump(
 			offset + 12));
 	}
 
-	offset = 0x420;
+	offset = 0x3A20;
 	val = cam_soc_util_r(camif_priv->soc_info, 1, offset);
-	CAM_INFO(CAM_ISP, "CAMNOC IFE02 MaxWR_LOW offset 0x%x value 0x%x",
-		offset, val);
+	CAM_INFO(CAM_ISP, "base 0x%lx, IFE0_nRDI_MAXWR_LOW offset 0x3A20 val 0x%x",
+		(unsigned long)camif_priv->soc_info->reg_map[1].mem_base, val);
 
-	offset = 0x820;
+	offset = 0x5420;
 	val = cam_soc_util_r(camif_priv->soc_info, 1, offset);
-	CAM_INFO(CAM_ISP, "CAMNOC IFE13 MaxWR_LOW offset 0x%x value 0x%x",
-		offset, val);
+	CAM_INFO(CAM_ISP, "IFE1_nRDI_MAXWR_LOW offset 0x5420 val 0x%x", val);
+
+	offset = 0x3620;
+	val = cam_soc_util_r(camif_priv->soc_info, 1, offset);
+	CAM_INFO(CAM_ISP, "IFE0123_RDI_WR_MAXWR_LOW offset 0x3620 val 0x%x", val);
 
 	return 0;
 }

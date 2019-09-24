@@ -1276,6 +1276,17 @@ config TOUCHSCREEN_SYNAPTICS_DSX
 
           If unsure, say N.
 
+config TOUCHSCREEN_DUMP_MODE
+	bool "touchscreen dump mode"
+	depends on I2C
+	help
+	  Say Y here if you need to get raw data.
+
+	  If unsure, say N.
+
 source "drivers/input/touchscreen/synaptics_dsx/Kconfig"
+source "drivers/input/touchscreen/zinitix/Kconfig"
+source "drivers/input/touchscreen/imagis_40xx/Kconfig"
+source "drivers/input/touchscreen/novatek/nt36672/Kconfig"
 
 endif

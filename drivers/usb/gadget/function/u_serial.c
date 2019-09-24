@@ -379,8 +379,10 @@ __acquires(&port->port_lock)
 	int			status = 0;
 	bool			do_tty_wake = false;
 
-	if (!port->port_usb)
-		return status;
+	if (!port || !port->port_usb) {
+		pr_err("Error - port or port->usb is NULL.");
+		return -EIO;
+	}
 
 	in = port->port_usb->in;
 
@@ -450,6 +452,11 @@ __acquires(&port->port_lock)
 {
 	struct list_head	*pool = &port->read_pool;
 	struct usb_ep		*out = port->port_usb->out;
+
+	if (!port || !port->port_usb) {
+		pr_err("Error - port or port->usb is NULL.");
+		return -EIO;
+	}
 
 	while (!list_empty(pool)) {
 		struct usb_request	*req;
@@ -603,19 +610,21 @@ static void gs_rx_push(unsigned long _port)
 static void gs_read_complete(struct usb_ep *ep, struct usb_request *req)
 {
 	struct gs_port	*port = ep->driver_data;
+	unsigned long flags;
 
 	/* Queue all received data until the tty layer is ready for it. */
-	spin_lock(&port->port_lock);
+	spin_lock_irqsave(&port->port_lock, flags);
 	list_add_tail(&req->list, &port->read_queue);
 	tasklet_schedule(&port->push);
-	spin_unlock(&port->port_lock);
+	spin_unlock_irqrestore(&port->port_lock, flags);
 }
 
 static void gs_write_complete(struct usb_ep *ep, struct usb_request *req)
 {
 	struct gs_port	*port = ep->driver_data;
+	unsigned long flags;
 
-	spin_lock(&port->port_lock);
+	spin_lock_irqsave(&port->port_lock, flags);
 	list_add(&req->list, &port->write_pool);
 	port->write_started--;
 
@@ -627,7 +636,8 @@ static void gs_write_complete(struct usb_ep *ep, struct usb_request *req)
 		/* FALL THROUGH */
 	case 0:
 		/* normal completion */
-		gs_start_tx(port);
+		if (port->port_usb)
+			gs_start_tx(port);
 		break;
 
 	case -ESHUTDOWN:
@@ -636,7 +646,7 @@ static void gs_write_complete(struct usb_ep *ep, struct usb_request *req)
 		break;
 	}
 
-	spin_unlock(&port->port_lock);
+	spin_unlock_irqrestore(&port->port_lock, flags);
 }
 
 static void gs_free_requests(struct usb_ep *ep, struct list_head *head,
@@ -693,6 +703,11 @@ static int gs_start_io(struct gs_port *port)
 	int			status;
 	unsigned		started;
 
+	if (!port || !port->port_usb) {
+		pr_err("Error - port or port->usb is NULL.");
+		return -EIO;
+	}
+
 	/* Allocate RX and TX I/O buffers.  We can't easily do this much
 	 * earlier (with GFP_KERNEL) because the requests are coupled to
 	 * endpoints, as are the packet sizes we'll be using.  Different
@@ -715,8 +730,20 @@ static int gs_start_io(struct gs_port *port)
 	port->n_read = 0;
 	started = gs_start_rx(port);
 
+	if (!port->port_usb) {
+		printk(KERN_ERR "usb:[%s] port_usb is NULL!! started(%d)\n",
+				__func__, started);
+		return -EIO;
+	}
+
+	if (!port->port.tty) {
+			printk(KERN_ERR "usb:[%s] port_tty is NULL!! started(%d)\n",
+					__func__, started);
+		return -EIO;
+	}
+
 	/* unblock any pending writes into our circular buffer */
-	if (started) {
+	if (started && port->port.tty) {
 		tty_wakeup(port->port.tty);
 	} else {
 		gs_free_requests(ep, head, &port->read_allocated);
@@ -948,6 +975,9 @@ static void gs_flush_chars(struct tty_struct *tty)
 	struct gs_port	*port = tty->driver_data;
 	unsigned long	flags;
 
+	if (!port)
+		return;
+
 	pr_vdebug("gs_flush_chars: (%d,%p)\n", port->port_num, tty);
 
 	spin_lock_irqsave(&port->port_lock, flags);
@@ -961,6 +991,9 @@ static int gs_write_room(struct tty_struct *tty)
 	struct gs_port	*port = tty->driver_data;
 	unsigned long	flags;
 	int		room = 0;
+
+	if (!port)
+		return 0;
 
 	spin_lock_irqsave(&port->port_lock, flags);
 	if (port->port_usb)
@@ -995,6 +1028,13 @@ static void gs_unthrottle(struct tty_struct *tty)
 	struct gs_port		*port = tty->driver_data;
 	unsigned long		flags;
 
+	/*
+	 * tty's driver data is set to NULL during port close.  Nothing
+	 * to do here.
+	 */
+	if (!port)
+		return;
+
 	spin_lock_irqsave(&port->port_lock, flags);
 	if (port->port_usb) {
 		/* Kickstart read queue processing.  We don't do xon/xoff,
@@ -1012,6 +1052,9 @@ static int gs_break_ctl(struct tty_struct *tty, int duration)
 	struct gs_port	*port = tty->driver_data;
 	int		status = 0;
 	struct gserial	*gser;
+
+	if (!port)
+		return 0;
 
 	pr_vdebug("gs_break_ctl: ttyGS%d, send break (%d) \n",
 			port->port_num, duration);

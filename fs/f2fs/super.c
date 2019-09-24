@@ -37,6 +37,10 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/f2fs.h>
 
+#ifdef CONFIG_FSCRYPT_SDP
+#include <linux/fscrypto_sdp_cache.h>
+#endif
+
 static struct kmem_cache *f2fs_inode_cachep;
 
 #ifdef CONFIG_F2FS_FAULT_INJECTION
@@ -882,10 +886,20 @@ static int f2fs_drop_inode(struct inode *inode)
 			spin_lock(&inode->i_lock);
 			atomic_dec(&inode->i_count);
 		}
+#ifdef CONFIG_FSCRYPT_SDP
+		if (fscrypt_sdp_is_locked_sensitive_inode(inode)) {
+			trace_f2fs_drop_inode(inode, 1);
+			return 1;
+		}
+#endif
 		trace_f2fs_drop_inode(inode, 0);
 		return 0;
 	}
 	ret = generic_drop_inode(inode);
+#ifdef CONFIG_FSCRYPT_SDP
+	if (!ret && fscrypt_sdp_is_locked_sensitive_inode(inode))
+		ret = 1;
+#endif
 	trace_f2fs_drop_inode(inode, ret);
 	return ret;
 }
@@ -1971,12 +1985,6 @@ static bool f2fs_dummy_context(struct inode *inode)
 	return DUMMY_ENCRYPTION_ENABLED(F2FS_I_SB(inode));
 }
 
-static unsigned f2fs_max_namelen(struct inode *inode)
-{
-	return S_ISLNK(inode->i_mode) ?
-			inode->i_sb->s_blocksize : F2FS_NAME_LEN;
-}
-
 static inline bool f2fs_is_encrypted(struct inode *inode)
 {
 	return f2fs_encrypted_file(inode);
@@ -1988,7 +1996,7 @@ static const struct fscrypt_operations f2fs_cryptops = {
 	.set_context	= f2fs_set_context,
 	.dummy_context	= f2fs_dummy_context,
 	.empty_dir	= f2fs_empty_dir,
-	.max_namelen	= f2fs_max_namelen,
+	.max_namelen	= F2FS_NAME_LEN,
 	.is_encrypted = f2fs_is_encrypted,
 };
 #endif

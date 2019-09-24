@@ -52,6 +52,10 @@
 #define CREATE_TRACE_POINTS
 #include "sde_trace.h"
 
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+#include <linux/sec_debug.h>
+#endif
+
 /* defines for secure channel call */
 #define MEM_PROTECT_SD_CTRL_SWITCH 0x18
 #define MDP_DEVICE_ID            0x1A
@@ -828,6 +832,13 @@ static int _sde_kms_release_splash_buffer(unsigned int mem_addr,
 		return -EINVAL;
 	}
 
+#if defined(CONFIG_DISPLAY_SAMSUNG) && defined(CONFIG_SEC_DEBUG)
+	if (sec_debug_is_enabled()) {
+		pr_info("skip to free splash memory\n");
+		return 0;
+	}
+#endif
+
 	/* leave ramdump memory only if base address matches */
 	if (ramdump_base == mem_addr &&
 			ramdump_buffer_size <= splash_buffer_size) {
@@ -843,6 +854,7 @@ static int _sde_kms_release_splash_buffer(unsigned int mem_addr,
 		SDE_ERROR("continuous splash memory free failed:%d\n", ret);
 		return ret;
 	}
+	free_memsize_reserved(mem_addr, splash_buffer_size);
 	for (pfn_idx = pfn_start; pfn_idx < pfn_end; pfn_idx++)
 		free_reserved_page(pfn_to_page(pfn_idx));
 
@@ -2896,6 +2908,11 @@ end:
 	return 0;
 }
 
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+extern int ss_dsi_panel_event_handler(
+		int display_ndx, enum mdss_intf_events event, void *arg);
+#endif
+
 static const struct msm_kms_funcs kms_funcs = {
 	.hw_init         = sde_kms_hw_init,
 	.postinit        = sde_kms_postinit,
@@ -2925,6 +2942,10 @@ static const struct msm_kms_funcs kms_funcs = {
 	.get_address_space = _sde_kms_get_address_space,
 	.postopen = _sde_kms_post_open,
 	.check_for_splash = sde_kms_check_for_splash,
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	.ss_callback	= ss_dsi_panel_event_handler,
+#endif
 };
 
 /* the caller api needs to turn on clock before calling it */

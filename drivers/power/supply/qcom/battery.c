@@ -46,7 +46,9 @@
 #define PL_FCC_LOW_VOTER		"PL_FCC_LOW_VOTER"
 #define ICL_LIMIT_VOTER			"ICL_LIMIT_VOTER"
 #define FCC_STEPPER_VOTER		"FCC_STEPPER_VOTER"
+#if !defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 #define FCC_VOTER			"FCC_VOTER"
+#endif
 
 struct pl_data {
 	int			pl_mode;
@@ -425,6 +427,9 @@ ATTRIBUTE_GROUPS(batt_class);
 #define EFFICIENCY_PCT	80
 #define FCC_STEP_SIZE_UA 100000
 #define FCC_STEP_UPDATE_DELAY_MS 1000
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+#define FCC_STEP_UPDATE_TURBO_DELAY_MS 100
+#endif
 #define STEP_UP 1
 #define STEP_DOWN -1
 static void get_fcc_split(struct pl_data *chip, int total_ua,
@@ -756,7 +761,20 @@ static void fcc_stepper_work(struct work_struct *work)
 	if (chip->main_step_fcc_count) {
 		main_fcc += (FCC_STEP_SIZE_UA * chip->main_step_fcc_dir);
 		chip->main_step_fcc_count--;
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+		rc = power_supply_get_property(chip->usb_psy,
+			POWER_SUPPLY_PROP_INITIAL_RAMP, &pval);
+		if (rc < 0) {
+			pr_err("Couldn't get initial vbus ramp status, rc=%d\n", rc);
+			reschedule_ms = FCC_STEP_UPDATE_DELAY_MS;
+		}
+		else if (pval.intval)
+			reschedule_ms = FCC_STEP_UPDATE_TURBO_DELAY_MS;
+		else
+			reschedule_ms = FCC_STEP_UPDATE_DELAY_MS;
+#else
 		reschedule_ms = FCC_STEP_UPDATE_DELAY_MS;
+#endif
 	} else if (chip->main_step_fcc_residual) {
 		main_fcc += chip->main_step_fcc_residual;
 		chip->main_step_fcc_residual = 0;
@@ -766,7 +784,20 @@ static void fcc_stepper_work(struct work_struct *work)
 		parallel_fcc += (FCC_STEP_SIZE_UA *
 			chip->parallel_step_fcc_dir);
 		chip->parallel_step_fcc_count--;
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+		rc = power_supply_get_property(chip->usb_psy,
+			POWER_SUPPLY_PROP_INITIAL_RAMP, &pval);
+		if (rc < 0) {
+			pr_err("Couldn't get initial vbus ramp status, rc=%d\n", rc);
+			reschedule_ms = FCC_STEP_UPDATE_DELAY_MS;
+		}
+		else if (pval.intval)
+			reschedule_ms = FCC_STEP_UPDATE_TURBO_DELAY_MS;
+		else
+			reschedule_ms = FCC_STEP_UPDATE_DELAY_MS;	
+#else
 		reschedule_ms = FCC_STEP_UPDATE_DELAY_MS;
+#endif
 	} else if (chip->parallel_step_fcc_residual) {
 		parallel_fcc += chip->parallel_step_fcc_residual;
 		chip->parallel_step_fcc_residual = 0;
@@ -868,9 +899,11 @@ stepper_exit:
 	chip->main_fcc_ua = main_fcc;
 	chip->slave_fcc_ua = parallel_fcc;
 
+#if !defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 	if (chip->cp_ilim_votable)
 		vote(chip->cp_ilim_votable, FCC_VOTER, true,
 					chip->main_fcc_ua / 2);
+#endif
 
 	if (reschedule_ms) {
 		schedule_delayed_work(&chip->fcc_stepper_work,
@@ -988,7 +1021,11 @@ static int usb_icl_vote_callback(struct votable *votable, void *data,
 	vote(chip->pl_disable_votable, ICL_CHANGE_VOTER, false, 0);
 
 	if (chip->cp_ilim_votable)
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+		vote(chip->cp_ilim_votable, ICL_CHANGE_VOTER, true, (icl_ua * 10 / 8));
+#else
 		vote(chip->cp_ilim_votable, ICL_CHANGE_VOTER, true, icl_ua);
+#endif
 
 	return 0;
 }
@@ -1248,9 +1285,11 @@ static int pl_disable_vote_callback(struct votable *votable,
 				return rc;
 			}
 
+#if !defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 			if (chip->cp_ilim_votable)
 				vote(chip->cp_ilim_votable, FCC_VOTER, true,
 						total_fcc_ua / 2);
+#endif
 
 			/* reset parallel FCC */
 			chip->slave_fcc_ua = 0;

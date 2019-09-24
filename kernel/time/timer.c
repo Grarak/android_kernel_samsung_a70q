@@ -53,6 +53,8 @@
 
 #include "tick-internal.h"
 
+#include <linux/sec_debug.h>
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/timer.h>
 
@@ -1298,7 +1300,10 @@ static void call_timer_fn(struct timer_list *timer, void (*fn)(unsigned long),
 	lock_map_acquire(&lockdep_map);
 
 	trace_timer_expire_entry(timer);
+
+	secdbg_msg("timer %pS entry", fn);
 	fn(data);
+	secdbg_msg("timer %pS exit", fn);
 	trace_timer_expire_exit(timer);
 
 	lock_map_release(&lockdep_map);

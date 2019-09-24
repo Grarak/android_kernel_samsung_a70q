@@ -19,6 +19,10 @@
 #include "sde_formats.h"
 #include "sde_trace.h"
 
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+#include "ss_dsi_panel_common.h"
+#endif
+
 #define SDE_DEBUG_CMDENC(e, fmt, ...) SDE_DEBUG("enc%d intf%d " fmt, \
 		(e) && (e)->base.parent ? \
 		(e)->base.parent->base.id : -1, \
@@ -563,6 +567,10 @@ static int _sde_encoder_phys_cmd_handle_ppdone_timeout(
 			cmd_enc->pp_timeout_report_cnt,
 			pending_kickoff_cnt,
 			frame_event);
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	SS_XLOG(cmd_enc->pp_timeout_report_cnt);
+#endif
 
 	/* decrement the kickoff_cnt before checking for ESD status */
 	atomic_add_unless(&phys_enc->pending_kickoff_cnt, -1, 0);

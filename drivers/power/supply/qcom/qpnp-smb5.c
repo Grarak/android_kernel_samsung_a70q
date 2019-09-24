@@ -19,6 +19,8 @@
 #include <linux/power_supply.h>
 #include <linux/of.h>
 #include <linux/of_irq.h>
+#include <linux/gpio.h>
+#include <linux/of_gpio.h>
 #include <linux/log2.h>
 #include <linux/qpnp/qpnp-revid.h>
 #include <linux/regulator/driver.h>
@@ -29,6 +31,21 @@
 #include "smb5-reg.h"
 #include "smb5-lib.h"
 #include "schgm-flash.h"
+#include <linux/sec_class.h>
+#if defined(CONFIG_PM6150_SBU_VBUS_SHORT)
+#include "pm6150-sbu-vbus-short.h"
+#endif
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+#include "../../../battery_qc/include/sec_battery_qc.h"
+#endif
+#if defined(CONFIG_AFC)
+#include <linux/afc/pm6150-afc.h>
+#endif
+#if defined(CONFIG_USB_CCIC_NOTIFIER_USING_QC)
+extern bool get_is_usb(void);
+extern int get_factory_step_current(void);
+#include <linux/usb/typec/pm6150/pm6150_typec.h>
+#endif
 
 static struct smb_params smb5_pmi632_params = {
 	.fcc			= {
@@ -232,7 +249,11 @@ struct smb5 {
 	struct smb_dt_props	dt;
 };
 
-static int __debug_mask;
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+static int __debug_mask = 0xFF & ~PR_REGISTER;
+#else
+static int __debug_mask = 0xFF;
+#endif
 module_param_named(
 	debug_mask, __debug_mask, int, 0600
 );
@@ -253,9 +274,114 @@ enum {
 	CONN_THERM,
 	SMB_THERM,
 };
+/* Configurable SW Thermal Throttling for DEBUG*/
+static int __die_temp_rst_thresh = 1300;
+module_param_named(
+	die_temp_rst_thresh, __die_temp_rst_thresh, int, 0600
+);
+
+static int __die_temp_reg_h_thresh = 800;
+module_param_named(
+	die_temp_reg_h_thresh, __die_temp_reg_h_thresh, int, 0600
+);
+
+static int __die_temp_reg_l_thresh = 750;
+module_param_named(
+	die_temp_reg_l_thresh, __die_temp_reg_l_thresh, int, 0600
+);
+
+static int __connector_temp_shdn_thresh = 980;
+module_param_named(
+	connector_temp_shdn_thresh, __connector_temp_shdn_thresh, int, 0600
+);
+
+static int __connector_temp_rst_thresh = 970;
+module_param_named(
+	connector_temp_rst_thresh, __connector_temp_rst_thresh, int, 0600
+);
+
+static int __connector_temp_reg_h_thresh = 960;
+module_param_named(
+	connector_temp_reg_h_thresh, __connector_temp_reg_h_thresh, int, 0600
+);
+
+static int __connector_temp_reg_l_thresh = 950;
+module_param_named(
+	connector_temp_reg_l_thresh, __connector_temp_reg_l_thresh, int, 0600
+);
+
+static int __smb_temp_shdn_thresh = 1400;
+module_param_named(
+	smb_temp_shdn_thresh, __smb_temp_shdn_thresh, int, 0600
+);
+
+static int __smb_temp_rst_thresh = 1200;
+module_param_named(
+	smb_temp_rst_thresh, __smb_temp_rst_thresh, int, 0600
+);
+
+static int __smb_temp_reg_h_thresh = 800;
+module_param_named(
+	smb_temp_reg_h_thresh, __smb_temp_reg_h_thresh, int, 0600
+);
+
+static int __smb_temp_reg_l_thresh = 750;
+module_param_named(
+	smb_temp_reg_l_thresh, __smb_temp_reg_l_thresh, int, 0600
+);
+
+static int __skin_temp_shdn_thresh = 700;
+module_param_named(
+	skin_temp_shdn_thresh, __skin_temp_shdn_thresh, int, 0600
+);
+
+static int __skin_temp_rst_thresh = 600;
+module_param_named(
+	skin_temp_rst_thresh, __skin_temp_rst_thresh, int, 0600
+);
+
+static int __skin_temp_reg_h_thresh = 550;
+module_param_named(
+	skin_temp_reg_h_thresh, __skin_temp_reg_h_thresh, int, 0600
+);
+
+static int __skin_temp_reg_l_thresh = 500;
+module_param_named(
+	skin_temp_reg_l_thresh, __skin_temp_reg_l_thresh, int, 0600
+);
+
+static int __snarl_delay_alert = 1;
+module_param_named(
+	snarl_delay_alert, __snarl_delay_alert, int, 0600
+);
+
+static int __snarl_delay_above_range = 8;
+module_param_named(
+	snarl_delay_above_range, __snarl_delay_above_range, int, 0600
+);
+
+static int __snarl_delay_below_range = 8;
+module_param_named(
+	snarl_delay_below_range, __snarl_delay_below_range, int, 0600
+);
+
+static int __snarl_delay_within_range = 8;
+module_param_named(
+	snarl_delay_within_range, __snarl_delay_within_range, int, 0600
+);
+
+static int __throttling_current_inc = 100000;
+module_param_named(
+	throttling_current_inc, __throttling_current_inc, int, 0600
+);
+
+static int __throttling_current_dec = 100000;
+module_param_named(
+	throttling_current_dec, __throttling_current_dec, int, 0600
+);
 
 #define PMI632_MAX_ICL_UA	3000000
-#define PM6150_MAX_FCC_UA	3000000
+#define PM6150_MAX_FCC_UA	8000000
 static int smb5_chg_config_init(struct smb5 *chip)
 {
 	struct smb_charger *chg = &chip->chg;
@@ -295,7 +421,11 @@ static int smb5_chg_config_init(struct smb5 *chip)
 		chg->wa_flags |= SW_THERM_REGULATION_WA | CHG_TERMINATION_WA;
 		if (pmic_rev_id->rev4 >= 2)
 			chg->uusb_moisture_protection_enabled = true;
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+		chg->main_fcc_max = 0;
+#else
 		chg->main_fcc_max = PM6150_MAX_FCC_UA;
+#endif
 		break;
 	case PMI632_SUBTYPE:
 		chip->chg.smb_version = PMI632_SUBTYPE;
@@ -427,6 +557,12 @@ static int smb5_parse_dt(struct smb5 *chip)
 			"qcom,fcc-max-ua", &chip->dt.batt_profile_fcc_ua);
 	if (rc < 0)
 		chip->dt.batt_profile_fcc_ua = -EINVAL;
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	chg->main_fcc_max = 0;
+	
+	chg->hard_jeita_enabled = of_property_read_bool(node,
+				"qcom,hard-jeita-enable");
+#endif
 
 	rc = of_property_read_u32(node,
 				"qcom,fv-max-uv", &chip->dt.batt_profile_fv_uv);
@@ -451,6 +587,40 @@ static int smb5_parse_dt(struct smb5 *chip)
 
 	rc = of_property_read_u32(node, "qcom,chg-term-current-ma",
 			&chip->dt.term_current_thresh_hi_ma);
+
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	rc = of_property_read_u32(node, "qcom,jeita_cold_trigger",
+			&chg->jeita_cold_trigger);
+	if (rc < 0)
+		chg->jeita_cold_trigger = JEITA_COLD_TRIGGER;
+
+	rc = of_property_read_u32(node, "qcom,jeita_cold_release",
+			&chg->jeita_cold_release);
+	if (rc < 0)
+		chg->jeita_cold_release = JEITA_COLD_RELEASE;
+
+	rc = of_property_read_u32(node, "qcom,jeita_hot_trigger",
+			&chg->jeita_hot_trigger);
+	if (rc < 0)
+		chg->jeita_hot_trigger = JEITA_HOT_TRIGGER;
+
+	rc = of_property_read_u32(node, "qcom,jeita_hot_release",
+			&chg->jeita_hot_release);
+	if (rc < 0)
+		chg->jeita_hot_release = JEITA_HOT_RELEASE;
+
+	rc = of_property_read_u32(node, "qcom,default_pdp_limit_w",
+			&chg->default_pdp_limit_w);
+	if (rc < 0)
+		chg->default_pdp_limit_w = -EINVAL;
+	else
+		chg->pdp_limit_w = chg->default_pdp_limit_w - 1;
+	
+	rc = of_property_read_u32(node, "qcom,final_pdp_limit_w",
+			&chg->final_pdp_limit_w);
+	if (rc)
+		chg->final_pdp_limit_w = -EINVAL;
+#endif
 
 	if (chip->dt.term_current_src == ITERM_SRC_ADC)
 		rc = of_property_read_u32(node, "qcom,chg-term-base-current-ma",
@@ -487,6 +657,7 @@ static int smb5_parse_dt(struct smb5 *chip)
 
 	rc = of_property_read_u32(node, "qcom,float-option",
 						&chip->dt.float_option);
+
 	if (!rc && (chip->dt.float_option < 0 || chip->dt.float_option > 4)) {
 		pr_err("qcom,float-option is out of range [0, 4]\n");
 		return -EINVAL;
@@ -510,8 +681,13 @@ static int smb5_parse_dt(struct smb5 *chip)
 	chip->dt.auto_recharge_soc = -EINVAL;
 	rc = of_property_read_u32(node, "qcom,auto-recharge-soc",
 				&chip->dt.auto_recharge_soc);
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	if (!rc && (chip->dt.auto_recharge_soc != -EINVAL) &&
+			(chip->dt.auto_recharge_soc < 0 || chip->dt.auto_recharge_soc > 100)) {
+#else
 	if (!rc && (chip->dt.auto_recharge_soc < 0 ||
 			chip->dt.auto_recharge_soc > 100)) {
+#endif
 		pr_err("qcom,auto-recharge-soc is incorrect\n");
 		return -EINVAL;
 	}
@@ -524,6 +700,7 @@ static int smb5_parse_dt(struct smb5 *chip)
 		pr_err("qcom,auto-recharge-vbat-mv is incorrect\n");
 		return -EINVAL;
 	}
+	chg->auto_recharge_vbat_mv = chip->dt.auto_recharge_vbat_mv;
 
 	chg->dcp_icl_ua = chip->dt.usb_icl_ua;
 
@@ -537,6 +714,9 @@ static int smb5_parse_dt(struct smb5 *chip)
 
 	chg->fcc_stepper_enable = of_property_read_bool(node,
 					"qcom,fcc-stepping-enable");
+					
+	chg->wdog_snarl_based_step_chg = of_property_read_bool(node,
+					"qcom,wdog-snarl-based-step-chg");
 
 	chg->uusb_moisture_protection_enabled =
 				chg->uusb_moisture_protection_enabled &&
@@ -609,6 +789,17 @@ static int smb5_parse_dt(struct smb5 *chip)
 
 	chip->dt.disable_suspend_on_collapse = of_property_read_bool(node,
 					"qcom,disable-suspend-on-collapse");
+					
+#if defined(CONFIG_PM6150_WATER_DETECT)
+	chg->water_det_en = of_property_read_bool(node, "water-det-enable");
+	pr_info("chg->water_det_en = %d\n", chg->water_det_en);	
+	
+	chg->hiccup_gpio = of_get_named_gpio(node, "hiccup-gpio", 0);
+	rc = gpio_request(chg->hiccup_gpio, "hiccup-gpio");	
+	if(unlikely(rc))
+		return rc;
+#endif //CONFIG_PM6150_WATER_DETECT
+					
 	return 0;
 }
 
@@ -647,7 +838,18 @@ static enum power_supply_property smb5_usb_props[] = {
 	POWER_SUPPLY_PROP_HVDCP_OPTI_ALLOWED,
 	POWER_SUPPLY_PROP_QC_OPTI_DISABLE,
 	POWER_SUPPLY_PROP_THERM_ICL_LIMIT,
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	POWER_SUPPLY_PROP_PDP_LIMIT_W,
+	POWER_SUPPLY_PROP_INITIAL_RAMP,
+#endif
+	POWER_SUPPLY_PROP_VPH_VOLTAGE,
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	POWER_SUPPLY_PROP_VOLTAGE_MAX_LIMIT,
+#endif
 };
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+extern unsigned int lpcharge;
+#endif
 
 static int smb5_usb_get_prop(struct power_supply *psy,
 		enum power_supply_property psp,
@@ -657,6 +859,11 @@ static int smb5_usb_get_prop(struct power_supply *psy,
 	struct smb_charger *chg = &chip->chg;
 	union power_supply_propval pval;
 	int rc = 0;
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	enum power_supply_ext_property ext_psp = (enum power_supply_ext_property)psp;
+	int curr = 0;
+#endif
+
 	val->intval = 0;
 
 	switch (psp) {
@@ -664,19 +871,42 @@ static int smb5_usb_get_prop(struct power_supply *psy,
 		rc = smblib_get_prop_usb_present(chg, val);
 		break;
 	case POWER_SUPPLY_PROP_ONLINE:
-		rc = smblib_get_prop_usb_online(chg, val);
-		if (!val->intval)
-			break;
-
-		if (((chg->typec_mode == POWER_SUPPLY_TYPEC_SOURCE_DEFAULT) ||
-		   (chg->connector_type == POWER_SUPPLY_CONNECTOR_MICRO_USB))
-			&& (chg->real_charger_type == POWER_SUPPLY_TYPE_USB))
-			val->intval = 0;
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+		curr = get_effective_result(chg->usb_icl_votable);
+		pr_info("lp charge = %d,USB_ICL Vote = %d\n",lpcharge,curr);
+		if( lpcharge && !curr)
+		{
+			pr_info("Low Power Mode with 0 input current\n");
+			rc = smblib_get_prop_usb_present(chg, val);
+		}
 		else
-			val->intval = 1;
+		{
+			rc = smblib_get_prop_usb_online(chg, val);
+		}
+#else
+		rc = smblib_get_prop_usb_online(chg, val);
+#endif
+			if (!val->intval)
+				break;
 
-		if (chg->real_charger_type == POWER_SUPPLY_TYPE_UNKNOWN)
-			val->intval = 0;
+			if (((chg->typec_mode == POWER_SUPPLY_TYPEC_SOURCE_DEFAULT) ||
+			(chg->connector_type == POWER_SUPPLY_CONNECTOR_MICRO_USB))
+				&& (chg->real_charger_type == POWER_SUPPLY_TYPE_USB))
+				val->intval = 0;
+#if defined(CONFIG_USB_CCIC_NOTIFIER_USING_QC)
+			else {
+				if (get_is_usb())
+					val->intval = 0;
+				else
+					val->intval = 1;
+			}
+#else
+			else
+				val->intval = 1;
+#endif
+
+			if (chg->real_charger_type == POWER_SUPPLY_TYPE_UNKNOWN)
+				val->intval = 0;
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
 		rc = smblib_get_prop_usb_voltage_max(chg, val);
@@ -793,6 +1023,7 @@ static int smb5_usb_get_prop(struct power_supply *psy,
 		val->intval = chg->moisture_present;
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_VPH:
+	case POWER_SUPPLY_PROP_VPH_VOLTAGE:
 		rc = smblib_get_prop_vph_voltage_now(chg, val);
 		break;
 	case POWER_SUPPLY_PROP_HVDCP_OPTI_ALLOWED:
@@ -809,6 +1040,35 @@ static int smb5_usb_get_prop(struct power_supply *psy,
 		val->intval = get_client_vote(chg->usb_icl_votable,
 					THERMAL_THROTTLE_VOTER);
 		break;
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	case POWER_SUPPLY_PROP_PDP_LIMIT_W:
+		val->intval = chg->pdp_limit_w;
+		break;
+	case POWER_SUPPLY_PROP_INITIAL_RAMP:
+		val->intval = chg->initial_ramp;
+		break;
+	case POWER_SUPPLY_PROP_VOLTAGE_MAX_LIMIT:
+		if (chg->hv_disable)
+			val->intval = MICRO_5V;
+		else
+			val->intval = chg->input_voltage_limit;
+		break;
+	case POWER_SUPPLY_PROP_MAX ... POWER_SUPPLY_EXT_PROP_MAX:
+		switch (ext_psp) {
+		case POWER_SUPPLY_EXT_FIXED_RECHARGE_VBAT:
+			val->intval = chip->dt.auto_recharge_vbat_mv;
+			break;
+		case POWER_SUPPLY_EXT_PROP_SW_CURRENT_MAX:
+			rc = smblib_get_charge_param(chg, &chg->param.usb_icl, &val->intval);
+			break;
+		case POWER_SUPPLY_EXT_PROP_HV_DISABLE:
+			val->intval = chg->hv_disable;
+			break;
+		default:
+			rc = -EINVAL;
+		}
+		break;
+#endif
 	default:
 		pr_err("get prop %d is not supported in usb\n", psp);
 		rc = -EINVAL;
@@ -830,6 +1090,9 @@ static int smb5_usb_set_prop(struct power_supply *psy,
 	struct smb5 *chip = power_supply_get_drvdata(psy);
 	struct smb_charger *chg = &chip->chg;
 	int icl, rc = 0;
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	enum power_supply_ext_property ext_psp = (enum power_supply_ext_property)psp;
+#endif
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_PD_CURRENT_MAX:
@@ -874,13 +1137,92 @@ static int smb5_usb_set_prop(struct power_supply *psy,
 		power_supply_changed(chg->usb_psy);
 		break;
 	case POWER_SUPPLY_PROP_THERM_ICL_LIMIT:
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+		if(val->intval == 0) {
+			/* Throttle Exit, disable vote */
+			rc = vote(chg->usb_icl_votable, THERMAL_THROTTLE_VOTER, false, 0);
+		}
+		else {
+			if (is_client_vote_enabled(chg->usb_icl_votable,
+											THERMAL_THROTTLE_VOTER)) {
+				/* Throttling in progress, base stepping on previous vote */
+				icl = get_client_vote(chg->usb_icl_votable,
+								THERMAL_THROTTLE_VOTER);
+			}
+			else {
+				/* Throttling entry, use current ICL as base for first step */
+				icl = get_effective_result(chg->usb_icl_votable);
+			}
+
+			if ((icl + val->intval) < 500000) //Limit throttling to 500mA minimum
+				rc = vote(chg->usb_icl_votable, THERMAL_THROTTLE_VOTER,
+						true, 500000);
+			else
+				rc = vote(chg->usb_icl_votable, THERMAL_THROTTLE_VOTER,
+						true, icl + val->intval);
+		}
+#else
 		icl = get_effective_result(chg->usb_icl_votable);
 		if ((icl + val->intval) > 0)
 			rc = vote(chg->usb_icl_votable, THERMAL_THROTTLE_VOTER,
 					true, icl + val->intval);
 		else
 			rc = -EINVAL;
+#endif
 		break;
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	case POWER_SUPPLY_PROP_PDP_LIMIT_W:
+		if (chg->pdp_limit_w > 0) {
+#if defined(CONFIG_SEC_A90Q_PROJECT)
+			union power_supply_propval soc_val = {0, };
+
+			smblib_get_prop_from_bms(chg, POWER_SUPPLY_PROP_CAPACITY, &soc_val);
+			if (soc_val.intval < 55) {
+#endif
+			mutex_lock(&chg->pdp_limit_w_lock);
+			chg->pdp_limit_w = val->intval;
+			chg->pdp_limit_w_set_time = ktime_to_ms(ktime_get_boottime());
+			pr_info("[%s] pdp_limit_w : %d\n", __func__, chg->pdp_limit_w);
+			mutex_unlock(&chg->pdp_limit_w_lock);
+#if defined(CONFIG_SEC_A90Q_PROJECT)
+			}
+			else {
+				pr_info("[%s] fix pdp_limit_w (%dw). soc(%d)\n", __func__, chg->final_pdp_limit_w, soc_val.intval);
+				chg->pdp_limit_w = chg->final_pdp_limit_w;
+			}
+#endif
+		}
+		break;
+	case POWER_SUPPLY_PROP_INITIAL_RAMP:
+		chg->initial_ramp = val->intval;
+		break;	
+	case POWER_SUPPLY_PROP_VOLTAGE_MAX_LIMIT:
+		chg->input_voltage_limit = val->intval;
+		pr_info("hv_disable(%d), set input_voltage_limit: %d\n",
+				chg->hv_disable, chg->input_voltage_limit);
+		break;
+	case POWER_SUPPLY_PROP_MAX ... POWER_SUPPLY_EXT_PROP_MAX:
+		switch (ext_psp) {
+			case POWER_SUPPLY_EXT_FIXED_RECHARGE_VBAT:
+				chip->dt.auto_recharge_vbat_mv = val->intval;
+				break;
+			case POWER_SUPPLY_EXT_PROP_HV_DISABLE:
+				if (val->intval == HV_DISABLE) {
+					chg->hv_disable = true;
+					vote(chg->usb_icl_votable, SEC_BATTERY_DISABLE_HV_VOTER,
+							true, 1800000);
+					/* SKB will change 1800000 to DCP_CURRENT_UA after CS6 merge. */
+				} else {
+					chg->hv_disable = false;
+					vote(chg->usb_icl_votable, SEC_BATTERY_DISABLE_HV_VOTER,
+							false, 0);
+				}
+				break;
+			default:
+				rc = -EINVAL;
+		}
+		break;
+#endif
 	default:
 		pr_err("set prop %d is not supported\n", psp);
 		rc = -EINVAL;
@@ -897,6 +1239,10 @@ static int smb5_usb_prop_is_writeable(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_CTM_CURRENT_MAX:
 	case POWER_SUPPLY_PROP_CONNECTOR_HEALTH:
 	case POWER_SUPPLY_PROP_THERM_ICL_LIMIT:
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	case POWER_SUPPLY_PROP_PDP_LIMIT_W:
+	case POWER_SUPPLY_PROP_INITIAL_RAMP:
+#endif
 		return 1;
 	default:
 		break;
@@ -950,13 +1296,31 @@ static int smb5_usb_port_get_prop(struct power_supply *psy,
 	struct smb5 *chip = power_supply_get_drvdata(psy);
 	struct smb_charger *chg = &chip->chg;
 	int rc = 0;
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	int curr = 0;
+#endif
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_TYPE:
 		val->intval = POWER_SUPPLY_TYPE_USB;
 		break;
 	case POWER_SUPPLY_PROP_ONLINE:
-		rc = smblib_get_prop_usb_online(chg, val);
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+        curr = get_effective_result(chg->usb_icl_votable);
+        pr_info("smb5_usb_port_get_prop:lp charge = %d,USB_ICL Vote = %d\n",lpcharge,curr);
+        if( lpcharge && !curr)
+        {
+            pr_info("Low Power Mode with 0 input current\n");
+            rc = smblib_get_prop_usb_present(chg, val);
+        }
+        else
+        {
+            rc = smblib_get_prop_usb_online(chg, val);
+        }
+#else
+        rc = smblib_get_prop_usb_online(chg, val);
+#endif
+
 		if (!val->intval)
 			break;
 
@@ -964,8 +1328,17 @@ static int smb5_usb_port_get_prop(struct power_supply *psy,
 		   (chg->connector_type == POWER_SUPPLY_CONNECTOR_MICRO_USB))
 			&& (chg->real_charger_type == POWER_SUPPLY_TYPE_USB))
 			val->intval = 1;
+#if defined(CONFIG_USB_CCIC_NOTIFIER_USING_QC)
+		else {
+			if (get_is_usb())
+				val->intval = 1;
+			else
+				val->intval = 0;
+		}
+#else
 		else
 			val->intval = 0;
+#endif
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
 		val->intval = 5000000;
@@ -1348,6 +1721,9 @@ static enum power_supply_property smb5_batt_props[] = {
 	POWER_SUPPLY_PROP_STATUS,
 	POWER_SUPPLY_PROP_HEALTH,
 	POWER_SUPPLY_PROP_PRESENT,
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	POWER_SUPPLY_PROP_ONLINE,
+#endif
 	POWER_SUPPLY_PROP_CHARGE_TYPE,
 	POWER_SUPPLY_PROP_CAPACITY,
 	POWER_SUPPLY_PROP_CHARGER_TEMP,
@@ -1357,6 +1733,7 @@ static enum power_supply_property smb5_batt_props[] = {
 	POWER_SUPPLY_PROP_VOLTAGE_MAX,
 	POWER_SUPPLY_PROP_VOLTAGE_QNOVO,
 	POWER_SUPPLY_PROP_CURRENT_NOW,
+	POWER_SUPPLY_PROP_CURRENT_AVG,
 	POWER_SUPPLY_PROP_CURRENT_QNOVO,
 	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX,
 	POWER_SUPPLY_PROP_CHARGE_TERM_CURRENT,
@@ -1378,25 +1755,61 @@ static enum power_supply_property smb5_batt_props[] = {
 	POWER_SUPPLY_PROP_CHARGE_FULL,
 	POWER_SUPPLY_PROP_FORCE_RECHARGE,
 	POWER_SUPPLY_PROP_FCC_STEPPER_ENABLE,
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	POWER_SUPPLY_PROP_SKIP_MODE_STATUS,
+	POWER_SUPPLY_PROP_RECHARGE_VBAT,
+	POWER_SUPPLY_PROP_SS_FACTORY_MODE,
+#endif
 };
 
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+#define DIV_FACTOR_DECIDEGC	100
+#endif
 static int smb5_batt_get_prop(struct power_supply *psy,
 		enum power_supply_property psp,
 		union power_supply_propval *val)
 {
 	struct smb_charger *chg = power_supply_get_drvdata(psy);
 	int rc = 0;
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	enum power_supply_ext_property ext_psp = (enum power_supply_ext_property)psp;
+	int health = 0;
+	u8 data;
+#endif
 
 	switch (psp) {
 	case POWER_SUPPLY_PROP_STATUS:
 		rc = smblib_get_prop_batt_status(chg, val);
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+		if((chg->last_capacity != 100) && (val->intval == POWER_SUPPLY_STATUS_FULL))
+			val->intval = POWER_SUPPLY_STATUS_CHARGING;
+#endif
 		break;
 	case POWER_SUPPLY_PROP_HEALTH:
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+		health = get_battery_health();
+		if (health == POWER_SUPPLY_HEALTH_SAFETY_TIMER_EXPIRE) {
+			val->intval = POWER_SUPPLY_HEALTH_SAFETY_TIMER_EXPIRE;
+		} else {
+			rc = smblib_get_prop_batt_health(chg, val);
+			if (val->intval == POWER_SUPPLY_HEALTH_COOL || val->intval == POWER_SUPPLY_HEALTH_WARM)
+				val->intval = POWER_SUPPLY_HEALTH_GOOD;
+		}
+#else
 		rc = smblib_get_prop_batt_health(chg, val);
+#endif
 		break;
 	case POWER_SUPPLY_PROP_PRESENT:
 		rc = smblib_get_prop_batt_present(chg, val);
 		break;
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	case POWER_SUPPLY_PROP_ONLINE:
+		if (chg->real_charger_type == POWER_SUPPLY_TYPE_UNKNOWN)
+			val->intval = POWER_SUPPLY_TYPE_BATTERY;
+		else
+			val->intval = chg->real_charger_type;
+		break;
+#endif
 	case POWER_SUPPLY_PROP_INPUT_SUSPEND:
 		rc = smblib_get_prop_input_suspend(chg, val);
 		break;
@@ -1405,6 +1818,9 @@ static int smb5_batt_get_prop(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
 		rc = smblib_get_prop_batt_capacity(chg, val);
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+		chg->last_capacity = val->intval;
+#endif
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT:
 		rc = smblib_get_prop_system_temp_level(chg, val);
@@ -1439,7 +1855,17 @@ static int smb5_batt_get_prop(struct power_supply *psy,
 		val->intval = get_client_vote_locked(chg->fv_votable,
 				QNOVO_VOTER);
 		break;
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	case POWER_SUPPLY_PROP_RECHARGE_VBAT:
+		val->intval = chg->auto_recharge_vbat_mv;
+		break;
+	case POWER_SUPPLY_PROP_SS_FACTORY_MODE:
+		/* To disable deamon ss_factory_mode */
+		val->intval = 0; 
+		break; 
+#endif
 	case POWER_SUPPLY_PROP_CURRENT_NOW:
+	case POWER_SUPPLY_PROP_CURRENT_AVG:
 		rc = smblib_get_prop_from_bms(chg,
 				POWER_SUPPLY_PROP_CURRENT_NOW, val);
 		if (!rc)
@@ -1509,6 +1935,78 @@ static int smb5_batt_get_prop(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_FCC_STEPPER_ENABLE:
 		val->intval = chg->fcc_stepper_enable;
 		break;
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	case POWER_SUPPLY_PROP_SKIP_MODE_STATUS:
+		rc = smblib_get_prop_skip_mode_status(chg, val);
+		break;
+	case POWER_SUPPLY_PROP_MAX ... POWER_SUPPLY_EXT_PROP_MAX:
+		switch (ext_psp) {
+		case POWER_SUPPLY_EXT_PROP_BATT_CHG_TEMP:
+			{
+				int temp_adc = 0, temp_data = 0;
+				if (sec_bat_use_chg_temp_adc_table()) {
+					rc = iio_read_channel_raw(chg->iio.die_temp_chan, &temp_adc);
+					if (rc < 0) {
+						pr_err("Failed reading CHG_TEMP(DIE_TEMP) ADC RAW. rc=%d\n", rc);
+						return rc;
+					}
+					pr_debug("%s: chg_temp_adc_raw = %d\n", __func__, temp_adc);
+			
+					temp_data = sec_bat_convert_adc_to_temp(SEC_BAT_ADC_CHANNEL_CHG_TEMP, temp_adc);
+					chg->die_temp = temp_data;
+				}
+				else {
+					rc = smblib_read_iio_channel(chg, chg->iio.die_temp_chan,
+							DIV_FACTOR_DECIDEGC, &chg->die_temp);
+				}
+#if defined(CONFIG_ENG_BATTERY_CONCEPT)
+				if (chg->batt_test_chg_temp > (-500))
+					chg->die_temp = chg->batt_test_chg_temp;
+#endif
+			}
+			val->intval = chg->die_temp;
+			break;
+		case POWER_SUPPLY_EXT_PROP_BATT_TEMP_ADC:
+			iio_read_channel_raw(chg->iio.die_temp_chan, &val->intval);
+			break;
+		case POWER_SUPPLY_EXT_PROP_DIRECT_CHARGING_STEP:
+			val->intval = chg->direct_charging_step;
+			break;
+		case POWER_SUPPLY_EXT_PROP_DIRECT_CHARGING_VOL:
+			val->intval = chg->direct_charging_vol;
+			break;
+		case POWER_SUPPLY_EXT_PROP_CHIP_ID:
+			rc = smblib_read(chg, REVID_PERPH_TYPE, &data);
+			if (rc < 0) {
+				dev_err(chg->dev, "Couldn't read CHIP ID rc=%d\n", rc);
+				val->intval = 0;
+			}
+			pr_info("%s: PM6150 CHIP ID(0x%x)\n", __func__, data);
+			if (data == REVID_PERPH_TYPE_RESET) /* 0x51 means pm6150 chip id */
+				val->intval = 1;
+			else
+				val->intval = 0;
+			break;
+		case POWER_SUPPLY_EXT_PROP_CHG_SWELLING_STATE:
+			val->intval = chg->swelling_states;
+			break;
+		case POWER_SUPPLY_EXT_PROP_CHARGE_CURRENT:
+			val->intval = get_effective_result(chg->fcc_votable);
+			break;
+#if defined(CONFIG_AFC)
+		case POWER_SUPPLY_EXT_PROP_AFC_RESULT:
+			if (chg->afc_sts >= AFC_5V)
+                        	val->intval = 1;
+                        else
+                        	val->intval = 0;
+
+			break;
+#endif
+		default:
+			rc = -EINVAL;
+		}
+		break;
+#endif
 	default:
 		pr_err("batt power supply prop %d not supported\n", psp);
 		return -EINVAL;
@@ -1528,6 +2026,9 @@ static int smb5_batt_set_prop(struct power_supply *psy,
 {
 	int rc = 0;
 	struct smb_charger *chg = power_supply_get_drvdata(psy);
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	enum power_supply_ext_property ext_psp = (enum power_supply_ext_property)prop;
+#endif
 
 	switch (prop) {
 	case POWER_SUPPLY_PROP_STATUS:
@@ -1542,6 +2043,12 @@ static int smb5_batt_set_prop(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_CAPACITY:
 		rc = smblib_set_prop_batt_capacity(chg, val);
 		break;
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	case POWER_SUPPLY_PROP_SW_JEITA_ENABLED:
+		pr_info("%s: SW_JEITA_ENABLED(%d)\n", __func__, val->intval);
+		chg->sw_jeita_enabled = val->intval;
+		break;
+#endif
 	case POWER_SUPPLY_PROP_PARALLEL_DISABLE:
 		vote(chg->pl_disable_votable, USER_VOTER, (bool)val->intval, 0);
 		break;
@@ -1553,6 +2060,19 @@ static int smb5_batt_set_prop(struct power_supply *psy,
 		vote(chg->fv_votable, QNOVO_VOTER, (val->intval >= 0),
 			val->intval);
 		break;
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	case POWER_SUPPLY_PROP_RECHARGE_VBAT:
+		rc = smblib_set_prop_rechg_vbat_thresh(chg, val);
+		break;
+	case POWER_SUPPLY_PROP_SS_FACTORY_MODE:
+		chg->charging_test_mode = val->intval;
+		if (chg->charging_test_mode) 
+			vote(chg->fcc_votable, SEC_SS_FACTORY_VOTER, true, get_factory_step_current());
+		else 
+			vote(chg->fcc_votable, SEC_SS_FACTORY_VOTER, false, 0);
+		pr_err("POWER_SUPPLY_PROP_SS_FACTORY_MODE %d, charging current: %d\n", chg->charging_test_mode, get_factory_step_current());
+		break; 
+#endif
 	case POWER_SUPPLY_PROP_STEP_CHARGING_ENABLED:
 		chg->step_chg_enabled = !!val->intval;
 		break;
@@ -1574,8 +2094,10 @@ static int smb5_batt_set_prop(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_SET_SHIP_MODE:
 		/* Not in ship mode as long as the device is active */
+#if !defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 		if (!val->intval)
 			break;
+#endif
 		if (chg->pl.psy)
 			power_supply_set_property(chg->pl.psy,
 				POWER_SUPPLY_PROP_SET_SHIP_MODE, val);
@@ -1610,6 +2132,47 @@ static int smb5_batt_set_prop(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_FCC_STEPPER_ENABLE:
 		chg->fcc_stepper_enable = val->intval;
 		break;
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	case POWER_SUPPLY_PROP_MAX ... POWER_SUPPLY_EXT_PROP_MAX:
+		switch (ext_psp) {
+		case POWER_SUPPLY_EXT_PROP_BATT_FET_CONTROL:
+			smblib_force_off_batfet_bodydiode(chg, val->intval);
+			break;
+#if defined(CONFIG_ENG_BATTERY_CONCEPT)
+		case POWER_SUPPLY_EXT_PROP_CHG_TEMP_TEST:
+			chg->batt_test_chg_temp = val->intval;
+			break;
+#endif
+		case POWER_SUPPLY_EXT_PROP_DIRECT_CHARGING_STEP:
+			chg->direct_charging_step = val->intval;
+			break;
+		case POWER_SUPPLY_EXT_PROP_DIRECT_CHARGING_VOL:
+			chg->direct_charging_vol = val->intval;
+			break;
+#if defined(CONFIG_AFC)
+		case POWER_SUPPLY_EXT_PROP_AFC_RESULT:
+			is_afc_result(chg, val->intval);
+			break;
+#endif
+		case POWER_SUPPLY_EXT_PROP_DCHG_ENABLE:
+			pr_info("%s: DCHG SMB_EN pin %s\n", __func__, val->intval ? "ENABLE" : "DISABLE");
+			rc = smblib_masked_write(chg, MISC_SMB_EN_CMD_REG,
+				SMB_EN_OVERRIDE_BIT | SMB_EN_OVERRIDE_VALUE_BIT,
+				val->intval ? (SMB_EN_OVERRIDE_BIT | SMB_EN_OVERRIDE_VALUE_BIT) : 0);
+			if (rc < 0)
+				pr_err("%s: smblib dchg enable/disable fail(%d)\n", __func__, rc);
+			break;
+		case POWER_SUPPLY_EXT_PROP_CHG_SWELLING_STATE:
+			if (chg->swelling_states == swelling_index[swelling_type][JEITA_NORMAL] && val->intval != swelling_index[swelling_type][JEITA_NORMAL])
+				sec_bat_safety_timer_reset();
+			chg->swelling_states = val->intval;
+			power_supply_changed(chg->batt_psy);
+			break;
+		default:
+			rc = -EINVAL;
+		}
+		break;
+#endif
 	default:
 		rc = -EINVAL;
 	}
@@ -1667,6 +2230,88 @@ static int smb5_init_batt_psy(struct smb5 *chip)
 
 	return rc;
 }
+
+
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+/*************************
+ * OTG PSY REGISTRATION *
+ *************************/
+static enum power_supply_property smb5_otg_props[] = {
+	POWER_SUPPLY_PROP_ONLINE,
+	POWER_SUPPLY_PROP_VOLTAGE_NOW,
+};
+
+static int smb5_otg_get_prop(struct power_supply *psy,
+				enum power_supply_property psp,
+				union power_supply_propval *val)
+{
+	struct smb_charger *chg = power_supply_get_drvdata(psy);
+
+	switch (psp) {
+	case POWER_SUPPLY_PROP_ONLINE:
+		val->intval = smblib_vbus_regulator_is_enabled(chg->vbus_vreg->rdev);
+		break;
+	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
+		smblib_get_prop_otg_voltage_now(chg, val);
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int smb5_otg_set_prop(struct power_supply *psy,
+				enum power_supply_property psp,
+				const union power_supply_propval *val)
+{
+	int rc = 0;
+	struct smb_charger *chg = power_supply_get_drvdata(psy);
+
+	switch (psp) {
+	case POWER_SUPPLY_PROP_ONLINE:
+		pr_info("%s: CHGIN-OTG %s\n", __func__, val->intval > 0 ? "on" : "off");
+		if(val->intval)
+			rc = smblib_vbus_regulator_enable(chg->vbus_vreg->rdev);
+		else
+			rc = smblib_vbus_regulator_disable(chg->vbus_vreg->rdev);
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static const struct power_supply_desc otg_psy_desc = {
+	.name			= "otg",
+	.type			= POWER_SUPPLY_TYPE_OTG,
+	.get_property	= smb5_otg_get_prop,
+	.set_property	= smb5_otg_set_prop,
+	.properties		= smb5_otg_props,
+	.num_properties	= ARRAY_SIZE(smb5_otg_props),
+};
+
+static int smb5_init_otg_psy(struct smb5 *chip)
+{
+	struct power_supply_config otg_cfg = {};
+	struct smb_charger *chg = &chip->chg;
+	int rc = 0;
+
+	otg_cfg.drv_data = chg;
+	otg_cfg.of_node = chg->dev->of_node;
+	chg->batt_psy = devm_power_supply_register(chg->dev,
+					   &otg_psy_desc,
+					   &otg_cfg);
+	if (IS_ERR(chg->otg_psy)) {
+		pr_err("Couldn't register battery power supply\n");
+		return PTR_ERR(chg->otg_psy);
+	}
+
+	return rc;
+}
+
+#endif
 
 /******************************
  * VBUS REGULATOR REGISTRATION *
@@ -2155,11 +2800,15 @@ static int smb5_init_hw(struct smb5 *chip)
 	 * knob to turn it on if required. Additionally, if specified in DT,
 	 * disable HVDCP and HVDCP authentication algorithm.
 	 */
+#if defined(CONFIG_AFC)
+	val = 0;
+#else
 	val = (chg->hvdcp_disable) ? 0 :
 		(HVDCP_AUTH_ALG_EN_CFG_BIT | HVDCP_EN_BIT);
 	if (chip->dt.hvdcp_autonomous)
 		val |= HVDCP_AUTONOMOUS_MODE_EN_CFG_BIT;
 
+#endif
 	rc = smblib_masked_write(chg, USBIN_OPTIONS_1_CFG_REG,
 			(HVDCP_AUTH_ALG_EN_CFG_BIT | HVDCP_EN_BIT |
 			 HVDCP_AUTONOMOUS_MODE_EN_CFG_BIT),
@@ -2168,6 +2817,16 @@ static int smb5_init_hw(struct smb5 *chip)
 		dev_err(chg->dev, "Couldn't configure HVDCP rc=%d\n", rc);
 		return rc;
 	}
+
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	rc = smblib_write(chg, USBIN_ADAPTER_ALLOW_CFG_REG, USBIN_ADAPTER_ALLOW_5V_TO_12V);
+	if (rc < 0) {
+		dev_err(chg->dev, "Couldn't write 0x%02x to USBIN_ADAPTER_ALLOW_CFG rc=%d\n",
+			USBIN_ADAPTER_ALLOW_5V_TO_12V, rc);
+		return rc;
+	}
+#endif
+
 
 	/*
 	 * PMI632 can have the connector type defined by a dedicated register
@@ -2240,6 +2899,7 @@ static int smb5_init_hw(struct smb5 *chip)
 	/* vote 0mA on usb_icl for non battery platforms */
 	vote(chg->usb_icl_votable,
 		DEFAULT_VOTER, chip->dt.no_battery, 0);
+	pr_info("%s: usb_icl_votable \n", __func__);
 	vote(chg->dc_suspend_votable,
 		DEFAULT_VOTER, chip->dt.no_battery, 0);
 	vote(chg->fcc_votable, HW_LIMIT_VOTER,
@@ -2269,7 +2929,14 @@ static int smb5_init_hw(struct smb5 *chip)
 	if (chg->smb_version != PMI632_SUBTYPE) {
 		mask = USBIN_AICL_PERIODIC_RERUN_EN_BIT | USBIN_AICL_ADC_EN_BIT
 			| USBIN_AICL_EN_BIT | SUSPEND_ON_COLLAPSE_USBIN_BIT;
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC) && defined(CONFIG_SEC_FACTORY)
+		if(factory_mode)
+			val = USBIN_AICL_PERIODIC_RERUN_EN_BIT;
+		else
+			val = USBIN_AICL_PERIODIC_RERUN_EN_BIT | USBIN_AICL_EN_BIT;
+#else
 		val = USBIN_AICL_PERIODIC_RERUN_EN_BIT | USBIN_AICL_EN_BIT;
+#endif
 		if (!chip->dt.disable_suspend_on_collapse)
 			val |= SUSPEND_ON_COLLAPSE_USBIN_BIT;
 
@@ -2313,7 +2980,9 @@ static int smb5_init_hw(struct smb5 *chip)
 	else
 		val |= (chip->dt.wd_snarl_time_cfg << SNARL_WDOG_TIMEOUT_SHIFT)
 			& SNARL_WDOG_TIMEOUT_MASK;
-
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	val |= BITE_WDOG_DISABLE_CHARGING_CFG_BIT;
+#endif
 	rc = smblib_masked_write(chg, SNARL_BARK_BITE_WD_CFG_REG,
 			BITE_WDOG_DISABLE_CHARGING_CFG_BIT |
 			SNARL_WDOG_TIMEOUT_MASK | BARK_WDOG_TIMEOUT_MASK |
@@ -2324,13 +2993,17 @@ static int smb5_init_hw(struct smb5 *chip)
 		return rc;
 	}
 
+	val = WDOG_TIMER_EN_ON_PLUGIN_BIT;
+
+	/* Disable WDOG BARK interrupt if WDOG SNARL is used for step chg */
+	if (!chg->wdog_snarl_based_step_chg)
+		val |= BARK_WDOG_INT_EN_BIT;
+
 	/* enable WD BARK and enable it on plugin */
 	rc = smblib_masked_write(chg, WD_CFG_REG,
 			WATCHDOG_TRIGGER_AFP_EN_BIT |
 			WDOG_TIMER_EN_ON_PLUGIN_BIT |
-			BARK_WDOG_INT_EN_BIT,
-			WDOG_TIMER_EN_ON_PLUGIN_BIT |
-			BARK_WDOG_INT_EN_BIT);
+			BARK_WDOG_INT_EN_BIT, val);
 	if (rc < 0) {
 		pr_err("Couldn't configue WD config rc=%d\n", rc);
 		return rc;
@@ -2415,7 +3088,11 @@ static int smb5_init_hw(struct smb5 *chip)
 	}
 
 	rc = smblib_write(chg, CHGR_FAST_CHARGE_SAFETY_TIMER_CFG_REG,
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+					FAST_CHARGE_SAFETY_TIMER_1536_MIN);
+#else
 					FAST_CHARGE_SAFETY_TIMER_768_MIN);
+#endif
 	if (rc < 0) {
 		dev_err(chg->dev, "Couldn't set CHGR_FAST_CHARGE_SAFETY_TIMER_CFG_REG rc=%d\n",
 			rc);
@@ -2537,6 +3214,75 @@ static int smb5_post_init(struct smb5 *chip)
 
 	return 0;
 }
+
+#if defined(CONFIG_PM6150_WATER_DETECT)
+/**
+* smb5_hiccup_store - sysfs write interface to disable hiccup switch.
+**/
+static ssize_t smb5_hiccup_store(struct device *dev, \
+		struct device_attribute *attr, const char *buf, size_t len)
+{
+	pr_info("%s\n", __func__);
+	
+	if (!strncasecmp(buf, "DISABLE", 7)) {
+		struct smb_charger *chg = dev_get_drvdata(dev);
+		if (chg->hiccup_mode) {
+			gpio_direction_output(chg->hiccup_gpio, 0);
+			chg->hiccup_mode &= ~HICCUP_VBUS;
+			pr_info("[HICCUP]  UI - hiccup Low");
+		}
+	} else
+		pr_warn("%s invalid com : %s\n", __func__, buf);
+
+	return len;
+}
+
+/**
+* smb5_hiccup_show - sysfs read interface to show hiccup 
+*      enebled status to UI.
+**/
+static ssize_t smb5_hiccup_show(struct device *dev, \
+		struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "ENABLE\n");
+}
+
+static DEVICE_ATTR(hiccup, S_IRUGO | S_IWUSR | S_IWGRP, \
+		smb5_hiccup_show, smb5_hiccup_store);
+
+static struct attribute *hiccup_attributes[] = {
+	&dev_attr_hiccup.attr,
+	NULL,
+};
+
+static struct attribute_group hiccup_attr_group = {
+	.attrs = hiccup_attributes,
+};
+
+void smb5_lpd_hiccup_init(struct smb_charger *chg)
+{
+	int ret;
+
+	chg->hiccup_dev = sec_device_create(0, NULL, "switch");
+	if (unlikely(IS_ERR(chg->hiccup_dev))) {
+		pr_err("[HICCUP]sysfs dir switch create failed\n");
+	}
+
+	ret = sysfs_create_group(&chg->hiccup_dev->kobj, &hiccup_attr_group);
+	if (unlikely(ret)) {
+		pr_err("[HICCUP]sysfs hiccup_switch create failed\n");
+	}
+
+	dev_set_drvdata(chg->hiccup_dev, chg);
+	
+	if (alarmtimer_get_rtcdev())
+		alarm_init(&chg->lpd_dry_check_timer, ALARM_REALTIME,
+			smblib_lpd_dry_check_timer);
+			
+	return;
+}
+#endif //CONFIG_PM6150_WATER_DETECT
+
 
 /****************************
  * DETERMINE INITIAL STATUS *
@@ -2736,7 +3482,9 @@ static struct smb_irq_info smb5_irqs[] = {
 	[TYPEC_OR_RID_DETECTION_CHANGE_IRQ] = {
 		.name		= "typec-or-rid-detect-change",
 		.handler	= typec_or_rid_detection_change_irq_handler,
+#if !defined(CONFIG_SEC_FACTORY)
 		.wake           = true,
+#endif
 	},
 	[TYPEC_VPD_DETECT_IRQ] = {
 		.name		= "typec-vpd-detect",
@@ -2828,6 +3576,16 @@ static struct smb_irq_info smb5_irqs[] = {
 	[FLASH_EN_IRQ] = {
 		.name		= "flash-en",
 	},
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	/* SDAM1 */
+	[SKIP_MODE_IRQ] = {
+		.name		= "skip-mode-smb",
+#if defined(CONFIG_SEC_A90Q_PROJECT)
+        .handler    = skip_mode_handler,
+#endif
+		.wake		= true,
+	},
+#endif
 };
 
 static int smb5_get_irq_index_byname(const char *irq_name)
@@ -2914,7 +3672,6 @@ static int smb5_request_interrupts(struct smb5 *chip)
 	 * the WA is not required and neither is the snarl timer configuration
 	 * defined, disable the WDOG_SNARL_IRQ to prevent interrupt storm.
 	 */
-
 	if (chg->irq_info[WDOG_SNARL_IRQ].irq && (!(chg->wa_flags &
 				SW_THERM_REGULATION_WA) &&
 				chip->dt.wd_snarl_time_cfg == -EINVAL)) {
@@ -2922,6 +3679,14 @@ static int smb5_request_interrupts(struct smb5 *chip)
 		disable_irq_nosync(chg->irq_info[WDOG_SNARL_IRQ].irq);
 	}
 
+	if (chg->irq_info[WDOG_BARK_IRQ].irq &&
+			chg->wdog_snarl_based_step_chg) {
+		disable_irq_wake(chg->irq_info[WDOG_BARK_IRQ].irq);
+		disable_irq_nosync(chg->irq_info[WDOG_BARK_IRQ].irq);
+	}
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	disable_irq_nosync(chg->irq_info[INPUT_CURRENT_LIMITING_IRQ].irq);
+#endif
 	return rc;
 }
 
@@ -3081,7 +3846,42 @@ static int smb5_probe(struct platform_device *pdev)
 	chg->connector_health = -EINVAL;
 	chg->otg_present = false;
 	chg->main_fcc_max = -EINVAL;
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	chg->pdp_limit_w = -EINVAL;
+#if defined(CONFIG_ENG_BATTERY_CONCEPT)
+	chg->batt_test_chg_temp = -900;
+#endif
+#endif
+	/* Configurable SW Thermal Throttling for DEBUG*/
+	chg->die_temp_rst_thresh = &__die_temp_rst_thresh;
+	chg->die_temp_reg_h_thresh = &__die_temp_reg_h_thresh;
+	chg->die_temp_reg_l_thresh = &__die_temp_reg_l_thresh;
+	chg->connector_temp_shdn_thresh = &__connector_temp_shdn_thresh;
+	chg->connector_temp_rst_thresh = &__connector_temp_rst_thresh;
+	chg->connector_temp_reg_h_thresh = &__connector_temp_reg_h_thresh;
+	chg->connector_temp_reg_l_thresh = &__connector_temp_reg_l_thresh;
+	chg->smb_temp_shdn_thresh = &__smb_temp_shdn_thresh;
+	chg->smb_temp_rst_thresh = &__smb_temp_rst_thresh;
+	chg->smb_temp_reg_h_thresh = &__smb_temp_reg_h_thresh;
+	chg->smb_temp_reg_l_thresh = &__smb_temp_reg_l_thresh;
+	chg->skin_temp_shdn_thresh = &__skin_temp_shdn_thresh;
+	chg->skin_temp_rst_thresh = &__skin_temp_rst_thresh;
+	chg->skin_temp_reg_h_thresh = &__skin_temp_reg_h_thresh;
+	chg->skin_temp_reg_l_thresh = &__skin_temp_reg_l_thresh;
+	chg->snarl_delay_alert = &__snarl_delay_alert;
+	chg->snarl_delay_above_range = &__snarl_delay_above_range;
+	chg->snarl_delay_below_range = &__snarl_delay_below_range;
+	chg->snarl_delay_within_range = &__snarl_delay_within_range;
+	chg->throttling_current_inc = &__throttling_current_inc;
+	chg->throttling_current_dec = &__throttling_current_dec;
 
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	chg->swelling_states = 0;
+	chg->input_voltage_limit = MICRO_12V;
+	chg->hv_disable = false;
+	chg->last_capacity = 0;
+	chg->float_type_recheck = false;
+#endif
 	chg->regmap = dev_get_regmap(chg->dev->parent, NULL);
 	if (!chg->regmap) {
 		pr_err("parent regmap is missing\n");
@@ -3175,6 +3975,15 @@ static int smb5_probe(struct platform_device *pdev)
 				rc);
 			goto cleanup;
 		}
+
+	#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+		rc = smb5_init_otg_psy(chip);
+		if (rc < 0) {
+			pr_err("Couldn't initialize otg psy rc=%d\n", rc);
+			goto cleanup;
+		}
+	#endif
+	
 	}
 
 	switch (chg->smb_version) {
@@ -3189,6 +3998,13 @@ static int smb5_probe(struct platform_device *pdev)
 	default:
 		break;
 	}
+
+#if defined(CONFIG_SMB1390_CHARGE_PUMP_PSY)
+	if (!chg->cp_disable_votable)
+		chg->cp_disable_votable = find_votable("CP_DISABLE");
+	if (!chg->cp_disable_votable)
+		return -EPROBE_DEFER;
+#endif
 
 	rc = smb5_init_usb_psy(chip);
 	if (rc < 0) {
@@ -3213,6 +4029,10 @@ static int smb5_probe(struct platform_device *pdev)
 		pr_err("Couldn't initialize batt psy rc=%d\n", rc);
 		goto cleanup;
 	}
+
+#if defined(CONFIG_PM6150_SBU_VBUS_SHORT)
+	pm6150_detect_sbu_short_init(chg);
+#endif
 
 	rc = smb5_determine_initial_status(chip);
 	if (rc < 0) {
@@ -3240,6 +4060,10 @@ static int smb5_probe(struct platform_device *pdev)
 		pr_err("Failed in getting charger status rc=%d\n", rc);
 		goto free_irq;
 	}
+
+#if defined(CONFIG_PM6150_WATER_DETECT)
+	smb5_lpd_hiccup_init(chg);
+#endif
 
 	device_init_wakeup(chg->dev, true);
 

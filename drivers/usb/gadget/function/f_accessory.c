@@ -42,6 +42,10 @@
 #include <linux/configfs.h>
 #include <linux/usb/composite.h>
 
+#ifdef CONFIG_USB_NOTIFY_PROC_LOG
+#include <linux/usblog_proc_notify.h>
+#endif
+
 #define MAX_INST_NAME_LEN        40
 #define BULK_BUFFER_SIZE    16384
 #define ACC_STRING_SIZE     256
@@ -663,7 +667,7 @@ static ssize_t acc_write(struct file *fp, const char __user *buf,
 		req = 0;
 		ret = wait_event_interruptible(dev->write_wq,
 			((req = req_get(dev, &dev->tx_idle)) || !dev->online));
-		if (!dev->online || !dev->disconnected) {
+		if (!dev->online || dev->disconnected) {
 			pr_debug("acc_write dev->error\n");
 			r = -EIO;
 			break;
@@ -1050,8 +1054,11 @@ acc_function_unbind(struct usb_configuration *c, struct usb_function *f)
 static void acc_start_work(struct work_struct *data)
 {
 	char *envp[2] = { "ACCESSORY=START", NULL };
-
+	pr_info("usb: Send uevent, ACCESSORY=START\n");
 	kobject_uevent_env(&acc_device.this_device->kobj, KOBJ_CHANGE, envp);
+#ifdef CONFIG_USB_NOTIFY_PROC_LOG
+ 	store_usblog_notify(NOTIFY_USBSTATE, (void *)envp[0], NULL);
+#endif
 }
 
 static int acc_hid_init(struct acc_hid_dev *hdev)

@@ -22,6 +22,10 @@
 #include "cam_debug_util.h"
 #include "cam_cpas_api.h"
 
+#if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
+#include "cam_sensor_cmn_header.h"
+#endif
+
 /* Timeout value in msec */
 #define IFE_CSID_TIMEOUT                               1000
 
@@ -3040,6 +3044,11 @@ irqreturn_t cam_ife_csid_irq(int irq_num, void *data)
 	bool fatal_err_detected = false;
 	uint32_t sof_irq_debug_en = 0;
 	unsigned long flags;
+#if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
+	struct cam_hw_param *hw_param = NULL;
+	uint32_t *hw_cam_position = NULL;
+	uint32_t hwb_mipi_err = FALSE;
+#endif
 
 	csid_hw = (struct cam_ife_csid_hw *)data;
 
@@ -3134,6 +3143,16 @@ irqreturn_t cam_ife_csid_irq(int irq_num, void *data)
 		}
 		if (irq_status_rx & CSID_CSI2_RX_ERROR_UNBOUNDED_FRAME) {
 			csid_hw->error_irq_count++;
+		}
+		if (irq_status_rx & CSID_CSI2_RX_ERROR_CRC) {
+#if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
+			hwb_mipi_err |= TRUE;
+#endif
+		}
+		if (irq_status_rx & CSID_CSI2_RX_ERROR_ECC) {
+#if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
+			hwb_mipi_err |= TRUE;
+#endif
 		}
 	}
 	spin_unlock_irqrestore(&csid_hw->lock_state, flags);
@@ -3312,6 +3331,9 @@ irqreturn_t cam_ife_csid_irq(int irq_num, void *data)
 			cam_io_w_csid_mb(CAM_CSID_HALT_IMMEDIATELY,
 				soc_info->reg_map[0].mem_base +
 				csid_reg->ipp_reg->csid_pxl_ctrl_addr);
+#if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
+			hwb_mipi_err |= TRUE;
+#endif
 		}
 	}
 
@@ -3350,6 +3372,9 @@ irqreturn_t cam_ife_csid_irq(int irq_num, void *data)
 			cam_io_w_csid_mb(CAM_CSID_HALT_IMMEDIATELY,
 				soc_info->reg_map[0].mem_base +
 				csid_reg->ppp_reg->csid_pxl_ctrl_addr);
+#if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
+			hwb_mipi_err |= TRUE;
+#endif
 		}
 	}
 
@@ -3385,6 +3410,9 @@ irqreturn_t cam_ife_csid_irq(int irq_num, void *data)
 			cam_io_w_csid_mb(CAM_CSID_HALT_IMMEDIATELY,
 				soc_info->reg_map[0].mem_base +
 				csid_reg->rdi_reg[i]->csid_rdi_ctrl_addr);
+#if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
+			hwb_mipi_err |= TRUE;
+#endif
 		}
 	}
 
@@ -3392,6 +3420,212 @@ irqreturn_t cam_ife_csid_irq(int irq_num, void *data)
 		cam_ife_csid_sof_irq_debug(csid_hw, &sof_irq_debug_en);
 		csid_hw->irq_debug_cnt = 0;
 	}
+
+#if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
+	if (hwb_mipi_err == TRUE) {
+		msm_is_sec_get_sensor_position(&hw_cam_position);
+		if (hw_cam_position != NULL) {
+			switch (*hw_cam_position) {
+			case CAMERA_0:
+				if (!msm_is_sec_get_rear_hw_param(&hw_param)) {
+					if (hw_param != NULL && (hw_param->mipi_chk == FALSE)) {
+						switch (hw_param->comp_chk) {
+						case TRUE:
+							CAM_ERR_RATE_LIMIT(CAM_HWB, "[R][MIPI_C] Err\n");
+							hw_param->mipi_comp_err_cnt++;
+							hw_param->mipi_chk = TRUE;
+							hw_param->need_update_to_file = TRUE;
+							break;
+
+						case FALSE:
+							CAM_ERR_RATE_LIMIT(CAM_HWB, "[R][MIPI_S] Err\n");
+							hw_param->mipi_sensor_err_cnt++;
+							hw_param->mipi_chk = TRUE;
+							hw_param->need_update_to_file = TRUE;
+							break;
+
+						default:
+							CAM_ERR_RATE_LIMIT(CAM_HWB, "[R][MIPI] Unsupport\n");
+							break;
+						}
+					}
+				}
+				break;
+
+			case CAMERA_1:
+				if (!msm_is_sec_get_front_hw_param(&hw_param)) {
+					if (hw_param != NULL && (hw_param->mipi_chk == FALSE)) {
+						switch (hw_param->comp_chk) {
+						case TRUE:
+							CAM_ERR_RATE_LIMIT(CAM_HWB, "[F][MIPI_C] Err\n");
+							hw_param->mipi_comp_err_cnt++;
+							hw_param->mipi_chk = TRUE;
+							hw_param->need_update_to_file = TRUE;
+							break;
+
+						case FALSE:
+							CAM_ERR_RATE_LIMIT(CAM_HWB, "[F][MIPI_S] Err\n");
+							hw_param->mipi_sensor_err_cnt++;
+							hw_param->mipi_chk = TRUE;
+							hw_param->need_update_to_file = TRUE;
+							break;
+
+						default:
+							CAM_ERR_RATE_LIMIT(CAM_HWB, "[F][MIPI] Unsupport\n");
+							break;
+						}
+					}
+				}
+				break;
+
+#if defined(CONFIG_SAMSUNG_FRONT_DUAL)
+			case CAMERA_2:
+				if (!msm_is_sec_get_front2_hw_param(&hw_param)) {
+					if (hw_param != NULL && (hw_param->mipi_chk == FALSE)) {
+						switch (hw_param->comp_chk) {
+						case TRUE:
+							CAM_ERR_RATE_LIMIT(CAM_HWB, "[F2][MIPI_C] Err\n");
+							hw_param->mipi_comp_err_cnt++;
+							hw_param->mipi_chk = TRUE;
+							hw_param->need_update_to_file = TRUE;
+							break;
+
+						case FALSE:
+							CAM_ERR_RATE_LIMIT(CAM_HWB, "[F2][MIPI_S] Err\n");
+							hw_param->mipi_sensor_err_cnt++;
+							hw_param->mipi_chk = TRUE;
+							hw_param->need_update_to_file = TRUE;
+							break;
+
+						default:
+							CAM_ERR_RATE_LIMIT(CAM_HWB, "[F2][MIPI] Unsupport\n");
+							break;
+						}
+					}
+				}
+				break;
+#endif
+#if defined(CONFIG_SAMSUNG_FRONT_TOP)
+			case CAMERA_5:
+				if (!msm_is_sec_get_front3_hw_param(&hw_param)) {
+					if (hw_param != NULL && (hw_param->mipi_chk == FALSE)) {
+						switch (hw_param->comp_chk) {
+						case TRUE:
+							CAM_ERR_RATE_LIMIT(CAM_HWB, "[F3][MIPI_C] Err\n");
+							hw_param->mipi_comp_err_cnt++;
+							hw_param->mipi_chk = TRUE;
+							hw_param->need_update_to_file = TRUE;
+							break;
+
+						case FALSE:
+							CAM_ERR_RATE_LIMIT(CAM_HWB, "[F3][MIPI_S] Err\n");
+							hw_param->mipi_sensor_err_cnt++;
+							hw_param->mipi_chk = TRUE;
+							hw_param->need_update_to_file = TRUE;
+							break;
+
+						default:
+							CAM_ERR_RATE_LIMIT(CAM_HWB, "[F3][MIPI] Unsupport\n");
+							break;
+						}
+					}
+				}
+				break;
+#endif
+
+#if defined(CONFIG_SAMSUNG_REAR_DUAL) || defined(CONFIG_SAMSUNG_REAR_TRIPLE)
+			case CAMERA_3:
+				if (!msm_is_sec_get_rear2_hw_param(&hw_param)) {
+					if (hw_param != NULL && (hw_param->mipi_chk == FALSE)) {
+						switch (hw_param->comp_chk) {
+						case TRUE:
+							CAM_ERR_RATE_LIMIT(CAM_HWB, "[R2][MIPI_C] Err\n");
+							hw_param->mipi_comp_err_cnt++;
+							hw_param->mipi_chk = TRUE;
+							hw_param->need_update_to_file = TRUE;
+							break;
+
+						case FALSE:
+							CAM_ERR_RATE_LIMIT(CAM_HWB, "[R2][MIPI_S] Err\n");
+							hw_param->mipi_sensor_err_cnt++;
+							hw_param->mipi_chk = TRUE;
+							hw_param->need_update_to_file = TRUE;
+							break;
+
+						default:
+							CAM_ERR_RATE_LIMIT(CAM_HWB, "[R2][MIPI] Unsupport\n");
+							break;
+						}
+					}
+				}
+				break;
+
+#endif
+
+#if defined(CONFIG_SAMSUNG_REAR_TRIPLE)
+			case CAMERA_4:
+				if (!msm_is_sec_get_rear3_hw_param(&hw_param)) {
+					if (hw_param != NULL && (hw_param->mipi_chk == FALSE)) {
+						switch (hw_param->comp_chk) {
+						case TRUE:
+							CAM_ERR_RATE_LIMIT(CAM_HWB, "[R3][MIPI_C] Err\n");
+							hw_param->mipi_comp_err_cnt++;
+							hw_param->mipi_chk = TRUE;
+							hw_param->need_update_to_file = TRUE;
+							break;
+
+						case FALSE:
+							CAM_ERR_RATE_LIMIT(CAM_HWB, "[R3][MIPI_S] Err\n");
+							hw_param->mipi_sensor_err_cnt++;
+							hw_param->mipi_chk = TRUE;
+							hw_param->need_update_to_file = TRUE;
+							break;
+
+						default:
+							CAM_ERR_RATE_LIMIT(CAM_HWB, "[R3][MIPI] Unsupport\n");
+							break;
+						}
+					}
+				}
+				break;
+
+#endif
+
+#if defined(CONFIG_SAMSUNG_SECURE_CAMERA)
+			case CAMERA_3:
+				if (!msm_is_sec_get_iris_hw_param(&hw_param)) {
+					if (hw_param != NULL && (hw_param->mipi_chk == FALSE)) {
+						switch (hw_param->comp_chk) {
+						case TRUE:
+							CAM_ERR_RATE_LIMIT(CAM_HWB, "[I][MIPI_C] Err\n");
+							hw_param->mipi_comp_err_cnt++;
+							hw_param->mipi_chk = TRUE;
+							hw_param->need_update_to_file = TRUE;
+							break;
+
+						case FALSE:
+							CAM_ERR_RATE_LIMIT(CAM_HWB, "[I][MIPI_S] Err\n");
+							hw_param->mipi_sensor_err_cnt++;
+							hw_param->mipi_chk = TRUE;
+							hw_param->need_update_to_file = TRUE;
+							break;
+
+						default:
+							CAM_ERR_RATE_LIMIT(CAM_HWB, "[I][MIPI] Unsupport\n");
+							break;
+						}
+					}
+				}
+				break;
+#endif
+
+			default:
+				CAM_ERR_RATE_LIMIT(CAM_HWB, "[NON][MIPI] Unsupport\n");
+				break;
+			}
+		}
+	}
+#endif
 
 	CAM_DBG(CAM_ISP, "IRQ Handling exit");
 	return IRQ_HANDLED;

@@ -31,10 +31,13 @@
 #include <linux/syscore_ops.h>
 #include <linux/tick.h>
 #include <linux/sched/topology.h>
+#include <linux/ologk.h>
 
 #include <trace/events/power.h>
 
 static LIST_HEAD(cpufreq_policy_list);
+
+struct cpufreq_user_policy core_min_max_policy[NR_CPUS];
 
 static inline bool policy_is_inactive(struct cpufreq_policy *policy)
 {
@@ -342,7 +345,7 @@ static void __cpufreq_notify_transition(struct cpufreq_policy *policy,
 			 (unsigned long)freqs->new, (unsigned long)freqs->cpu);
 		trace_cpu_frequency(freqs->new, freqs->cpu);
 		cpufreq_stats_record_transition(policy, freqs->new);
-		cpufreq_times_record_transition(freqs);
+		cpufreq_times_record_transition(policy, freqs->new);
 		srcu_notifier_call_chain(&cpufreq_transition_notifier_list,
 				CPUFREQ_POSTCHANGE, freqs);
 		if (likely(policy) && likely(policy->cpu == freqs->cpu))
@@ -1862,9 +1865,14 @@ EXPORT_SYMBOL(cpufreq_unregister_notifier);
 unsigned int cpufreq_driver_fast_switch(struct cpufreq_policy *policy,
 					unsigned int target_freq)
 {
-	target_freq = clamp_val(target_freq, policy->min, policy->max);
+	unsigned int next_freq;
 
-	return cpufreq_driver->fast_switch(policy, target_freq);
+	target_freq = clamp_val(target_freq, policy->min, policy->max);
+	next_freq = cpufreq_driver->fast_switch(policy, target_freq);
+
+	cpufreq_times_record_transition(policy, target_freq);
+
+	return next_freq;
 }
 EXPORT_SYMBOL_GPL(cpufreq_driver_fast_switch);
 
@@ -2238,6 +2246,13 @@ static int cpufreq_set_policy(struct cpufreq_policy *policy,
 	arch_set_max_freq_scale(policy->cpus, policy->max);
 
 	trace_cpu_frequency_limits(policy->max, policy->min, policy->cpu);
+	if(policy->cpu < NR_CPUS) {
+		if(core_min_max_policy[policy->cpu].min != policy->min || core_min_max_policy[policy->cpu].max != policy->max) {
+			core_min_max_policy[policy->cpu].min = policy->min;
+			core_min_max_policy[policy->cpu].max = policy->max;
+			ologk("%s [%d] %lu, %lu", __func__, policy->cpu, policy->min, policy->max);
+		}
+	}
 
 	policy->cached_target_freq = UINT_MAX;
 

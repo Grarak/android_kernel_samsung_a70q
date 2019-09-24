@@ -135,6 +135,26 @@ void do_fpsimd_exc(unsigned int esr, struct pt_regs *regs)
 	send_sig_info(SIGFPE, &info, current);
 }
 
+#ifdef CONFIG_KERNEL_MODE_NEON_DEBUG 
+void fpsimd_context_check(struct task_struct *next)
+{
+	int simd_reg_index;
+	struct fpsimd_state current_st, *saved_st;
+	saved_st = &next->thread.fpsimd_state;
+	fpsimd_save_state(&current_st);
+	
+	for (simd_reg_index = 0; simd_reg_index < 32; simd_reg_index++)
+	{
+		if(current_st.vregs[simd_reg_index] != saved_st->vregs[simd_reg_index])
+			BUG();
+	}
+
+	if((current_st.fpsr != saved_st->fpsr) || (current_st.fpcr != saved_st->fpcr))
+		BUG();
+
+}
+#endif
+
 void fpsimd_thread_switch(struct task_struct *next)
 {
 	if (!system_supports_fpsimd())
@@ -158,9 +178,15 @@ void fpsimd_thread_switch(struct task_struct *next)
 		struct fpsimd_state *st = &next->thread.fpsimd_state;
 
 		if (__this_cpu_read(fpsimd_last_state) == st
-		    && st->cpu == smp_processor_id())
+		    && st->cpu == smp_processor_id()) {
+
+#ifdef CONFIG_KERNEL_MODE_NEON_DEBUG 
+			fpsimd_context_check(next);
+#endif 
+
 			clear_ti_thread_flag(task_thread_info(next),
 					     TIF_FOREIGN_FPSTATE);
+		}
 		else
 			set_ti_thread_flag(task_thread_info(next),
 					   TIF_FOREIGN_FPSTATE);

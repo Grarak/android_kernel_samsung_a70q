@@ -53,6 +53,11 @@
 #define CORE_RESET			BIT(5)
 #define CORE_RESET_MUX			BIT(6)
 
+#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
+#define TUNE1_MAX_VALUE			0x7
+#define TUNE1_MIN_VALUE			0x1
+#endif
+
 #define QUSB2PHY_1P8_VOL_MIN           1800000 /* uV */
 #define QUSB2PHY_1P8_VOL_MAX           1800000 /* uV */
 #define QUSB2PHY_1P8_HPM_LOAD          30000   /* uA */
@@ -64,7 +69,10 @@
 #define LINESTATE_DP			BIT(0)
 #define LINESTATE_DM			BIT(1)
 
-#define BIAS_CTRL_2_OVERRIDE_VAL	0x28
+#define BIAS_CTRL_2_OVERRIDE_VAL	0x20
+#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
+#define BIAS_CTRL_2_OVERRIDE_VAL_HOST	0x28
+#endif
 
 #define DEBUG_CTRL1_OVERRIDE_VAL	0x09
 
@@ -116,6 +124,11 @@ struct qusb_phy {
 	int			qusb_phy_reg_offset_cnt;
 
 	u32			tune_val;
+#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
+	u32			tune_efuse_val;
+	int			sync_val;
+	int			sync_host_val;
+#endif
 	int			efuse_bit_pos;
 	int			efuse_num_of_bits;
 
@@ -191,7 +204,7 @@ static int qusb_phy_enable_power(struct qusb_phy *qphy, bool on)
 
 	mutex_lock(&qphy->lock);
 
-	dev_dbg(qphy->phy.dev,
+	dev_info(qphy->phy.dev,
 		"%s:req to turn %s regulators. power_enabled_ref:%d\n",
 			__func__, on ? "on" : "off", qphy->power_enabled_ref);
 
@@ -268,7 +281,7 @@ static int qusb_phy_enable_power(struct qusb_phy *qphy, bool on)
 		goto unset_vdd33;
 	}
 
-	pr_debug("%s(): QUSB PHY's regulators are turned ON.\n", __func__);
+	pr_info("%s(): QUSB PHY's regulators are turned ON.\n", __func__);
 
 	mutex_unlock(&qphy->lock);
 	return ret;
@@ -318,6 +331,7 @@ unconfig_vdd:
 							ret);
 err_vdd:
 	dev_dbg(qphy->phy.dev, "QUSB PHY's regulators are turned OFF.\n");
+	pr_info("%s(): QUSB PHY's regulators are turned OFF.\n", __func__);
 
 	/* in case of error in turning on regulators */
 	if (qphy->power_enabled_ref)
@@ -327,12 +341,42 @@ done:
 	return ret;
 }
 
+#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
+static void qusb_phy_update_tune1(struct qusb_phy *qphy, int phy_mode)
+{
+	struct device *dev = qphy->phy.dev;
+	int diff_tune = 0;
+
+	dev_info(dev, "read tune diff for USB %s: %d",
+			phy_mode ? "Host" : "Device",
+			phy_mode ? qphy->sync_host_val : qphy->sync_val);
+
+	if (phy_mode)
+		diff_tune = qphy->sync_host_val;
+	else
+		diff_tune = qphy->sync_val;
+
+	diff_tune += qphy->tune_efuse_val;
+
+	if (diff_tune < TUNE1_MIN_VALUE)
+		diff_tune = TUNE1_MIN_VALUE;
+	else if (diff_tune > TUNE1_MAX_VALUE)
+		diff_tune = TUNE1_MAX_VALUE;
+
+	qphy->tune_val = readb_relaxed(qphy->base +
+					qphy->phy_reg[PORT_TUNE1]);
+
+	qphy->tune_val = ((diff_tune << 0x4) |
+			(qphy->tune_val & 0x0f)) & 0xFF;
+}
+#endif
+
 static void qusb_phy_get_tune1_param(struct qusb_phy *qphy)
 {
 	u8 reg;
 	u32 bit_mask = 1;
 
-	pr_debug("%s(): num_of_bits:%d bit_pos:%d\n", __func__,
+	pr_info("%s(): num_of_bits:%d bit_pos:%d\n", __func__,
 				qphy->efuse_num_of_bits,
 				qphy->efuse_bit_pos);
 
@@ -344,12 +388,18 @@ static void qusb_phy_get_tune1_param(struct qusb_phy *qphy)
 	 * tune parameters
 	 */
 	qphy->tune_val = readl_relaxed(qphy->efuse_reg);
-	pr_debug("%s(): bit_mask:%d efuse based tune1 value:%d\n",
+	pr_info("%s(): bit_mask:%d efuse based tune1 value:%d\n",
 				__func__, bit_mask, qphy->tune_val);
 
 	qphy->tune_val = TUNE_VAL_MASK(qphy->tune_val,
 				qphy->efuse_bit_pos, bit_mask);
 	reg = readb_relaxed(qphy->base + qphy->phy_reg[PORT_TUNE1]);
+
+#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
+	pr_info("%s(): QC efuse value : 0x%x\n", __func__, qphy->tune_val);
+	qphy->tune_efuse_val = qphy->tune_val;
+#endif
+
 	if (qphy->tune_val) {
 		reg = reg & 0x0f;
 		reg |= (qphy->tune_val << 4);
@@ -363,9 +413,9 @@ static void qusb_phy_write_seq(void __iomem *base, u32 *seq, int cnt,
 {
 	int i;
 
-	pr_debug("Seq count:%d\n", cnt);
+	pr_info("Seq count:%d\n", cnt);
 	for (i = 0; i < cnt; i = i+2) {
-		pr_debug("write 0x%02x to 0x%02x\n", seq[i], seq[i+1]);
+		pr_info("before 0x%02x write 0x%02x to 0x%02x\n", readb_relaxed(base + seq[i+1]), seq[i], seq[i+1]);
 		writel_relaxed(seq[i], base + seq[i+1]);
 		if (delay)
 			usleep_range(delay, (delay + 2000));
@@ -414,6 +464,9 @@ static void qusb_phy_host_init(struct usb_phy *phy)
 	if (qphy->efuse_reg) {
 		if (!qphy->tune_val)
 			qusb_phy_get_tune1_param(qphy);
+#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
+		qusb_phy_update_tune1(qphy, 1);
+#endif
 	} else {
 		/* For non fused chips we need to write the TUNE1 param as
 		 * specified in DT otherwise we will end up writing 0 to
@@ -423,7 +476,7 @@ static void qusb_phy_host_init(struct usb_phy *phy)
 					qphy->phy_reg[PORT_TUNE1]);
 	}
 
-	writel_relaxed(qphy->tune_val | BIT(7),
+	writel_relaxed(qphy->tune_val,
 		qphy->base + qphy->phy_reg[PORT_TUNE1]);
 	pr_debug("%s(): Programming TUNE1 parameter as:%x\n",
 		__func__, readb_relaxed(qphy->base +
@@ -439,10 +492,20 @@ static void qusb_phy_host_init(struct usb_phy *phy)
 							(4 * p_index));
 	}
 
+#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
+	if (qphy->refgen_north_bg_reg && qphy->override_bias_ctrl2) {
+		pr_info("%s(): refgen_north_bg_reg : 0x%x\n", __func__,
+			readl_relaxed(qphy->refgen_north_bg_reg));
+		if (readl_relaxed(qphy->refgen_north_bg_reg) & BANDGAP_BYPASS)
+			writel_relaxed(BIAS_CTRL_2_OVERRIDE_VAL_HOST,
+				qphy->base + qphy->phy_reg[BIAS_CTRL_2]);
+	}
+#else
 	if (qphy->refgen_north_bg_reg && qphy->override_bias_ctrl2)
 		if (readl_relaxed(qphy->refgen_north_bg_reg) & BANDGAP_BYPASS)
 			writel_relaxed(BIAS_CTRL_2_OVERRIDE_VAL,
 				qphy->base + qphy->phy_reg[BIAS_CTRL_2]);
+#endif
 
 	if (qphy->bias_ctrl2)
 		writel_relaxed(qphy->bias_ctrl2,
@@ -450,6 +513,16 @@ static void qusb_phy_host_init(struct usb_phy *phy)
 
 	/* Ensure above write is completed before turning ON ref clk */
 	wmb();
+
+#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
+	pr_info("%s():Setting qusb phy val: imp_ctrl1 %x, tune1 %x, tune2 %x, tune4 %x, bias_control2 %x\n",
+		__func__,
+		(readl_relaxed(qphy->base + 0x220) & 0xff),
+		(readl_relaxed(qphy->base + 0x240) & 0xff),
+		(readl_relaxed(qphy->base + 0x244) & 0xff),
+		(readl_relaxed(qphy->base + 0x24c) & 0xff),
+		(readl_relaxed(qphy->base + 0x198) & 0xff));
+#endif
 
 	/* Require to get phy pll lock successfully */
 	usleep_range(150, 160);
@@ -467,7 +540,7 @@ static int qusb_phy_init(struct usb_phy *phy)
 	int ret, p_index;
 	u8 reg;
 
-	dev_dbg(phy->dev, "%s\n", __func__);
+	dev_info(phy->dev, "%s\n", __func__);
 
 	ret = qusb_phy_enable_power(qphy, true);
 	if (ret)
@@ -517,8 +590,12 @@ static int qusb_phy_init(struct usb_phy *phy)
 		if (!qphy->tune_val)
 			qusb_phy_get_tune1_param(qphy);
 
-		pr_debug("%s(): Programming TUNE1 parameter as:%x\n", __func__,
-				qphy->tune_val);
+#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
+		qusb_phy_update_tune1(qphy, 0);
+
+		pr_info("%s(): Programming TUNE1 parameter as:%x efuse:%x\n", __func__,
+				qphy->tune_val, qphy->tune_efuse_val);
+#endif
 		writel_relaxed(qphy->tune_val,
 				qphy->base + qphy->phy_reg[PORT_TUNE1]);
 	}
@@ -531,10 +608,15 @@ static int qusb_phy_init(struct usb_phy *phy)
 							(4 * p_index));
 	}
 
-	if (qphy->refgen_north_bg_reg && qphy->override_bias_ctrl2)
+	if (qphy->refgen_north_bg_reg && qphy->override_bias_ctrl2) {
+#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
+		pr_info("%s(): refgen_north_bg_reg : 0x%x\n", __func__,
+			readl_relaxed(qphy->refgen_north_bg_reg));
+#endif
 		if (readl_relaxed(qphy->refgen_north_bg_reg) & BANDGAP_BYPASS)
 			writel_relaxed(BIAS_CTRL_2_OVERRIDE_VAL,
 				qphy->base + qphy->phy_reg[BIAS_CTRL_2]);
+	}
 
 	if (qphy->bias_ctrl2)
 		writel_relaxed(qphy->bias_ctrl2,
@@ -550,6 +632,16 @@ static int qusb_phy_init(struct usb_phy *phy)
 
 	/* Ensure above write is completed before turning ON ref clk */
 	wmb();
+
+#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
+	pr_info("%s():Setting qusb phy val: imp_ctrl1 %x, tune1 %x, tune2 %x, tune4 %x, bias_control2 %x\n",
+		__func__,
+		(readl_relaxed(qphy->base + 0x220) & 0xff),
+		(readl_relaxed(qphy->base + 0x240) & 0xff),
+		(readl_relaxed(qphy->base + 0x244) & 0xff),
+		(readl_relaxed(qphy->base + 0x24c) & 0xff),
+		(readl_relaxed(qphy->base + 0x198) & 0xff));
+#endif
 
 	/* Require to get phy pll lock successfully */
 	usleep_range(150, 160);
@@ -1078,6 +1170,26 @@ static int qusb_phy_probe(struct platform_device *pdev)
 			return -ENOMEM;
 	}
 
+#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
+	size = 0;
+	of_get_property(dev->of_node, "qcom,diff_tune_host", &size);
+	if (size) {
+		ret = of_property_read_u32(dev->of_node, "qcom,diff_tune_host",
+					&qphy->sync_host_val);
+		if (ret)
+			qphy->sync_host_val = 0;
+	}
+
+	size = 0;
+	of_get_property(dev->of_node, "qcom,diff_tune_device", &size);
+	if (size) {
+		ret = of_property_read_u32(dev->of_node, "qcom,diff_tune_device",
+					&qphy->sync_val);
+		if (ret)
+			qphy->sync_val = 0;
+	}
+#endif
+
 	qphy->override_bias_ctrl2 = of_property_read_bool(dev->of_node,
 					"qcom,override-bias-ctrl2");
 
@@ -1117,6 +1229,10 @@ static int qusb_phy_probe(struct platform_device *pdev)
 	qphy->phy.type			= USB_PHY_TYPE_USB2;
 	qphy->phy.notify_connect        = qusb_phy_notify_connect;
 	qphy->phy.notify_disconnect     = qusb_phy_notify_disconnect;
+
+#ifdef CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE
+	qphy->tune_efuse_val		= 0;
+#endif
 
 	ret = usb_add_phy_dev(&qphy->phy);
 	if (ret)

@@ -24,10 +24,10 @@ int32_t cam_actuator_construct_default_power_setting(
 {
 	int rc = 0;
 
-	power_info->power_setting_size = 1;
+	power_info->power_setting_size = 2;
 	power_info->power_setting =
 		(struct cam_sensor_power_setting *)
-		kzalloc(sizeof(struct cam_sensor_power_setting),
+		kzalloc(sizeof(struct cam_sensor_power_setting) * MAX_POWER_CONFIG,
 			GFP_KERNEL);
 	if (!power_info->power_setting)
 		return -ENOMEM;
@@ -35,21 +35,30 @@ int32_t cam_actuator_construct_default_power_setting(
 	power_info->power_setting[0].seq_type = SENSOR_VAF;
 	power_info->power_setting[0].seq_val = CAM_VAF;
 	power_info->power_setting[0].config_val = 1;
-	power_info->power_setting[0].delay = 2;
+	power_info->power_setting[0].delay = 1;
 
-	power_info->power_down_setting_size = 1;
+	power_info->power_setting[1].seq_type = SENSOR_VIO;
+	power_info->power_setting[1].seq_val = CAM_VIO;
+	power_info->power_setting[1].config_val = 1;
+	power_info->power_setting[1].delay = 10;
+
+	power_info->power_down_setting_size = 2;
 	power_info->power_down_setting =
 		(struct cam_sensor_power_setting *)
-		kzalloc(sizeof(struct cam_sensor_power_setting),
+		kzalloc(sizeof(struct cam_sensor_power_setting) * MAX_POWER_CONFIG,
 			GFP_KERNEL);
 	if (!power_info->power_down_setting) {
 		rc = -ENOMEM;
 		goto free_power_settings;
 	}
 
-	power_info->power_down_setting[0].seq_type = SENSOR_VAF;
-	power_info->power_down_setting[0].seq_val = CAM_VAF;
+	power_info->power_down_setting[0].seq_type = SENSOR_VIO;
+	power_info->power_down_setting[0].seq_val = CAM_VIO;
 	power_info->power_down_setting[0].config_val = 0;
+
+	power_info->power_down_setting[1].seq_type = SENSOR_VAF;
+	power_info->power_down_setting[1].seq_val = CAM_VAF;
+	power_info->power_down_setting[1].config_val = 0;
 
 	return rc;
 
@@ -60,7 +69,7 @@ free_power_settings:
 	return rc;
 }
 
-static int32_t cam_actuator_power_up(struct cam_actuator_ctrl_t *a_ctrl)
+int32_t cam_actuator_power_up(struct cam_actuator_ctrl_t *a_ctrl)
 {
 	int rc = 0;
 	struct cam_hw_soc_info  *soc_info =
@@ -108,6 +117,7 @@ static int32_t cam_actuator_power_up(struct cam_actuator_ctrl_t *a_ctrl)
 
 	power_info->dev = soc_info->dev;
 
+	CAM_INFO(CAM_ACTUATOR, "POWER UP ABOUT TO CALL");
 	rc = cam_sensor_core_power_up(power_info, soc_info);
 	if (rc) {
 		CAM_ERR(CAM_ACTUATOR,
@@ -122,7 +132,7 @@ static int32_t cam_actuator_power_up(struct cam_actuator_ctrl_t *a_ctrl)
 	return rc;
 }
 
-static int32_t cam_actuator_power_down(struct cam_actuator_ctrl_t *a_ctrl)
+int32_t cam_actuator_power_down(struct cam_actuator_ctrl_t *a_ctrl)
 {
 	int32_t rc = 0;
 	struct cam_sensor_power_ctrl_t *power_info;
@@ -143,6 +153,7 @@ static int32_t cam_actuator_power_down(struct cam_actuator_ctrl_t *a_ctrl)
 		CAM_ERR(CAM_ACTUATOR, "failed: power_info %pK", power_info);
 		return -EINVAL;
 	}
+	CAM_INFO(CAM_ACTUATOR, "ABOUT TO POWER DOWN at slot:%d", soc_info->index);
 	rc = cam_sensor_util_power_down(power_info, soc_info);
 	if (rc) {
 		CAM_ERR(CAM_ACTUATOR, "power down the core is failed:%d", rc);
@@ -231,12 +242,14 @@ int32_t cam_actuator_slaveInfo_pkt_parser(struct cam_actuator_ctrl_t *a_ctrl,
 			a_ctrl->cci_i2c_master;
 		a_ctrl->io_master_info.cci_client->i2c_freq_mode =
 			i2c_info->i2c_freq_mode;
-		a_ctrl->io_master_info.cci_client->sid =
-			i2c_info->slave_addr >> 1;
+		if (i2c_info->slave_addr > 0)
+			a_ctrl->io_master_info.cci_client->sid =
+				i2c_info->slave_addr >> 1;
 		CAM_DBG(CAM_ACTUATOR, "Slave addr: 0x%x Freq Mode: %d",
 			i2c_info->slave_addr, i2c_info->i2c_freq_mode);
 	} else if (a_ctrl->io_master_info.master_type == I2C_MASTER) {
-		a_ctrl->io_master_info.client->addr = i2c_info->slave_addr;
+		if (i2c_info->slave_addr > 0)
+			a_ctrl->io_master_info.client->addr = i2c_info->slave_addr;
 		CAM_DBG(CAM_ACTUATOR, "Slave addr: 0x%x", i2c_info->slave_addr);
 	} else {
 		CAM_ERR(CAM_ACTUATOR, "Invalid Master type: %d",
@@ -252,6 +265,10 @@ int32_t cam_actuator_apply_settings(struct cam_actuator_ctrl_t *a_ctrl,
 {
 	struct i2c_settings_list *i2c_list;
 	int32_t rc = 0;
+
+#if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
+	struct cam_hw_param *hw_param = NULL;
+#endif
 
 	if (a_ctrl == NULL || i2c_set == NULL) {
 		CAM_ERR(CAM_ACTUATOR, "Invalid Args");
@@ -272,6 +289,61 @@ int32_t cam_actuator_apply_settings(struct cam_actuator_ctrl_t *a_ctrl,
 			CAM_ERR(CAM_ACTUATOR,
 				"Failed to apply settings: %d",
 				rc);
+#if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
+			if ((rc < 0) && (i2c_list->i2c_settings.reg_setting->reg_data == 0x0)) {
+				if (a_ctrl != NULL) {
+					switch (a_ctrl->soc_info.index) {
+					case CAMERA_0:
+						if (!msm_is_sec_get_rear_hw_param(&hw_param)) {
+							if (hw_param != NULL) {
+								CAM_ERR(CAM_HWB, "[R][AF] Err\n");
+								hw_param->i2c_af_err_cnt++;
+								hw_param->need_update_to_file = TRUE;
+							}
+						}
+						break;
+
+					case CAMERA_1:
+						if (!msm_is_sec_get_front_hw_param(&hw_param)) {
+							if (hw_param != NULL) {
+								CAM_ERR(CAM_HWB, "[F][AF] Err\n");
+								hw_param->i2c_af_err_cnt++;
+								hw_param->need_update_to_file = TRUE;
+							}
+						}
+						break;
+
+#if defined(CONFIG_SAMSUNG_REAR_TRIPLE)
+					case CAMERA_2:
+						if (!msm_is_sec_get_rear3_hw_param(&hw_param)) {
+							if (hw_param != NULL) {
+								CAM_ERR(CAM_HWB, "[R3][AF] Err\n");
+								hw_param->i2c_af_err_cnt++;
+								hw_param->need_update_to_file = TRUE;
+							}
+						}
+						break;
+#endif
+
+#if defined(CONFIG_SAMSUNG_SECURE_CAMERA)
+					case CAMERA_3:
+						if (!msm_is_sec_get_iris_hw_param(&hw_param)) {
+							if (hw_param != NULL) {
+								CAM_ERR(CAM_HWB, "[I][AF] Err\n");
+								hw_param->i2c_af_err_cnt++;
+								hw_param->need_update_to_file = TRUE;
+							}
+						}
+						break;
+#endif
+
+					default:
+						CAM_ERR(CAM_HWB, "[NON][AF] Unsupport\n");
+						break;
+					}
+				}
+			}
+#endif
 		} else {
 			CAM_DBG(CAM_ACTUATOR,
 				"Success:request ID: %d",
@@ -768,6 +840,7 @@ int32_t cam_actuator_driver_cmd(struct cam_actuator_ctrl_t *a_ctrl,
 		struct cam_sensor_acquire_dev actuator_acq_dev;
 		struct cam_create_dev_hdl bridge_params;
 
+		CAM_INFO(CAM_ACTUATOR, "CAM_ACQUIRE_DEV");
 		if (a_ctrl->bridge_intf.device_hdl != -1) {
 			CAM_ERR(CAM_ACTUATOR, "Device is already acquired");
 			rc = -EINVAL;
@@ -807,6 +880,7 @@ int32_t cam_actuator_driver_cmd(struct cam_actuator_ctrl_t *a_ctrl,
 	}
 		break;
 	case CAM_RELEASE_DEV: {
+		CAM_INFO(CAM_ACTUATOR, "CAM_RELEASE_DEV");
 		if (a_ctrl->cam_act_state == CAM_ACTUATOR_START) {
 			rc = -EINVAL;
 			CAM_WARN(CAM_ACTUATOR,
@@ -870,6 +944,7 @@ int32_t cam_actuator_driver_cmd(struct cam_actuator_ctrl_t *a_ctrl,
 	}
 		break;
 	case CAM_START_DEV: {
+		CAM_INFO(CAM_ACTUATOR, "CAM_START_DEV");
 		if (a_ctrl->cam_act_state != CAM_ACTUATOR_CONFIG) {
 			rc = -EINVAL;
 			CAM_WARN(CAM_ACTUATOR,
@@ -884,6 +959,7 @@ int32_t cam_actuator_driver_cmd(struct cam_actuator_ctrl_t *a_ctrl,
 	case CAM_STOP_DEV: {
 		struct i2c_settings_array *i2c_set = NULL;
 		int i;
+		CAM_INFO(CAM_ACTUATOR, "CAM_STOP_DEV");
 
 		if (a_ctrl->cam_act_state != CAM_ACTUATOR_START) {
 			rc = -EINVAL;

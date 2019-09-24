@@ -37,6 +37,9 @@
 #include <asm/paravirt.h>
 #endif
 
+#include <linux/sec_debug.h>
+#include <linux/sec_debug_summary.h>
+
 #include "sched.h"
 #include "walt.h"
 #include "../workqueue_internal.h"
@@ -46,6 +49,15 @@
 #include <trace/events/sched.h>
 
 DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
+
+#ifdef CONFIG_SEC_DEBUG_SCHED_LOG
+void summary_set_lpm_info_runqueues(struct sec_debug_summary_data_apss *apss)
+{
+	pr_info("%s : 0x%llx\n", __func__, virt_to_phys((void *)&runqueues));
+	apss->aplpm.p_runqueues = virt_to_phys((void *)&runqueues);
+	apss->aplpm.cstate_offset = offsetof(struct rq, cstate);
+}
+#endif
 
 /*
  * Debugging: various feature bits
@@ -3564,6 +3576,9 @@ static void __sched notrace __schedule(bool preempt)
 		trace_sched_switch(preempt, prev, next);
 
 		/* Also unlocks the rq: */
+#ifdef CONFIG_SEC_DEBUG_SCHED_LOG
+		sec_debug_task_sched_log(cpu, preempt, next, prev);
+#endif
 		rq = context_switch(rq, prev, next, &rf);
 	} else {
 		update_task_ravg(prev, rq, TASK_UPDATE, wallclock, 0);
@@ -6361,6 +6376,8 @@ void __init sched_init(void)
 {
 	int i, j;
 	unsigned long alloc_size = 0, ptr;
+
+	sec_gaf_supply_rqinfo(offsetof(struct rq, curr),offsetof(struct cfs_rq, rq));
 
 	sched_clock_init();
 	wait_bit_init();

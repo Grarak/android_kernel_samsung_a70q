@@ -20,6 +20,27 @@
 #include "cam_packet_util.h"
 
 
+#if defined(CONFIG_SAMSUNG_REAR_TOF) || defined(CONFIG_SAMSUNG_FRONT_TOF)
+struct cam_sensor_ctrl_t *g_s_ctrl_tof;
+int check_pd_ready;
+#endif
+
+#if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
+//#define HWB_FILE_OPERATION 1
+uint32_t sec_sensor_position;
+uint32_t sec_sensor_clk_size;
+
+static struct cam_hw_param_collector cam_hwparam_collector;
+#endif
+#if defined(CONFIG_CAMERA_DYNAMIC_MIPI)
+#include "cam_sensor_mipi.h"
+#endif
+
+#define STREAM_ON_ADDR_IMX586_S5K4HA    0x0100
+#define STREAM_ON_ADDR_IMX316           0x1001
+
+char tof_freq[10] = "\n";
+
 static void cam_sensor_update_req_mgr(
 	struct cam_sensor_ctrl_t *s_ctrl,
 	struct cam_packet *csl_packet)
@@ -149,7 +170,7 @@ static int32_t cam_sensor_i2c_pkt_parse(struct cam_sensor_ctrl_t *s_ctrl,
 		CAM_SENSOR_PACKET_OPCODE_SENSOR_INITIAL_CONFIG &&
 		csl_packet->header.request_id <= s_ctrl->last_flush_req
 		&& s_ctrl->last_flush_req != 0) {
-		CAM_ERR(CAM_SENSOR,
+		CAM_DBG(CAM_SENSOR,
 			"reject request %lld, last request to flush %lld",
 			csl_packet->header.request_id, s_ctrl->last_flush_req);
 		rc = -EINVAL;
@@ -267,14 +288,67 @@ rel_pkt_buf:
 	return rc;
 }
 
+#if defined(CONFIG_CAMERA_DYNAMIC_MIPI)
+int32_t cam_check_stream_on(
+	struct cam_sensor_ctrl_t *s_ctrl,
+	struct i2c_settings_list *i2c_list)
+{
+	int32_t ret = 0;
+
+#if defined(CONFIG_SEC_A90Q_PROJECT)
+	if (i2c_list->i2c_settings.reg_setting[0].reg_addr == STREAM_ON_ADDR_IMX316
+		&& i2c_list->i2c_settings.reg_setting[0].reg_data != 0x0
+		&& s_ctrl->sensordata->slave_info.sensor_id == SENSOR_ID_IMX316
+		&& (s_ctrl->soc_info.index == 7 /*Front TOF*/ || s_ctrl->soc_info.index == 6 /*Rear TOF*/)) {
+		ret = 1;
+	}
+#endif
+	return ret;
+}
+#endif
+
 static int32_t cam_sensor_i2c_modes_util(
+	struct cam_sensor_ctrl_t *s_ctrl,
 	struct camera_io_master *io_master_info,
 	struct i2c_settings_list *i2c_list)
 {
 	int32_t rc = 0;
 	uint32_t i, size;
 
+#if defined(CONFIG_CAMERA_DYNAMIC_MIPI)
+	const struct cam_mipi_sensor_mode *cur_mipi_sensor_mode;
+	struct i2c_settings_list mipi_i2c_list;
+#endif
+
 	if (i2c_list->op_code == CAM_SENSOR_I2C_WRITE_RANDOM) {
+#if defined(CONFIG_CAMERA_DYNAMIC_MIPI)
+		if (cam_check_stream_on(s_ctrl, i2c_list)
+			&& s_ctrl->mipi_clock_index_new != INVALID_MIPI_INDEX
+			&& s_ctrl->i2c_data.streamon_settings.is_settings_valid) {
+			CAM_INFO(CAM_SENSOR, "[dynamic_mipi] Write MIPI setting before Stream On setting. mipi_index : %d",
+				s_ctrl->mipi_clock_index_new);
+
+			cur_mipi_sensor_mode = &(s_ctrl->mipi_info[0]);
+			memset(&mipi_i2c_list, 0, sizeof(mipi_i2c_list));
+
+			mipi_i2c_list.i2c_settings.reg_setting =
+				cur_mipi_sensor_mode->mipi_setting[s_ctrl->mipi_clock_index_new].clk_setting->reg_setting;
+			mipi_i2c_list.i2c_settings.addr_type =
+				cur_mipi_sensor_mode->mipi_setting[s_ctrl->mipi_clock_index_new].clk_setting->addr_type;
+			mipi_i2c_list.i2c_settings.data_type =
+				cur_mipi_sensor_mode->mipi_setting[s_ctrl->mipi_clock_index_new].clk_setting->data_type;
+			mipi_i2c_list.i2c_settings.size =
+				cur_mipi_sensor_mode->mipi_setting[s_ctrl->mipi_clock_index_new].clk_setting->size;
+			mipi_i2c_list.i2c_settings.delay =
+				cur_mipi_sensor_mode->mipi_setting[s_ctrl->mipi_clock_index_new].clk_setting->delay;
+
+			CAM_INFO(CAM_SENSOR, "[dynamic_mipi] Picked MIPI clock : %s", cur_mipi_sensor_mode->mipi_setting[s_ctrl->mipi_clock_index_new].str_mipi_clk);
+
+			rc = camera_io_dev_write(io_master_info,
+				&(mipi_i2c_list.i2c_settings));
+		}
+#endif
+
 		rc = camera_io_dev_write(io_master_info,
 			&(i2c_list->i2c_settings));
 		if (rc < 0) {
@@ -283,6 +357,25 @@ static int32_t cam_sensor_i2c_modes_util(
 				rc);
 			return rc;
 		}
+#if defined(CONFIG_SEC_A90Q_PROJECT)
+		if ((i2c_list->i2c_settings.size > 0)
+			&& (i2c_list->i2c_settings.reg_setting[0].reg_addr == STREAM_ON_ADDR_IMX586_S5K4HA || i2c_list->i2c_settings.reg_setting[0].reg_addr == STREAM_ON_ADDR_IMX316)
+			&& (i2c_list->i2c_settings.reg_setting[0].reg_data == 0x0)) {
+			uint32_t frame_cnt = 0;
+			int retry_cnt = 20;
+			CAM_INFO(CAM_SENSOR, "Stream off start retry_cnt = %d", retry_cnt);
+
+			do {
+				rc = camera_io_dev_read(io_master_info, 0x0005,	&frame_cnt,
+					CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
+				CAM_DBG(CAM_SENSOR, "retry cnt : %d, Stream off, frame_cnt : %x", retry_cnt, frame_cnt);
+				if (frame_cnt != 0xFF)
+					usleep_range(2000, 3000);
+				retry_cnt--;
+			} while (frame_cnt != 0xFF && retry_cnt > 0);
+			CAM_INFO(CAM_SENSOR, "Stream off end retry_cnt = %d", retry_cnt);
+		}
+#endif
 	} else if (i2c_list->op_code == CAM_SENSOR_I2C_WRITE_SEQ) {
 		rc = camera_io_dev_write_continuous(
 			io_master_info,
@@ -634,7 +727,16 @@ int cam_sensor_match_id(struct cam_sensor_ctrl_t *s_ctrl)
 		&chipid, CAMERA_SENSOR_I2C_TYPE_WORD,
 		CAMERA_SENSOR_I2C_TYPE_WORD);
 
-	CAM_DBG(CAM_SENSOR, "read id: 0x%x expected id 0x%x:",
+#if defined(CONFIG_SAMSUNG_FRONT_TOF) || defined(CONFIG_SAMSUNG_REAR_TOF)
+        if(slave_info->sensor_id == TOF_SENSOR_ID_IMX316)
+        {
+            chipid >>= 4;
+        }
+#endif
+#if defined(CONFIG_SEC_A60Q_PROJECT)
+	usleep_range(200, 300);
+#endif
+	CAM_ERR(CAM_SENSOR, "read id: 0x%x expected id 0x%x:",
 			 chipid, slave_info->sensor_id);
 	if (cam_sensor_id_by_mask(s_ctrl, chipid) != slave_info->sensor_id) {
 		CAM_ERR(CAM_SENSOR, "chip id %x does not match %x",
@@ -651,6 +753,11 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 	struct cam_control *cmd = (struct cam_control *)arg;
 	struct cam_sensor_power_ctrl_t *power_info =
 		&s_ctrl->sensordata->power_info;
+
+#if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
+	struct cam_hw_param *hw_param = NULL;
+#endif
+
 	if (!s_ctrl || !arg) {
 		CAM_ERR(CAM_SENSOR, "s_ctrl is NULL");
 		return -EINVAL;
@@ -672,6 +779,10 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 				"Already Sensor Probed in the slot");
 			break;
 		}
+
+#if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
+		sec_sensor_position = s_ctrl->id;
+#endif
 
 		if (cmd->handle_type ==
 			CAM_HANDLE_MEM_HANDLE) {
@@ -720,11 +831,132 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 
 		/* Match sensor ID */
 		rc = cam_sensor_match_id(s_ctrl);
+
+#if defined(CONFIG_CAMERA_DYNAMIC_MIPI)
+#if defined(CONFIG_SEC_A90Q_PROJECT)
+		if (
+			(s_ctrl->sensordata->slave_info.sensor_id == SENSOR_ID_IMX316
+			&& (s_ctrl->soc_info.index == 7 /*Front TOF*/ || s_ctrl->soc_info.index == 6))
+			) {
+			cam_mipi_init_setting(s_ctrl);
+		}
+#endif
+#endif
+
+#if 0
 		if (rc < 0) {
 			cam_sensor_power_down(s_ctrl);
 			msleep(20);
 			goto free_power_settings;
 		}
+#endif
+
+#if 1 //For factory module test
+		if (rc < 0) {
+			CAM_ERR(CAM_SENSOR, "need to check sensor module : 0x%x",
+				s_ctrl->sensordata->slave_info.sensor_id);
+#if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
+			if (rc < 0) {
+				CAM_ERR(CAM_HWB, "failed rc %d\n", rc);
+				if (s_ctrl != NULL) {
+					switch (s_ctrl->id) {
+					case CAMERA_0:
+						if (!msm_is_sec_get_rear_hw_param(&hw_param)) {
+							if (hw_param != NULL) {
+								CAM_ERR(CAM_HWB, "[R][I2C] Err\n");
+								hw_param->i2c_sensor_err_cnt++;
+								hw_param->need_update_to_file = TRUE;
+							}
+						}
+						break;
+
+					case CAMERA_1:
+						if (!msm_is_sec_get_front_hw_param(&hw_param)) {
+							if (hw_param != NULL) {
+								CAM_ERR(CAM_HWB, "[F][I2C] Err\n");
+								hw_param->i2c_sensor_err_cnt++;
+								hw_param->need_update_to_file = TRUE;
+							}
+						}
+						break;
+
+#if defined(CONFIG_SAMSUNG_FRONT_DUAL)
+					case CAMERA_2:
+						if (!msm_is_sec_get_front2_hw_param(&hw_param)) {
+							if (hw_param != NULL) {
+								CAM_ERR(CAM_HWB, "[F2][I2C] Err\n");
+								hw_param->i2c_sensor_err_cnt++;
+								hw_param->need_update_to_file = TRUE;
+							}
+						}
+						break;
+#endif
+
+#if defined(CONFIG_SAMSUNG_FRONT_TOP)
+					case CAMERA_5:
+						if (!msm_is_sec_get_front3_hw_param(&hw_param)) {
+							if (hw_param != NULL) {
+								CAM_ERR(CAM_HWB, "[F3][I2C] Err\n");
+								hw_param->i2c_sensor_err_cnt++;
+								hw_param->need_update_to_file = TRUE;
+							}
+						}
+						break;
+#endif
+
+#if defined(CONFIG_SAMSUNG_REAR_DUAL) || defined(CONFIG_SAMSUNG_REAR_TRIPLE)
+					case CAMERA_3:
+						if (!msm_is_sec_get_rear2_hw_param(&hw_param)) {
+							if (hw_param != NULL) {
+								CAM_ERR(CAM_HWB, "[R2][I2C] Err\n");
+								hw_param->i2c_sensor_err_cnt++;
+								hw_param->need_update_to_file = TRUE;
+							}
+						}
+						break;
+#endif
+
+#if defined(CONFIG_SAMSUNG_REAR_TRIPLE)
+					case CAMERA_4:
+						if (!msm_is_sec_get_rear3_hw_param(&hw_param)) {
+							if (hw_param != NULL) {
+								CAM_ERR(CAM_HWB, "[R3][I2C] Err\n");
+								hw_param->i2c_sensor_err_cnt++;
+								hw_param->need_update_to_file = TRUE;
+							}
+						}
+						break;
+#endif
+
+#if defined(CONFIG_SAMSUNG_SECURE_CAMERA)
+					case CAMERA_3:
+						if (!msm_is_sec_get_iris_hw_param(&hw_param)) {
+							if (hw_param != NULL) {
+								CAM_ERR(CAM_HWB, "[I][I2C] Err\n");
+								hw_param->i2c_sensor_err_cnt++;
+								hw_param->need_update_to_file = TRUE;
+							}
+						}
+						break;
+#endif
+
+					default:
+						CAM_ERR(CAM_HWB, "[NON][I2C] Unsupport\n");
+						break;
+					}
+				}
+			}
+#endif
+		}
+#else
+		if (rc < 0) {
+			cam_sensor_power_down(s_ctrl);
+			msleep(20);
+			kfree(pu);
+			kfree(pd);
+			goto release_mutex;
+		}
+#endif
 
 		CAM_INFO(CAM_SENSOR,
 			"Probe success,slot:%d,slave_addr:0x%x,sensor_id:0x%x",
@@ -781,6 +1013,21 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			cam_create_device_hdl(&bridge_params);
 		s_ctrl->bridge_intf.device_hdl = sensor_acq_dev.device_handle;
 		s_ctrl->bridge_intf.session_hdl = sensor_acq_dev.session_handle;
+
+#if defined(CONFIG_SAMSUNG_REAR_TOF) || defined(CONFIG_SAMSUNG_FRONT_TOF)
+		if(s_ctrl->sensordata->slave_info.sensor_id == 0x316)
+		{
+			g_s_ctrl_tof = s_ctrl;
+			check_pd_ready = 0;
+		}
+#endif
+
+#if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
+		if (sec_sensor_position < s_ctrl->id) {
+			sec_sensor_position = s_ctrl->id;
+			CAM_ERR(CAM_SENSOR, "sensor_position: %d", sec_sensor_position);
+		}
+#endif
 
 		CAM_DBG(CAM_SENSOR, "Device Handle: %d",
 			sensor_acq_dev.device_handle);
@@ -857,6 +1104,10 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 		s_ctrl->streamon_count = 0;
 		s_ctrl->streamoff_count = 0;
 		s_ctrl->last_flush_req = 0;
+#if defined(CONFIG_SAMSUNG_REAR_TOF) || defined(CONFIG_SAMSUNG_FRONT_TOF)
+		g_s_ctrl_tof = NULL;
+		check_pd_ready = 0;
+#endif
 	}
 		break;
 	case CAM_QUERY_CAP: {
@@ -881,6 +1132,18 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			goto release_mutex;
 		}
 
+#if defined(CONFIG_CAMERA_DYNAMIC_MIPI)
+#if defined(CONFIG_SEC_A90Q_PROJECT)
+		if (
+			(s_ctrl->sensordata->slave_info.sensor_id == SENSOR_ID_IMX316
+			&& (s_ctrl->soc_info.index == 7 /*Front TOF*/|| s_ctrl->soc_info.index == 6))
+			) {
+			cam_mipi_update_info(s_ctrl);
+			cam_mipi_get_clock_string(s_ctrl);
+		}
+#endif
+#endif
+
 		if (s_ctrl->i2c_data.streamon_settings.is_settings_valid &&
 			(s_ctrl->i2c_data.streamon_settings.request_id == 0)) {
 			rc = cam_sensor_apply_settings(s_ctrl, 0,
@@ -891,6 +1154,16 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 				goto release_mutex;
 			}
 		}
+
+#if defined(CONFIG_SAMSUNG_REAR_TOF) || defined(CONFIG_SAMSUNG_FRONT_TOF)
+		if (s_ctrl->sensordata->slave_info.sensor_id == TOF_SENSOR_ID_IMX316 &&
+			s_ctrl->sensordata->power_info.gpio_num_info &&
+			s_ctrl->sensordata->power_info.gpio_num_info->valid[SENSOR_CUSTOM_GPIO1] == 1) {
+			gpio_set_value_cansleep(
+				s_ctrl->sensordata->power_info.gpio_num_info->gpio_num[SENSOR_CUSTOM_GPIO1],
+				GPIOF_OUT_INIT_HIGH);
+		}
+#endif
 		s_ctrl->sensor_state = CAM_SENSOR_START;
 		CAM_INFO(CAM_SENSOR,
 			"CAM_START_DEV Success, sensor_id:0x%x,sensor_slave_addr:0x%x",
@@ -907,6 +1180,13 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			goto release_mutex;
 		}
 
+#if defined(CONFIG_SEC_A90Q_PROJECT)
+		if (s_ctrl->sensordata->slave_info.sensor_id == SENSOR_ID_IMX316
+			&& (s_ctrl->soc_info.index == 7 /*Front TOF*/ || s_ctrl->soc_info.index == 6)) {
+			scnprintf(tof_freq, sizeof(tof_freq), "0");
+			CAM_INFO(CAM_SENSOR, "[TOF_FREQ_DBG] tof_freq : %s", tof_freq);
+		}
+#endif
 		if (s_ctrl->i2c_data.streamoff_settings.is_settings_valid &&
 			(s_ctrl->i2c_data.streamoff_settings.request_id == 0)) {
 			rc = cam_sensor_apply_settings(s_ctrl, 0,
@@ -1067,11 +1347,119 @@ int cam_sensor_power_up(struct cam_sensor_ctrl_t *s_ctrl)
 	struct cam_camera_slave_info *slave_info;
 	struct cam_hw_soc_info *soc_info =
 		&s_ctrl->soc_info;
+#if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
+	struct cam_hw_param *hw_param = NULL;
+#endif
 
 	if (!s_ctrl) {
 		CAM_ERR(CAM_SENSOR, "failed: %pK", s_ctrl);
 		return -EINVAL;
 	}
+
+#if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
+	if (s_ctrl != NULL) {
+		switch (s_ctrl->id) {
+		case CAMERA_0:
+			if (!msm_is_sec_get_rear_hw_param(&hw_param)) {
+				if (hw_param != NULL) {
+					CAM_DBG(CAM_HWB, "[R][INIT] Init\n");
+					hw_param->i2c_chk = FALSE;
+					hw_param->mipi_chk = FALSE;
+					hw_param->need_update_to_file = FALSE;
+					hw_param->comp_chk = FALSE;
+				}
+			}
+			break;
+
+		case CAMERA_1:
+			if (!msm_is_sec_get_front_hw_param(&hw_param)) {
+				if (hw_param != NULL) {
+					CAM_DBG(CAM_HWB, "[F][INIT] Init\n");
+					hw_param->i2c_chk = FALSE;
+					hw_param->mipi_chk = FALSE;
+					hw_param->need_update_to_file = FALSE;
+					hw_param->comp_chk = FALSE;
+				}
+			}
+			break;
+
+#if defined(CONFIG_SAMSUNG_FRONT_DUAL)
+		case CAMERA_2:
+			if (!msm_is_sec_get_front2_hw_param(&hw_param)) {
+				if (hw_param != NULL) {
+					CAM_DBG(CAM_HWB, "[F2][INIT] Init\n");
+					hw_param->i2c_chk = FALSE;
+					hw_param->mipi_chk = FALSE;
+					hw_param->need_update_to_file = FALSE;
+					hw_param->comp_chk = FALSE;
+				}
+			}
+			break;
+#endif
+
+#if defined(CONFIG_SAMSUNG_FRONT_TOP)
+		case CAMERA_5:
+			if (!msm_is_sec_get_front3_hw_param(&hw_param)) {
+				if (hw_param != NULL) {
+					CAM_DBG(CAM_HWB, "[F3][INIT] Init\n");
+					hw_param->i2c_chk = FALSE;
+					hw_param->mipi_chk = FALSE;
+					hw_param->need_update_to_file = FALSE;
+					hw_param->comp_chk = FALSE;
+				}
+			}
+			break;
+#endif
+
+#if defined(CONFIG_SAMSUNG_REAR_DUAL) || defined(CONFIG_SAMSUNG_REAR_TRIPLE)
+		case CAMERA_3:
+			if (!msm_is_sec_get_rear2_hw_param(&hw_param)) {
+				if (hw_param != NULL) {
+					CAM_DBG(CAM_HWB, "[R2][INIT] Init\n");
+					hw_param->i2c_chk = FALSE;
+					hw_param->mipi_chk = FALSE;
+					hw_param->need_update_to_file = FALSE;
+					hw_param->comp_chk = FALSE;
+
+				}
+			}
+			break;
+#endif
+
+#if defined(CONFIG_SAMSUNG_REAR_TRIPLE)
+		case CAMERA_4:
+			if (!msm_is_sec_get_rear3_hw_param(&hw_param)) {
+				if (hw_param != NULL) {
+					CAM_DBG(CAM_HWB, "[R3][INIT] Init\n");
+					hw_param->i2c_chk = FALSE;
+					hw_param->mipi_chk = FALSE;
+					hw_param->need_update_to_file = FALSE;
+					hw_param->comp_chk = FALSE;
+				}
+			}
+			break;
+#endif
+
+#if defined(CONFIG_SAMSUNG_SECURE_CAMERA)
+		case CAMERA_3:
+			if (!msm_is_sec_get_iris_hw_param(&hw_param)) {
+				if (hw_param != NULL) {
+					CAM_DBG(CAM_HWB, "[I][INIT] Init\n");
+					hw_param->i2c_chk = FALSE;
+					hw_param->mipi_chk = FALSE;
+					hw_param->need_update_to_file = FALSE;
+					hw_param->comp_chk = FALSE;
+				}
+			}
+			break;
+#endif
+
+		default:
+			CAM_ERR(CAM_HWB, "[NON][INIT] Unsupport\n");
+			break;
+		}
+	}
+#endif
 
 	power_info = &s_ctrl->sensordata->power_info;
 	slave_info = &(s_ctrl->sensordata->slave_info);
@@ -1109,11 +1497,147 @@ int cam_sensor_power_down(struct cam_sensor_ctrl_t *s_ctrl)
 	struct cam_sensor_power_ctrl_t *power_info;
 	struct cam_hw_soc_info *soc_info;
 	int rc = 0;
+#if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
+	struct cam_hw_param *hw_param = NULL;
+#endif
 
 	if (!s_ctrl) {
 		CAM_ERR(CAM_SENSOR, "failed: s_ctrl %pK", s_ctrl);
 		return -EINVAL;
 	}
+
+#if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
+	if (s_ctrl != NULL) {
+		switch (s_ctrl->id) {
+		case CAMERA_0:
+			if (!msm_is_sec_get_rear_hw_param(&hw_param)) {
+				if (hw_param != NULL) {
+					hw_param->i2c_chk = FALSE;
+					hw_param->mipi_chk = FALSE;
+					hw_param->comp_chk = FALSE;
+
+					if (hw_param->need_update_to_file) {
+						CAM_DBG(CAM_HWB, "[R][DEINIT] Update\n");
+						msm_is_sec_copy_err_cnt_to_file();
+					}
+					hw_param->need_update_to_file = FALSE;
+				}
+			}
+			break;
+
+		case CAMERA_1:
+			if (!msm_is_sec_get_front_hw_param(&hw_param)) {
+				if (hw_param != NULL) {
+					hw_param->i2c_chk = FALSE;
+					hw_param->mipi_chk = FALSE;
+					hw_param->comp_chk = FALSE;
+
+					if (hw_param->need_update_to_file) {
+						CAM_DBG(CAM_HWB, "[F][DEINIT] Update\n");
+						msm_is_sec_copy_err_cnt_to_file();
+					}
+					hw_param->need_update_to_file = FALSE;
+				}
+			}
+			break;
+
+#if defined(CONFIG_SAMSUNG_FRONT_DUAL)
+		case CAMERA_2:
+			if (!msm_is_sec_get_front2_hw_param(&hw_param)) {
+				if (hw_param != NULL) {
+					hw_param->i2c_chk = FALSE;
+					hw_param->mipi_chk = FALSE;
+					hw_param->comp_chk = FALSE;
+
+					if (hw_param->need_update_to_file) {
+						CAM_DBG(CAM_HWB, "[F2][DEINIT] Update\n");
+						msm_is_sec_copy_err_cnt_to_file();
+					}
+					hw_param->need_update_to_file = FALSE;
+				}
+			}
+			break;
+#endif
+
+#if defined(CONFIG_SAMSUNG_FRONT_TOP)
+		case CAMERA_5:
+			if (!msm_is_sec_get_front3_hw_param(&hw_param)) {
+				if (hw_param != NULL) {
+					hw_param->i2c_chk = FALSE;
+					hw_param->mipi_chk = FALSE;
+					hw_param->comp_chk = FALSE;
+
+					if (hw_param->need_update_to_file) {
+						CAM_DBG(CAM_HWB, "[F3][DEINIT] Update\n");
+						msm_is_sec_copy_err_cnt_to_file();
+					}
+					hw_param->need_update_to_file = FALSE;
+				}
+			}
+			break;
+#endif
+
+#if defined(CONFIG_SAMSUNG_REAR_DUAL) || defined(CONFIG_SAMSUNG_REAR_TRIPLE)
+		case CAMERA_3:
+			if (!msm_is_sec_get_rear2_hw_param(&hw_param)) {
+				if (hw_param != NULL) {
+					hw_param->i2c_chk = FALSE;
+					hw_param->mipi_chk = FALSE;
+					hw_param->comp_chk = FALSE;
+
+					if (hw_param->need_update_to_file) {
+						CAM_DBG(CAM_HWB, "[R2][DEINIT] Update\n");
+						msm_is_sec_copy_err_cnt_to_file();
+					}
+					hw_param->need_update_to_file = FALSE;
+				}
+			}
+			break;
+#endif
+
+#if defined(CONFIG_SAMSUNG_REAR_TRIPLE)
+		case CAMERA_4:
+			if (!msm_is_sec_get_rear3_hw_param(&hw_param)) {
+				if (hw_param != NULL) {
+					hw_param->i2c_chk = FALSE;
+					hw_param->mipi_chk = FALSE;
+					hw_param->comp_chk = FALSE;
+
+					if (hw_param->need_update_to_file) {
+						CAM_DBG(CAM_HWB, "[R3][DEINIT] Update\n");
+						msm_is_sec_copy_err_cnt_to_file();
+					}
+					hw_param->need_update_to_file = FALSE;
+				}
+			}
+			break;
+#endif
+
+
+#if defined(CONFIG_SAMSUNG_SECURE_CAMERA)
+		case CAMERA_3:
+			if (!msm_is_sec_get_iris_hw_param(&hw_param)) {
+				if (hw_param != NULL) {
+					hw_param->i2c_chk = FALSE;
+					hw_param->mipi_chk = FALSE;
+					hw_param->comp_chk = FALSE;
+
+					if (hw_param->need_update_to_file) {
+						CAM_DBG(CAM_HWB, "[I][DEINIT] Update\n");
+						msm_is_sec_copy_err_cnt_to_file();
+					}
+					hw_param->need_update_to_file = FALSE;
+				}
+			}
+			break;
+#endif
+
+		default:
+			CAM_ERR(CAM_HWB, "[NON][DEINIT] Unsupport\n");
+			break;
+		}
+	}
+#endif
 
 	power_info = &s_ctrl->sensordata->power_info;
 	soc_info = &s_ctrl->soc_info;
@@ -1178,6 +1702,7 @@ int cam_sensor_apply_settings(struct cam_sensor_ctrl_t *s_ctrl,
 			list_for_each_entry(i2c_list,
 				&(i2c_set->list_head), list) {
 				rc = cam_sensor_i2c_modes_util(
+					s_ctrl,
 					&(s_ctrl->io_master_info),
 					i2c_list);
 				if (rc < 0) {
@@ -1196,6 +1721,7 @@ int cam_sensor_apply_settings(struct cam_sensor_ctrl_t *s_ctrl,
 			list_for_each_entry(i2c_list,
 				&(i2c_set->list_head), list) {
 				rc = cam_sensor_i2c_modes_util(
+					s_ctrl,
 					&(s_ctrl->io_master_info),
 					i2c_list);
 				if (rc < 0) {
@@ -1345,3 +1871,259 @@ int32_t cam_sensor_flush_request(struct cam_req_mgr_flush_request *flush_req)
 	mutex_unlock(&(s_ctrl->cam_sensor_mutex));
 	return rc;
 }
+
+#if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
+void msm_is_sec_init_all_cnt(void)
+{
+	CAM_INFO(CAM_HWB, "All_Init_Cnt\n");
+	memset(&cam_hwparam_collector, 0, sizeof(struct cam_hw_param_collector));
+}
+
+void msm_is_sec_init_err_cnt_file(struct cam_hw_param *hw_param)
+{
+	if (hw_param != NULL) {
+		CAM_INFO(CAM_HWB, "Init_Cnt\n");
+
+		memset(hw_param, 0, sizeof(struct cam_hw_param));
+		msm_is_sec_copy_err_cnt_to_file();
+	} else {
+		CAM_INFO(CAM_HWB, "NULL\n");
+	}
+}
+
+void msm_is_sec_dbg_check(void)
+{
+	CAM_INFO(CAM_HWB, "Dbg E\n");
+	CAM_INFO(CAM_HWB, "Dbg X\n");
+}
+
+void msm_is_sec_copy_err_cnt_to_file(void)
+{
+#if defined(HWB_FILE_OPERATION)
+	struct file *fp = NULL;
+	mm_segment_t old_fs;
+	long nwrite = 0;
+	int old_mask = 0;
+
+	CAM_INFO(CAM_HWB, "To_F\n");
+
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+	old_mask = sys_umask(0);
+
+	fp = filp_open(CAM_HW_ERR_CNT_FILE_PATH, O_WRONLY | O_CREAT | O_TRUNC | O_SYNC, 0660);
+	if (IS_ERR_OR_NULL(fp)) {
+		CAM_ERR(CAM_HWB, "[To_F] Err\n");
+		sys_umask(old_mask);
+		set_fs(old_fs);
+		return;
+	}
+
+	nwrite = vfs_write(fp, (char *)&cam_hwparam_collector, sizeof(struct cam_hw_param_collector), &fp->f_pos);
+
+	filp_close(fp, NULL);
+	fp = NULL;
+	sys_umask(old_mask);
+	set_fs(old_fs);
+#endif
+}
+
+void msm_is_sec_copy_err_cnt_from_file(void)
+{
+#if defined(HWB_FILE_OPERATION)
+	struct file *fp = NULL;
+	mm_segment_t old_fs;
+	long nread = 0;
+	int ret = 0;
+
+	ret = msm_is_sec_file_exist(CAM_HW_ERR_CNT_FILE_PATH, HW_PARAMS_NOT_CREATED);
+	if (ret == 1) {
+		CAM_INFO(CAM_HWB, "From_F\n");
+		old_fs = get_fs();
+		set_fs(KERNEL_DS);
+
+		fp = filp_open(CAM_HW_ERR_CNT_FILE_PATH, O_RDONLY, 0660);
+		if (IS_ERR_OR_NULL(fp)) {
+			CAM_ERR(CAM_HWB, "[From_F] Err\n");
+			set_fs(old_fs);
+			return;
+		}
+
+		nread = vfs_read(fp, (char *)&cam_hwparam_collector, sizeof(struct cam_hw_param_collector), &fp->f_pos);
+
+		filp_close(fp, NULL);
+		fp = NULL;
+		set_fs(old_fs);
+	} else {
+		CAM_INFO(CAM_HWB, "NoEx_F\n");
+	}
+#endif
+}
+
+int msm_is_sec_file_exist(char *filename, hw_params_check_type chktype)
+{
+	int ret = 0;
+#if defined(HWB_FILE_OPERATION)
+	struct file *fp = NULL;
+	mm_segment_t old_fs;
+	long nwrite = 0;
+	int old_mask = 0;
+
+	old_fs = get_fs();
+	set_fs(KERNEL_DS);
+
+	if (sys_access(filename, 0) == 0) {
+		CAM_INFO(CAM_HWB, "Ex_F\n");
+		ret = 1;
+	} else {
+		switch (chktype) {
+		case HW_PARAMS_CREATED:
+			CAM_INFO(CAM_HWB, "Ex_Cr\n");
+			msm_is_sec_init_all_cnt();
+
+			old_mask = sys_umask(0);
+
+			fp = filp_open(CAM_HW_ERR_CNT_FILE_PATH, O_WRONLY | O_CREAT | O_TRUNC | O_SYNC, 0660);
+			if (IS_ERR_OR_NULL(fp)) {
+				CAM_ERR(CAM_HWB, "[Ex_F] ERROR\n");
+				ret = 0;
+			} else {
+				nwrite = vfs_write(fp, (char *)&cam_hwparam_collector, sizeof(struct cam_hw_param_collector), &fp->f_pos);
+
+				filp_close(fp, current->files);
+				fp = NULL;
+				ret = 2;
+			}
+			sys_umask(old_mask);
+			break;
+
+		case HW_PARAMS_NOT_CREATED:
+			CAM_INFO(CAM_HWB, "Ex_NoCr\n");
+			ret = 0;
+			break;
+
+		default:
+			CAM_INFO(CAM_HWB, "Ex_Err\n");
+			ret = 0;
+			break;
+		}
+	}
+
+	set_fs(old_fs);
+#endif
+
+	return ret;
+}
+
+int msm_is_sec_get_sensor_position(uint32_t **cam_position)
+{
+	*cam_position = &sec_sensor_position;
+	return 0;
+}
+
+int msm_is_sec_get_sensor_comp_mode(uint32_t **sensor_clk_size)
+{
+	*sensor_clk_size = &sec_sensor_clk_size;
+	return 0;
+}
+
+int msm_is_sec_get_rear_hw_param(struct cam_hw_param **hw_param)
+{
+	*hw_param = &cam_hwparam_collector.rear_hwparam;
+	return 0;
+}
+
+int msm_is_sec_get_front_hw_param(struct cam_hw_param **hw_param)
+{
+	*hw_param = &cam_hwparam_collector.front_hwparam;
+	return 0;
+}
+
+int msm_is_sec_get_iris_hw_param(struct cam_hw_param **hw_param)
+{
+	*hw_param = &cam_hwparam_collector.iris_hwparam;
+	return 0;
+}
+
+int msm_is_sec_get_rear2_hw_param(struct cam_hw_param **hw_param)
+{
+	*hw_param = &cam_hwparam_collector.rear2_hwparam;
+	return 0;
+}
+
+int msm_is_sec_get_front2_hw_param(struct cam_hw_param **hw_param)
+{
+	*hw_param = &cam_hwparam_collector.front2_hwparam;
+	return 0;
+}
+
+int msm_is_sec_get_front3_hw_param(struct cam_hw_param **hw_param)
+{
+	*hw_param = &cam_hwparam_collector.front3_hwparam;
+	return 0;
+}
+
+int msm_is_sec_get_rear3_hw_param(struct cam_hw_param **hw_param)
+{
+	*hw_param = &cam_hwparam_collector.rear3_hwparam;
+	return 0;
+}
+#endif
+
+#if defined(CONFIG_SAMSUNG_REAR_TOF) || defined(CONFIG_SAMSUNG_FRONT_TOF)
+void cam_sensor_tof_i2c_read(uint32_t addr, uint32_t *data,
+	enum camera_sensor_i2c_type addr_type,
+	enum camera_sensor_i2c_type data_type)
+{
+	int rc = 0;
+
+	if (g_s_ctrl_tof)
+	{
+		rc = camera_io_dev_read(&g_s_ctrl_tof->io_master_info, addr,
+			data, addr_type, data_type);
+		if (rc < 0)
+			CAM_ERR(CAM_SENSOR, "Failed to read 0x%x", addr);
+
+		CAM_INFO(CAM_SENSOR, "[TOF_I2C] tof_i2c_read, addr : 0x%x, data : 0x%x", addr, *data);
+	}
+	else
+	{
+		CAM_ERR(CAM_SENSOR, "tof i2c is not ready!");
+	}
+}
+
+void cam_sensor_tof_i2c_write(uint32_t addr, uint32_t data,
+	enum camera_sensor_i2c_type addr_type,
+	enum camera_sensor_i2c_type data_type)
+{
+	int rc = 0;
+
+	struct cam_sensor_i2c_reg_setting  i2c_reg_settings;
+	struct cam_sensor_i2c_reg_array    i2c_reg_array;
+
+	CAM_DBG(CAM_SENSOR, "[TOF_I2C] tof_i2c_write, addr : 0x%x, data : 0x%x", addr, data);
+
+	if (g_s_ctrl_tof)
+	{
+		i2c_reg_settings.addr_type = addr_type;
+		i2c_reg_settings.data_type = data_type;
+		i2c_reg_settings.size = 1;
+		i2c_reg_settings.delay = 0;
+		i2c_reg_array.reg_addr = addr;
+		i2c_reg_array.reg_data = data;
+		i2c_reg_array.delay = 0;
+		i2c_reg_array.data_mask = 0x0;
+		i2c_reg_settings.reg_setting = &i2c_reg_array;
+
+		rc = camera_io_dev_write(&g_s_ctrl_tof->io_master_info,
+			&i2c_reg_settings);
+
+		if (rc < 0)
+			CAM_ERR(CAM_SENSOR, "Failed to i2c write");
+	}
+	else
+	{
+		CAM_ERR(CAM_SENSOR, "tof i2c is not ready!");
+	}
+}
+#endif

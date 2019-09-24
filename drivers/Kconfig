@@ -107,6 +107,8 @@ source "drivers/memstick/Kconfig"
 
 source "drivers/leds/Kconfig"
 
+source "drivers/switch/Kconfig"
+
 source "drivers/accessibility/Kconfig"
 
 source "drivers/infiniband/Kconfig"
@@ -140,6 +142,12 @@ source "drivers/xen/Kconfig"
 source "drivers/vservices/Kconfig"
 
 source "drivers/staging/Kconfig"
+
+source "drivers/muic/Kconfig"
+
+source "drivers/rid_adc/Kconfig"
+
+source "drivers/afc/Kconfig"
 
 source "drivers/platform/Kconfig"
 
@@ -218,5 +226,25 @@ source "drivers/mux/Kconfig"
 source "drivers/sensors/Kconfig"
 
 source "drivers/esoc/Kconfig"
+
+source "drivers/debug/Kconfig"
+
+source "drivers/battery_v2/Kconfig"
+
+source "drivers/battery_qc/Kconfig"
+
+source "drivers/staging/samsung/sec_notifier/Kconfig"
+
+source "drivers/adsp_factory/Kconfig"
+
+source "drivers/fingerprint/Kconfig"
+
+source "drivers/motor/Kconfig"
+
+source "drivers/five/Kconfig"
+
+source "drivers/icdrv/Kconfig"
+
+source "drivers/ccic/Kconfig"
 
 endmenu

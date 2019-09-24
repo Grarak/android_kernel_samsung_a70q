@@ -502,7 +502,7 @@
 		};
 	};
 
-	reserved-memory {
+	reserved_memory: reserved-memory {
 		#address-cells = <2>;
 		#size-cells = <2>;
 		ranges;
@@ -513,10 +513,10 @@
 			reg = <0 0x85700000 0 0x600000>;
 		};
 
-		xbl_aop_mem: xbl_aop_mem@85e00000 {
+		xbl_aop_mem: xbl_aop_mem@85d00000 {
 			compatible = "removed-dma-pool";
 			no-map;
-			reg = <0x0 0x85e00000 0x0 0x1ff000>;
+			reg = <0x0 0x85d00000 0x0 0x2ff000>;
 		};
 
 		sec_apps_mem: sec_apps_region@85fff000 {
@@ -675,6 +675,7 @@
 			linux,cma-default;
 		};
 	};
+
 };
 
 &soc {
@@ -1068,6 +1069,11 @@
 		diag_dload@c8 {
 			compatible = "qcom,msm-imem-diag-dload";
 			reg = <0xc8 200>;
+		};
+
+		upload_cause@66c {
+			compatible = "qcom,msm-imem-upload_cause";
+			reg = <0x66c 4>;
 		};
 	};
 
@@ -2359,7 +2365,6 @@
 
 		lanes-per-direction = <1>;
 		dev-ref-clk-freq = <0>; /* 19.2 MHz */
-		spm-level = <5>;
 
 		clock-names =
 			"core_clk",

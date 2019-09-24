@@ -45,7 +45,11 @@ struct fscrypt_name {
 #define fname_len(p)		((p)->disk_name.len)
 
 /* Maximum value for the third parameter of fscrypt_operations.set_context(). */
+#if defined(CONFIG_FSCRYPT_SDP) || defined(CONFIG_DDAR)
+#define FSCRYPT_SET_CONTEXT_MAX_SIZE	32
+#else
 #define FSCRYPT_SET_CONTEXT_MAX_SIZE	28
+#endif
 
 #if __FS_HAS_ENCRYPTION
 #include <linux/fscrypt_supp.h>
@@ -256,19 +260,42 @@ static inline int fscrypt_encrypt_symlink(struct inode *inode,
 	return 0;
 }
 
+/* inline.c */
+#ifdef CONFIG_FS_INLINE_ENCRYPTION
+extern void fscrypt_set_bio_cryptd(const struct inode *inode, struct bio *bio);
+extern void *fscrypt_get_bio_cryptd(const struct inode *inode);
+extern int fscrypt_inline_encrypted(const struct inode *inode);
+extern int fscrypt_submit_bh(int op, int op_flags, struct buffer_head *bh, struct inode *inode);
+#else
+static inline void fscrypt_set_bio_cryptd(const struct inode *inode, struct bio *bio)
+{
+}
+
+static inline void *fscrypt_get_bio_cryptd(const struct inode *inode)
+{
+	return NULL;
+}
+
+static inline int fscrypt_inline_encrypted(const struct inode *inode)
+{
+	return 0;
+}
+
+static inline int fscrypt_submit_bh(int op, int op_flags, struct buffer_head *bh, struct inode *inode)
+{
+	return -EOPNOTSUPP;
+}
+#endif
+
 /* fscrypt_ice.c */
+#define fscrypt_using_hardware_encryption fscrypt_inline_encrypted
 #ifdef CONFIG_PFK
-extern int fscrypt_using_hardware_encryption(const struct inode *inode);
 extern void fscrypt_set_ice_dun(const struct inode *inode,
 		struct bio *bio, u64 dun);
 extern void fscrypt_set_ice_skip(struct bio *bio, int bi_crypt_skip);
 extern bool fscrypt_mergeable_bio(struct bio *bio, u64 dun, bool bio_encrypted,
 		int bi_crypt_skip);
 #else
-static inline int fscrypt_using_hardware_encryption(const struct inode *inode)
-{
-	return 0;
-}
 
 static inline void fscrypt_set_ice_dun(const struct inode *inode,
 		struct bio *bio, u64 dun){}

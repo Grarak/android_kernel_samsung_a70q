@@ -49,6 +49,9 @@
 #include <soc/qcom/scm.h>
 #include <trace/events/exception.h>
 
+#include <linux/sec_debug.h>
+#include <linux/sec_debug_user_reset.h>
+
 struct fault_info {
 	int	(*fn)(unsigned long addr, unsigned int esr,
 		      struct pt_regs *regs);
@@ -158,8 +161,18 @@ void show_pte(unsigned long addr)
 	pr_alert("%s pgtable: %luk pages, %u-bit VAs, pgd = %p\n",
 		 mm == &init_mm ? "swapper" : "user", PAGE_SIZE / SZ_1K,
 		 VA_BITS, mm->pgd);
+
+#ifdef CONFIG_USER_RESET_DEBUG
+	sec_debug_store_pte((unsigned long)mm->pgd, 0);
+#endif
+
 	pgd = pgd_offset(mm, addr);
 	pr_alert("[%016lx] *pgd=%016llx", addr, pgd_val(*pgd));
+
+#ifdef CONFIG_USER_RESET_DEBUG
+	sec_debug_store_pte((unsigned long)addr, 1);
+	sec_debug_store_pte((unsigned long)pgd_val(*pgd), 2);
+#endif
 
 	do {
 		pud_t *pud;
@@ -171,16 +184,31 @@ void show_pte(unsigned long addr)
 
 		pud = pud_offset(pgd, addr);
 		pr_cont(", *pud=%016llx", pud_val(*pud));
+
+#ifdef CONFIG_USER_RESET_DEBUG
+		sec_debug_store_pte((unsigned long)pud_val(*pud), 3);
+#endif
+
 		if (pud_none(*pud) || pud_bad(*pud))
 			break;
 
 		pmd = pmd_offset(pud, addr);
 		pr_cont(", *pmd=%016llx", pmd_val(*pmd));
+
+#ifdef CONFIG_USER_RESET_DEBUG
+		sec_debug_store_pte((unsigned long)pmd_val(*pmd), 4);
+#endif
+
 		if (pmd_none(*pmd) || pmd_bad(*pmd))
 			break;
 
 		pte = pte_offset_map(pmd, addr);
 		pr_cont(", *pte=%016llx", pte_val(*pte));
+
+#ifdef CONFIG_USER_RESET_DEBUG
+		sec_debug_store_pte((unsigned long)pte_val(*pte), 5);
+#endif
+
 		pte_unmap(pte);
 	} while(0);
 
@@ -284,6 +312,10 @@ static void __do_kernel_fault(unsigned long addr, unsigned int esr,
 		msg = "paging request";
 	}
 
+#ifdef CONFIG_USER_RESET_DEBUG
+	sec_debug_store_extc_idx(false);
+#endif
+
 	pr_alert("Unable to handle kernel %s at virtual address %08lx\n", msg,
 		 addr);
 
@@ -317,6 +349,11 @@ static void __do_user_fault(struct task_struct *tsk, unsigned long addr,
 		print_vma_addr(KERN_CONT ", in ", regs->pc);
 		pr_cont("\n");
 		__show_regs(regs);
+	}
+
+	if (current->pid == 0x1) {
+		pr_err("[%s] trap before tragedy\n", current->comm);
+		panic("init");
 	}
 
 	tsk->thread.fault_address = addr;
@@ -778,6 +815,10 @@ asmlinkage void __exception do_mem_abort(unsigned long addr, unsigned int esr,
 	const struct fault_info *inf = esr_to_fault_info(esr);
 	struct siginfo info;
 
+#ifdef CONFIG_USER_RESET_DEBUG
+	sec_debug_save_fault_info(esr, inf->name, addr, 0UL);
+#endif
+
 	if (!inf->fn(addr, esr, regs))
 		return;
 
@@ -838,6 +879,11 @@ asmlinkage void __exception do_sp_pc_abort(unsigned long addr,
 				    esr_get_class_string(esr), (void *)regs->pc,
 				    (void *)regs->sp);
 
+#ifdef CONFIG_USER_RESET_DEBUG
+	sec_debug_save_fault_info(esr, esr_get_class_string(esr),
+			(unsigned long)regs->pc, (unsigned long)regs->sp);
+#endif
+
 	info.si_signo = SIGBUS;
 	info.si_errno = 0;
 	info.si_code  = BUS_ADRALN;
@@ -884,6 +930,9 @@ asmlinkage int __exception do_debug_exception(unsigned long addr,
 	struct siginfo info;
 	int rv;
 
+#ifdef CONFIG_USER_RESET_DEBUG
+	sec_debug_save_fault_info(esr, inf->name, addr, 0UL);
+#endif
 	/*
 	 * Tell lockdep we disabled irqs in entry.S. Do nothing if they were
 	 * already disabled to preserve the last enabled/disabled addresses.

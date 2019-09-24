@@ -11,7 +11,18 @@
  */
 
 #ifdef CONFIG_MSM_BOOT_STATS
+
+#define TIMER_KHZ 32768
+
 int boot_stats_init(void);
+int boot_stats_exit(void);
 #else
 static inline int boot_stats_init(void) { return 0; }
+#endif
+
+#ifdef CONFIG_MSM_BOOT_TIME_MARKER
+
+static inline int boot_marker_enabled(void) { return 1; }
+#else
+static inline int boot_marker_enabled(void) { return 0; }
 #endif

@@ -16,6 +16,10 @@
 #include "cam_flash_soc.h"
 #include "cam_flash_core.h"
 #include "cam_common_util.h"
+#include <cam_sensor_cmn_header.h>
+#include <cam_sensor_util.h>
+
+struct cam_flash_ctrl *g_flash_ctrl;
 
 static int32_t cam_flash_driver_cmd(struct cam_flash_ctrl *fctrl,
 		void *arg, struct cam_flash_private_soc *soc_private)
@@ -499,6 +503,7 @@ static int32_t cam_flash_platform_probe(struct platform_device *pdev)
 	mutex_init(&(fctrl->flash_mutex));
 
 	fctrl->flash_state = CAM_FLASH_STATE_INIT;
+	g_flash_ctrl = fctrl;
 	CAM_DBG(CAM_FLASH, "Probe success");
 	return rc;
 
@@ -585,6 +590,7 @@ static int32_t cam_flash_i2c_driver_probe(struct i2c_client *client,
 
 	mutex_init(&(fctrl->flash_mutex));
 	fctrl->flash_state = CAM_FLASH_STATE_INIT;
+	g_flash_ctrl = fctrl;
 
 	return rc;
 

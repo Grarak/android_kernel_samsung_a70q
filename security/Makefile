@@ -11,6 +11,8 @@ subdir-$(CONFIG_SECURITY_APPARMOR)	+= apparmor
 subdir-$(CONFIG_SECURITY_YAMA)		+= yama
 subdir-$(CONFIG_SECURITY_LOADPIN)	+= loadpin
 subdir-$(CONFIG_ARCH_QCOM)		+= pfe
+subdir-$(CONFIG_SECURITY_DEFEX)		+= defex_lsm
+subdir-$(CONFIG_SECURITY_DSMS)		+= dsms
 
 # always enable default capabilities
 obj-y					+= commoncap.o
@@ -28,7 +30,19 @@ obj-$(CONFIG_SECURITY_YAMA)		+= yama/
 obj-$(CONFIG_SECURITY_LOADPIN)		+= loadpin/
 obj-$(CONFIG_CGROUP_DEVICE)		+= device_cgroup.o
 obj-$(CONFIG_ARCH_QCOM)			+= pfe/
+obj-$(CONFIG_SECURITY_DEFEX)		+= defex_lsm/built-in.o
+obj-$(CONFIG_SECURITY_DSMS)		+= dsms/
 
 # Object integrity file lists
 subdir-$(CONFIG_INTEGRITY)		+= integrity
 obj-$(CONFIG_INTEGRITY)			+= integrity/
+
+# MST driver
+obj-$(CONFIG_MST_LDO)	  += mstdrv/
+# PROCA module
+subdir-$(CONFIG_PROCA)			+= proca
+obj-$(CONFIG_PROCA)			+= proca/
+
+# Knox SDP
+obj-$(CONFIG_SDP) += sdp/
+obj-$(CONFIG_SDP) += sdp/built-in.o
