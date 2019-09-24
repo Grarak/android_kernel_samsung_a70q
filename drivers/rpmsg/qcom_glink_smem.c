@@ -83,7 +83,7 @@ static size_t glink_smem_rx_avail(struct qcom_glink_pipe *np)
 		len = pipe->native.length - tail + head;
 	else
 		len = head - tail;
-	
+
 	if (WARN_ON_ONCE(len > pipe->native.length))
 		len = 0;
 

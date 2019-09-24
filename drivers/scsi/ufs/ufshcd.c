@@ -227,7 +227,7 @@ static void ufshcd_update_uic_error_cnt(struct ufs_hba *hba, u32 reg, int type)
 #define DEV_INIT_COMPL_TIMEOUT  1500
 
 /* Query request retries */
-#define QUERY_REQ_RETRIES 2 
+#define QUERY_REQ_RETRIES 2
 /* Query request timeout */
 #define QUERY_REQ_TIMEOUT 1500 /* 1.5 seconds */
 
@@ -462,6 +462,8 @@ static struct ufs_dev_fix ufs_fixups[] = {
 	UFS_FIX(UFS_VENDOR_SKHYNIX, UFS_ANY_MODEL, UFS_DEVICE_NO_VCCQ),
 	UFS_FIX(UFS_VENDOR_SKHYNIX, UFS_ANY_MODEL,
 		UFS_DEVICE_QUIRK_HOST_PA_SAVECONFIGTIME),
+	UFS_FIX(UFS_VENDOR_SKHYNIX, UFS_ANY_MODEL,
+		UFS_DEVICE_QUIRK_WAIT_AFTER_REF_CLK_UNGATE),
 	UFS_FIX(UFS_VENDOR_SKHYNIX, "hB8aL1",
 		UFS_DEVICE_QUIRK_HS_G1_TO_HS_G3_SWITCH),
 	UFS_FIX(UFS_VENDOR_SKHYNIX, "hC8aL1",
@@ -5066,7 +5068,7 @@ int ufshcd_read_device_desc(struct ufs_hba *hba, u8 *buf, u32 size)
  * Return 0 in case of success, non-zero otherwise
  */
 #define ASCII_STD true
-#define UTF16_STD false 
+#define UTF16_STD false
 static int ufshcd_read_string_desc(struct ufs_hba *hba, int desc_index,
 				   u8 *buf, u32 size, bool ascii)
 {
@@ -7892,7 +7894,7 @@ static void ufshcd_fatal_mode_handler(struct work_struct *work)
 
 	ufshcd_scsi_unblock_requests(hba);
 	return;
-}	
+}
 
 /**
  * ufshcd_update_uic_error - check and set fatal UIC error flags.
@@ -8664,7 +8666,7 @@ static int ufshcd_reset_and_restore(struct ufs_hba *hba)
 	unsigned long flags;
 	int retries = MAX_HOST_RESET_RETRIES;
 
-	ssleep(2);
+	ufshcd_enable_irq(hba);
 
 	do {
 		err = ufshcd_detect_device(hba);

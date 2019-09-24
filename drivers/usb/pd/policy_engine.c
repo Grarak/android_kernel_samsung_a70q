@@ -529,7 +529,7 @@ struct usbpd {
 	u8			get_battery_status_db;
 	bool			send_get_battery_status;
 	u32			battery_sts_dobj;
-#if defined(CONFIG_USB_CCIC_NOTIFIER_USING_QC)	
+#if defined(CONFIG_USB_CCIC_NOTIFIER_USING_QC)
 	struct pm6150_phydrv_data *phy_driver_data;
 #endif
 #if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
@@ -607,7 +607,7 @@ bool get_ps_ready_status()
 #endif
 
 void usbpd_acc_detach(struct device *dev)
-{	
+{
 	struct usbpd *pd = dev_get_drvdata(dev);
 
 	pr_info("%s: acc_type %d\n",
@@ -642,16 +642,16 @@ static void usbpd_acc_detach_handler(struct work_struct *wk)
 		phy_driver_data->Product_ID = 0;
 		phy_driver_data->Device_Version = 0;
 		phy_driver_data->is_samsung_accessory_enter_mode = 0;
-#if 0		
+#if 0
 		pd->alt_sended = 0;
 		pd->SVID_0 = 0;
 		pd->SVID_1 = 0;
 		pd->Standard_Vendor_ID = 0;
-		
-		
+
+
 		reinit_completion(&pd->uvdm_out_wait);
 		reinit_completion(&pd->uvdm_in_wait);
-#endif		
+#endif
 	}
 }
 
@@ -1838,7 +1838,7 @@ static void usbpd_set_state(struct usbpd *pd, enum usbpd_state next_state)
 			pd->pwr_opmode = TYPEC_PWR_MODE_PD;
 			typec_set_pwr_opmode(pd->port, pd->pwr_opmode);
 #endif
-		}			
+		}
 
 		pd->in_explicit_contract = true;
 
@@ -2024,7 +2024,7 @@ static void usbpd_set_state(struct usbpd *pd, enum usbpd_state next_state)
 
 			if (pdo == 0)
 			{
-				
+
 				break;
 			}
 			if (PD_SRC_PDO_TYPE(pdo) == PD_SRC_PDO_TYPE_FIXED) {
@@ -2040,7 +2040,7 @@ static void usbpd_set_state(struct usbpd *pd, enum usbpd_state next_state)
 				} else if (i > 1) {
 					pd->is_kakao = KAKAO_NONE;
 				}
-				
+
 				usbpd_dbg(&pd->dev, "Fixed PDO:%d Max Volt:%dmV Max OpCurr:%dmA\n",
 				i,
 				PD_SRC_PDO_FIXED_VOLTAGE(pdo) * 50,
@@ -2056,20 +2056,20 @@ static void usbpd_set_state(struct usbpd *pd, enum usbpd_state next_state)
 				PD_SRC_PDO_VAR_BATT_MAX_VOLT(pdo) * 50,
 				PD_SRC_PDO_VAR_BATT_MIN_VOLT(pdo) * 50,
 				PD_SRC_PDO_VAR_BATT_MAX(pdo) * 250);
-				
+
 				if(PD_SRC_PDO_VAR_BATT_MAX_VOLT(pdo) * 50 <= SEC_PD_VOLT_LIMIT)
 				{
 					temp = PD_SRC_PDO_VAR_BATT_MAX(pdo) * 250;
 					pd_count++;
 				}
-				
+
 			} else if (PD_SRC_PDO_TYPE(pdo) == PD_SRC_PDO_TYPE_VARIABLE) {
 				usbpd_dbg(&pd->dev, "Variable PDO:%d Max Volt:%dmV Min Volt:%dmV Max OpCurr:%dmA\n",
 				i,
 				PD_SRC_PDO_VAR_BATT_MAX_VOLT(pdo) * 50,
 				PD_SRC_PDO_VAR_BATT_MIN_VOLT(pdo) * 50,
 				PD_SRC_PDO_VAR_BATT_MAX(pdo) * 10);
-				
+
 				if(PD_SRC_PDO_VAR_BATT_MAX_VOLT(pdo) * 50 <= SEC_PD_VOLT_LIMIT)
 				{
 					temp = ( PD_SRC_PDO_VAR_BATT_MAX_VOLT(pdo) * PD_SRC_PDO_VAR_BATT_MAX(pdo) / 2);
@@ -2081,18 +2081,18 @@ static void usbpd_set_state(struct usbpd *pd, enum usbpd_state next_state)
 				PD_APDO_MAX_VOLT(pdo) * 100,
 				PD_APDO_MIN_VOLT(pdo) * 100,
 				PD_APDO_MAX_CURR(pdo) * 50);
-				
+
 				if(PD_APDO_MAX_VOLT(pdo) * 100 <= SEC_PD_VOLT_LIMIT)
 				{
 					temp = (PD_APDO_MAX_VOLT(pdo) * PD_APDO_MAX_CURR(pdo) * 5);
 					pd_count++;
 				}
-			} 
-			
+			}
+
 			if(temp > max_pd_power)
 			{
 				max_pd_power = temp;
-				
+
 			}
 		}
 		usbpd_dbg(&pd->dev, "Max PD Power found: %dmW number of pdos : %d\n", max_pd_power,pd_count);
@@ -2327,7 +2327,7 @@ EXPORT_SYMBOL(usbpd_vdm_in_suspend);
 int usbpd_send_uvdm(struct usbpd *pd, u16 vid, const void * vdos, int num_vdos)
 {
 	u32 uvdm_hdr = UVDM_HDR(vid, 4);
-	
+
 	usbpd_info(&pd->dev, "UVDM tx: vid:%x uvdm_hdr:%x num_vdos:%x\n",
 			vid, uvdm_hdr, num_vdos-1);
 
@@ -2477,9 +2477,9 @@ static void handle_vdm_rx(struct usbpd *pd, struct rx_msg *rx_msg)
 			pd->vdm_state = DISCOVERED_ID;
 			pd->phy_driver_data->Vendor_ID = vdos[0] & 0xFFFF;
 			pd->phy_driver_data->Product_ID = vdos[2] >> 16;
-			pd->phy_driver_data->Device_Version = vdos[2] & 0x00FF; 
+			pd->phy_driver_data->Device_Version = vdos[2] & 0x00FF;
 			pr_info("%s Vendor_ID : 0x%X, Product_ID : 0x%X Device Version 0x%X \n",\
-				 __func__, pd->phy_driver_data->Vendor_ID, pd->phy_driver_data->Product_ID, pd->phy_driver_data->Device_Version);			
+				 __func__, pd->phy_driver_data->Vendor_ID, pd->phy_driver_data->Product_ID, pd->phy_driver_data->Device_Version);
 			if (process_check_accessory(pd))
 				pr_info("%s : Samsung Accessory Connected.\n", __func__);
 			usbpd_send_svdm(pd, USBPD_SID,
@@ -3076,7 +3076,7 @@ static void usbpd_sm(struct work_struct *w)
 
 		power_supply_set_property(pd->usb_psy,
 				POWER_SUPPLY_PROP_PD_ACTIVE, &val);
-#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)		
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 		ps_ready = false;
 		pd->is_kakao = KAKAO_NONE;
 #endif
@@ -3282,7 +3282,7 @@ static void usbpd_sm(struct work_struct *w)
 			power_supply_set_property(pd->usb_psy,
 					POWER_SUPPLY_PROP_PD_ACTIVE,
 					&val);
-#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)		
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 			ps_ready = false;
 #endif
 			break;
@@ -3300,7 +3300,7 @@ static void usbpd_sm(struct work_struct *w)
 				power_supply_set_property(pd->usb_psy,
 						POWER_SUPPLY_PROP_PD_ACTIVE,
 						&val);
-			#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)		
+			#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 				ps_ready = false;
 			#endif
 				break;
@@ -3322,7 +3322,7 @@ static void usbpd_sm(struct work_struct *w)
 		val.intval = POWER_SUPPLY_PD_ACTIVE;
 		power_supply_set_property(pd->usb_psy,
 				POWER_SUPPLY_PROP_PD_ACTIVE, &val);
-#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)		
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 		ps_ready = false;
 #endif
 		break;
@@ -3547,7 +3547,7 @@ static void usbpd_sm(struct work_struct *w)
 			val.intval = POWER_SUPPLY_PD_INACTIVE;
 			power_supply_set_property(pd->usb_psy,
 					POWER_SUPPLY_PROP_PD_ACTIVE, &val);
-		#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)		
+		#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 			ps_ready = false;
 		#endif
 		}
@@ -3597,7 +3597,7 @@ static void usbpd_sm(struct work_struct *w)
 			}
 
 			pd->selected_pdo = pd->requested_pdo;
-		#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)		
+		#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 			ps_ready = false;
 		#endif
 		} else if (IS_CTRL(rx_msg, MSG_REJECT) ||
@@ -3629,7 +3629,7 @@ static void usbpd_sm(struct work_struct *w)
 			val.intval = pd->requested_current * 1000; /* mA->uA */
 			power_supply_set_property(pd->usb_psy,
 					POWER_SUPPLY_PROP_PD_CURRENT_MAX, &val);
-		#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)		
+		#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 			ps_ready = true;
 			usbpd_dbg(&pd->dev, "ps_ready:  PE_SNK_TRANSITION_SINK  Volt:%duV Curr:%dmA\n",pd->current_voltage, val.intval );
 		#endif
@@ -4672,7 +4672,7 @@ static int usbpd_port_type_set(const struct typec_capability *cap, enum typec_po
 		val.intval = 0;
 		power_supply_set_property(pd->usb_psy,
 				POWER_SUPPLY_PROP_PR_SWAP, &val);
-		
+
 		val.intval = POWER_SUPPLY_TYPEC_PR_DUAL;
 		power_supply_set_property(pd->usb_psy,
 				POWER_SUPPLY_PROP_TYPEC_POWER_ROLE, &val);
@@ -5408,7 +5408,7 @@ struct usbpd *usbpd_create(struct device *parent)
 	pm6150_usbpd_create(&pd->dev, &pd->phy_driver_data);
 	if (pd->phy_driver_data == NULL) {
 		pr_info("%s : phy_driver_data is null!\n");
-	}		
+	}
 	INIT_DELAYED_WORK(&pd->phy_driver_data->acc_detach_handler,
 			usbpd_acc_detach_handler);
 #endif

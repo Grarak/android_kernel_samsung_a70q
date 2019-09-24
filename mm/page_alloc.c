@@ -3874,6 +3874,7 @@ should_reclaim_retry(gfp_t gfp_mask, unsigned order,
 	 */
 	if ((did_some_progress || lmk_kill_possible()) &&
 				order <= PAGE_ALLOC_COSTLY_ORDER) {
+
 		*no_progress_loops = 0;
 
 		if (lmk_kill_possible())

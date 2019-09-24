@@ -4231,7 +4231,12 @@ int ipa3_cfg_ep_ctrl(u32 clnt_hdl, const struct ipa_ep_cfg_ctrl *ep_ctrl)
 		WARN_ON(1);
 		return -EPERM;
 	}
-	
+
+	if (ipa3_ctx->ipa_endp_delay_wa) {
+		IPAERR("pipe setting delay is not supported\n");
+		return 0;
+	}
+
 	if (ipa3_ctx->ipa_endp_delay_wa) {
 		IPAERR("pipe setting delay is not supported\n");
 		return 0;
@@ -6715,7 +6720,6 @@ static int __ipa3_stop_gsi_channel(u32 clnt_hdl)
 			ep->gsi_chan_hdl, res);
 		if (res != -GSI_STATUS_AGAIN && res != -GSI_STATUS_TIMED_OUT)
 			return res;
-
 		/*
 		 * From >=IPA4.0 version not required to send dma send command,
 		 * this issue was fixed in latest versions.
@@ -6729,7 +6733,6 @@ static int __ipa3_stop_gsi_channel(u32 clnt_hdl)
 				return res;
 			}
 		}
-
 		/* sleep for short period to flush IPA */
 		usleep_range(IPA_GSI_CHANNEL_STOP_SLEEP_MIN_USEC,
 			IPA_GSI_CHANNEL_STOP_SLEEP_MAX_USEC);
@@ -7459,27 +7462,27 @@ void ipa3_read_mailbox_17(enum uc_state state)
 	val = ipahal_read_reg_mn(IPA_UC_MAILBOX_m_n,
 			0,
 			17);
-		IPAERR_RL("GSI INTSET %d\n mailbox-17: 0x%x\n",
+		IPADBG_LOW("GSI INTSET %d\n mailbox-17: 0x%x\n",
 			ipa3_ctx->gsi_chk_intset_value,
 			val);
 	switch (state)	{
 	case IPA_PC_SAVE_CONTEXT_SAVE_ENTERED:
 		if (val != PC_SAVE_CONTEXT_SAVE_ENTERED) {
-			IPAERR_RL("expected 0x%x, value: 0x%x\n",
+			IPADBG_LOW("expected 0x%x, value: 0x%x\n",
 				PC_SAVE_CONTEXT_SAVE_ENTERED,
 				val);
 		}
 		break;
 	case IPA_PC_SAVE_CONTEXT_STATUS_SUCCESS:
 		if (val != PC_SAVE_CONTEXT_STATUS_SUCCESS) {
-			IPAERR_RL("expected 0x%x, value: 0x%x\n",
+			IPADBG_LOW("expected 0x%x, value: 0x%x\n",
 				PC_SAVE_CONTEXT_STATUS_SUCCESS,
 				val);
 		}
 		break;
 	case IPA_PC_RESTORE_CONTEXT_ENTERED:
 		if (val != PC_RESTORE_CONTEXT_ENTERED) {
-			IPAERR_RL("expected 0x%x, value: 0x%x\n",
+			IPADBG_LOW("expected 0x%x, value: 0x%x\n",
 				PC_RESTORE_CONTEXT_ENTERED,
 				val);
 		}
@@ -7488,7 +7491,7 @@ void ipa3_read_mailbox_17(enum uc_state state)
 			ipa3_ctx->uc_mailbox17_chk++;
 		if (val != PC_RESTORE_CONTEXT_STATUS_SUCCESS) {
 			ipa3_ctx->uc_mailbox17_mismatch++;
-			IPAERR_RL("expected 0x%x, value: 0x%x\n",
+			IPADBG_LOW("expected 0x%x, value: 0x%x\n",
 				PC_RESTORE_CONTEXT_STATUS_SUCCESS,
 				val);
 		}

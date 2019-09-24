@@ -120,6 +120,7 @@ struct gadget_info {
 	struct usb_composite_driver composite;
 	struct usb_composite_dev cdev;
 	bool use_os_desc;
+	bool unbinding;
 	char b_vendor_code;
 	char qw_sign[OS_STRING_QW_SIGN_LEN];
 #ifdef CONFIG_USB_CONFIGFS_UEVENT
@@ -340,9 +341,12 @@ static int unregister_gadget(struct gadget_info *gi)
 	if (!gi->composite.gadget_driver.udc_name)
 		return -ENODEV;
 
+	gi->unbinding = true;
 	ret = usb_gadget_unregister_driver(&gi->composite.gadget_driver);
 	if (ret)
 		return ret;
+
+	gi->unbinding = false;
 	kfree(gi->composite.gadget_driver.udc_name);
 	gi->composite.gadget_driver.udc_name = NULL;
 	return 0;
@@ -1579,7 +1583,7 @@ static void android_work(struct work_struct *data)
 #ifdef CONFIG_USB_TYPEC_MANAGER_NOTIFIER
 		if (gi->connected) {
 			if (cdev->desc.bcdUSB == 0x310) {
-				set_usb_enumeration_state(0x310);	// Super-Speed	
+				set_usb_enumeration_state(0x310);	// Super-Speed
 			} else {
 				set_usb_enumeration_state(0x210);	// High-Speed
 			}
@@ -1721,7 +1725,7 @@ static int android_setup(struct usb_gadget *gadget,
 			cdev->mute_switch == true)
 		cdev->mute_switch = false;
 #endif
-	
+
 	if (c->bRequest == USB_REQ_SET_CONFIGURATION &&
 						cdev->config) {
 		schedule_work(&gi->work);
@@ -1769,11 +1773,13 @@ static void android_disconnect(struct usb_gadget *gadget)
 	} else {
 		pr_info("usb: %s schedule_work con(%d) sw(%d)\n",
 			 __func__, gi->connected, gi->sw_connected);
-		schedule_work(&gi->work);
+		if (!gi->unbinding)
+			schedule_work(&gi->work);
 	}
 	composite_disconnect(gadget);
 #else
-	schedule_work(&gi->work);
+	if (!gi->unbinding)
+		schedule_work(&gi->work);
 	composite_disconnect(gadget);
 #endif
 }

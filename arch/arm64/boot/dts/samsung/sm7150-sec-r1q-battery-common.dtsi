@@ -32,7 +32,7 @@
 	qcom,float-option = <2>;
 	qcom,otg-cl-ua = <1500000>;
 	qcom,hard-jeita-enable;
-	qcom,wdog-snarl-based-step-chg;
+	qcom,wd-snarl-time-config = <0>;
 	qcom,auto-recharge-soc = <(-22)>;
 	qcom,auto-recharge-vbat-mv = <4280>;
 
@@ -47,7 +47,7 @@
 
 &smb1390_charger {
 	qcom,min-ilim-ua = <750000>;
-	qcom,max-soc = <55>;
+	qcom,max-cutoff-soc = <55>;
 };
 
 &soc {
@@ -126,7 +126,7 @@
  *  22	CHARGE_PUMP,
  *  23	POWER_SHARING,
  *  24	OTG,
- *  25	AFC, 
+ *  25	AFC,
  *  26	CABLE_MAX,
 */
 	cable-info {

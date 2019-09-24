@@ -559,7 +559,7 @@ static int diagchar_close(struct inode *inode, struct file *file)
 	int ret;
 
 	DIAG_LOG(DIAG_DEBUG_USERSPACE, "diag: %s process exit with pid = %d\n",
-		current->comm, current->tgid);		
+		current->comm, current->tgid);
 	ret = diag_remove_client_entry(file);
 
 	return ret;

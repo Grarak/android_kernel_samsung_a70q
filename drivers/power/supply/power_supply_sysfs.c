@@ -389,7 +389,6 @@ static struct device_attribute power_supply_attrs[] = {
 #if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 	POWER_SUPPLY_ATTR(recharge_vbat),
 	POWER_SUPPLY_ATTR(ss_factory_mode),
-	POWER_SUPPLY_ATTR(voltage_max_limit),
 #endif
 	POWER_SUPPLY_ATTR(hvdcp_opti_allowed),
 	POWER_SUPPLY_ATTR(smb_en_mode),
@@ -417,6 +416,8 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(pdp_limit_w),
 #endif
 	POWER_SUPPLY_ATTR(vph_voltage),
+	POWER_SUPPLY_ATTR(voltage_max_limit),
+	POWER_SUPPLY_ATTR(dc_reset),
 	/* Charge pump properties */
 	POWER_SUPPLY_ATTR(cp_status1),
 	POWER_SUPPLY_ATTR(cp_status2),

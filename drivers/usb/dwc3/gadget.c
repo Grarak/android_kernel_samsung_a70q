@@ -2152,7 +2152,13 @@ static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 		dwc->pullups_connected = true;
 	} else {
 		dwc3_gadget_disable_irq(dwc);
+		/* Mask all interrupts */
+		reg1 = dwc3_readl(dwc->regs, DWC3_GEVNTSIZ(0));
+		reg1 |= DWC3_GEVNTSIZ_INTMASK;
+		dwc3_writel(dwc->regs, DWC3_GEVNTSIZ(0), reg1);
+
 		dwc->pullups_connected = false;
+
 		__dwc3_gadget_ep_disable(dwc->eps[0]);
 		__dwc3_gadget_ep_disable(dwc->eps[1]);
 
@@ -2171,6 +2177,19 @@ static int dwc3_gadget_run_stop(struct dwc3 *dwc, int is_on, int suspend)
 	}
 
 	dwc3_writel(dwc->regs, DWC3_DCTL, reg);
+
+	/* Controller is not halted until the events are acknowledged */
+	if (!is_on) {
+		/*
+		 * Clear out any pending events (i.e. End Transfer Command
+		 * Complete).
+		 */
+		reg1 = dwc3_readl(dwc->regs, DWC3_GEVNTCOUNT(0));
+		reg1 &= DWC3_GEVNTCOUNT_MASK;
+		dbg_log_string("remaining EVNTCOUNT(0)=%d", reg1);
+		dwc3_writel(dwc->regs, DWC3_GEVNTCOUNT(0), reg1);
+		dwc3_notify_event(dwc, DWC3_GSI_EVT_BUF_CLEAR, 0);
+	}
 
 	do {
 		reg = dwc3_readl(dwc->regs, DWC3_DSTS);
@@ -2295,14 +2314,8 @@ static void dwc3_gadget_enable_irq(struct dwc3 *dwc)
 			DWC3_DEVTEN_USBRSTEN |
 			DWC3_DEVTEN_DISCONNEVTEN);
 
-	/*
-	 * Enable SUSPENDEVENT(BIT:6) for version 230A and above
-	 * else enable USB Link change event (BIT:3) for older version
-	 */
 	if (dwc->revision < DWC3_REVISION_230A)
 		reg |= DWC3_DEVTEN_ULSTCNGEN;
-	else
-		reg |= DWC3_DEVTEN_EOPFEN;
 
 	dwc3_writel(dwc->regs, DWC3_DEVTEN, reg);
 }
@@ -3363,6 +3376,13 @@ static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 	speed = reg & DWC3_DSTS_CONNECTSPD;
 	dwc->speed = speed;
 
+	/* Enable SUSPENDEVENT(BIT:6) for version 230A and above */
+	if (dwc->revision >= DWC3_REVISION_230A) {
+		reg = dwc3_readl(dwc->regs, DWC3_DEVTEN);
+		reg |= DWC3_DEVTEN_EOPFEN;
+		dwc3_writel(dwc->regs, DWC3_DEVTEN, reg);
+	}
+
 	/*
 	 * RAMClkSel is reset to 0 after USB reset, so it must be reprogrammed
 	 * each time on Connect Done.
@@ -3890,6 +3910,20 @@ static irqreturn_t dwc3_check_event_buf(struct dwc3_event_buffer *evt)
 	if (dwc->err_evt_seen)
 		return IRQ_HANDLED;
 
+	/* Controller is being halted, ignore the interrupts */
+	if (!dwc->pullups_connected) {
+		/*
+		 * Even with controller halted, there is a possibility
+		 * that the interrupt line is kept asserted.
+		 * As per the databook (3.00A - 6.3.57) read the GEVNTCOUNT
+		 * to ensure that the interrupt line is de-asserted.
+		 */
+		count = dwc3_readl(dwc->regs, DWC3_GEVNTCOUNT(0));
+		count &= DWC3_GEVNTCOUNT_MASK;
+		dbg_event(0xFF, "NO_PULLUP", count);
+		return IRQ_HANDLED;
+	}
+
 	/*
 	 * With PCIe legacy interrupt, test shows that top-half irq handler can
 	 * be called again after HW interrupt deassertion. Check if bottom-half
@@ -3903,6 +3937,19 @@ static irqreturn_t dwc3_check_event_buf(struct dwc3_event_buffer *evt)
 	count &= DWC3_GEVNTCOUNT_MASK;
 	if (!count)
 		return IRQ_NONE;
+
+	if (count > evt->length) {
+		dbg_event(0xFF, "HUGE_EVCNT", count);
+		/*
+		 * If writes from dwc3_interrupt and run_stop(0) races
+		 * with each other, the count can result in a very large
+		 * value.In that case setting the evt->lpos here
+		 * is a no-op. The value will be reset as part of run_stop(1).
+		 */
+		evt->lpos = (evt->lpos + count) % DWC3_EVENT_BUFFERS_SIZE;
+		dwc3_writel(dwc->regs, DWC3_GEVNTCOUNT(0), count);
+		return IRQ_HANDLED;
+	}
 
 	evt->count = count;
 	evt->flags |= DWC3_EVENT_PENDING;

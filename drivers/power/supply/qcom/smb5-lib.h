@@ -65,7 +65,6 @@ enum print_reason {
 #define OTG_DELAY_VOTER			"OTG_DELAY_VOTER"
 #define USBIN_I_VOTER			"USBIN_I_VOTER"
 #define WEAK_CHARGER_VOTER		"WEAK_CHARGER_VOTER"
-#define OTG_VOTER			"OTG_VOTER"
 #define PL_FCC_LOW_VOTER		"PL_FCC_LOW_VOTER"
 #define WBC_VOTER			"WBC_VOTER"
 #define HW_LIMIT_VOTER			"HW_LIMIT_VOTER"
@@ -81,7 +80,6 @@ enum print_reason {
 #define AICL_THRESHOLD_VOTER		"AICL_THRESHOLD_VOTER"
 #define USBOV_DBC_VOTER			"USBOV_DBC_VOTER"
 #define THERMAL_THROTTLE_VOTER		"THERMAL_THROTTLE_VOTER"
-#define DETACH_DETECT_VOTER		"DETACH_DETECT_VOTER"
 #if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 #define SEC_BATTERY_TERM_CURRENT_VOTER	"SEC_BATTERY_TERM_CURRENT_VOTER"
 #define SEC_BATTERY_SAFETY_TIMER_VOTER	"SEC_BATTERY_SAFETY_TIMER_VOTER"
@@ -103,6 +101,11 @@ enum print_reason {
 #define SEC_BATTERY_FACTORY_MODE_VOTER	"SEC_BATTERY_FACTORY_MODE_VOTER"
 #endif
 #endif
+#define USB_SUSPEND_VOTER		"USB_SUSPEND_VOTER"
+#define CHARGER_TYPE_VOTER		"CHARGER_TYPE_VOTER"
+#define HDC_IRQ_VOTER			"HDC_IRQ_VOTER"
+#define VOUT_VOTER			"VOUT_VOTER"
+#define DETACH_DETECT_VOTER		"DETACH_DETECT_VOTER"
 
 #define BOOST_BACK_STORM_COUNT	3
 #define WEAK_CHG_STORM_COUNT	8
@@ -144,7 +147,7 @@ enum print_reason {
 #define HICCUP_VBUS			0x01
 #define HICCUP_WATER_MASK	0xF0
 #define HICCUP_VBUS_MASK	0x0F
-#endif 
+#endif
 
 #if !defined(CONFIG_PM6150_SBU_VBUS_SHORT) && defined(CONFIG_PM6150_CC_VBUS_SHORT)
 #define SBUx_VBUS_OPEN 0x0
@@ -160,6 +163,7 @@ enum smb_mode {
 enum sink_src_mode {
 	SINK_MODE,
 	SRC_MODE,
+	AUDIO_ACCESS_MODE,
 	UNATTACHED_MODE,
 };
 
@@ -288,6 +292,7 @@ struct smb_irq_info {
 	const struct storm_watch	storm_data;
 	struct smb_irq_data		*irq_data;
 	int				irq;
+	bool				enabled;
 };
 
 static const unsigned int smblib_extcon_cable[] = {
@@ -470,9 +475,11 @@ struct smb_charger {
 	struct votable		*pl_disable_votable;
 	struct votable		*chg_disable_votable;
 	struct votable		*pl_enable_votable_indirect;
-	struct votable		*usb_irq_enable_votable;
 	struct votable		*cp_disable_votable;
 	struct votable		*smb_override_votable;
+	struct votable		*icl_irq_disable_votable;
+	struct votable		*limited_irq_disable_votable;
+	struct votable		*hdc_irq_disable_votable;
 
 	/* work */
 	struct work_struct	bms_update_work;
@@ -486,17 +493,17 @@ struct smb_charger {
 	struct delayed_work	pl_enable_work;
 	struct delayed_work	uusb_otg_work;
 	struct delayed_work	bb_removal_work;
-#if defined(CONFIG_PM6150_WATER_DETECT)	
+#if defined(CONFIG_PM6150_WATER_DETECT)
 	struct delayed_work	lpd_recheck_work;
 #endif
 	struct delayed_work	lpd_ra_open_work;
 	struct delayed_work	lpd_detach_work;
 	struct delayed_work	thermal_regulation_work;
 	struct delayed_work	usbov_dbc_work;
-	struct delayed_work	detach_work;
 #if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 	struct delayed_work    compliant_check_work;
 #endif
+	struct delayed_work	pr_swap_detach_work;
 
 	struct alarm		lpd_recheck_timer;
 	struct alarm		moisture_protection_alarm;
@@ -504,11 +511,11 @@ struct smb_charger {
 #if defined(CONFIG_PM6150_WATER_DETECT)
 	struct alarm		lpd_dry_check_timer;
 	enum lpd_notify		lpd_notify;
-	bool 				water_det_en;	
+	bool 				water_det_en;
 	int 				hiccup_mode;
 	int 				hiccup_gpio;
 	struct device		*hiccup_dev;
-#endif //CONFIG_PM6150_WATER_DETECT	
+#endif //CONFIG_PM6150_WATER_DETECT
 
 	/* secondary charger config */
 	bool			sec_pl_present;
@@ -619,7 +626,8 @@ struct smb_charger {
 	int			aicl_cont_threshold_mv;
 	int			default_aicl_cont_threshold_mv;
 	bool			aicl_max_reached;
-	bool			wdog_snarl_based_step_chg;
+	int			usbin_forced_max_uv;
+	int			init_thermal_ua;
 
 	/* workaround flag */
 	u32			wa_flags;
@@ -650,7 +658,7 @@ struct smb_charger {
 
 	/* wireless */
 	int			wireless_vout;
-	
+
 	/* Configurable SW Thermal Throttling for DEBUG*/
 	int			*die_temp_rst_thresh;
 	int			*die_temp_reg_h_thresh;
@@ -789,8 +797,11 @@ int smblib_get_prop_dc_voltage_now(struct smb_charger *chg,
 				union power_supply_propval *val);
 int smblib_get_prop_dc_voltage_max(struct smb_charger *chg,
 				union power_supply_propval *val);
+int smblib_get_prop_voltage_wls_output(struct smb_charger *chg,
+				union power_supply_propval *val);
 int smblib_set_prop_voltage_wls_output(struct smb_charger *chg,
 				const union power_supply_propval *val);
+int smblib_set_prop_dc_reset(struct smb_charger *chg);
 int smblib_get_prop_usb_present(struct smb_charger *chg,
 				union power_supply_propval *val);
 int smblib_get_prop_usb_online(struct smb_charger *chg,
@@ -799,6 +810,10 @@ int smblib_get_prop_usb_suspend(struct smb_charger *chg,
 				union power_supply_propval *val);
 int smblib_get_prop_usb_voltage_max(struct smb_charger *chg,
 				union power_supply_propval *val);
+int smblib_get_prop_usb_voltage_max_design(struct smb_charger *chg,
+				union power_supply_propval *val);
+int smblib_set_prop_usb_voltage_max_limit(struct smb_charger *chg,
+				const union power_supply_propval *val);
 int smblib_get_prop_usb_voltage_now(struct smb_charger *chg,
 				union power_supply_propval *val);
 int smblib_get_prop_low_power(struct smb_charger *chg,
@@ -880,6 +895,7 @@ enum alarmtimer_restart smblib_lpd_recheck_timer(struct alarm *alarm,
 				ktime_t time);
 int smblib_toggle_smb_en(struct smb_charger *chg, int toggle);
 void smblib_hvdcp_detect_enable(struct smb_charger *chg, bool enable);
+void smblib_hvdcp_exit_config(struct smb_charger *chg);
 void smblib_apsd_enable(struct smb_charger *chg, bool enable);
 int smblib_force_vbus_voltage(struct smb_charger *chg, u8 val);
 

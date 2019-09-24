@@ -33,7 +33,7 @@
 	qcom,float-option = <2>;
 	qcom,otg-cl-ua = <1500000>;
 	qcom,hard-jeita-enable;
-	qcom,wdog-snarl-based-step-chg;
+	qcom,wd_snarl_time_cfg = <0>;
 	qcom,auto-recharge-soc = <(-22)>;
 	qcom,auto-recharge-vbat-mv = <4280>;
 

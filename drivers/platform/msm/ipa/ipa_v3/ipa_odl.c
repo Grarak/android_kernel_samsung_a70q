@@ -1,4 +1,4 @@
-/* Copyright (c) 2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -422,7 +422,7 @@ void ipa3_odl_pipe_cleanup(bool is_ssr)
 		ipa3_odl_ctx->odl_state.adpl_open = true;
 	else
 		ipa3_odl_ctx->odl_state.adpl_open = false;
-	
+
 	ipa3_odl_ctx->odl_state.odl_disconnected = true;
 	ipa3_odl_ctx->odl_state.odl_ep_setup = false;
 	ipa3_odl_ctx->odl_state.aggr_byte_limit_sent = false;

@@ -32,7 +32,7 @@
 	qcom,float-option = <2>;
 	qcom,otg-cl-ua = <1500000>;
 	qcom,hard-jeita-enable;
-	qcom,wdog-snarl-based-step-chg;
+	qcom,wd-snarl-time-config = <0>;
 	qcom,auto-recharge-soc = <(-22)>;
 	qcom,auto-recharge-vbat-mv = <4280>;
 
@@ -45,7 +45,7 @@
 
 &smb1390_charger {
 	qcom,min-ilim-ua = <750000>;
-	qcom,max-soc = <85>;
+	qcom,max-cutoff-soc = <85>;
 };
 
 &soc {
@@ -97,7 +97,7 @@
 		battery,dc_chg_high_temp = <560>;
 		battery,dc_chg_high_temp_recovery = <540>;
 		battery,dc_chg_input_limit_current = <1200>;
-		
+
 		/* Safety timer parameters */
 		battery,standard_curr = <3150000>;		//equal to last step of step_chg_ranges
 		battery,expired_time = <10920>;		//182min (requested by HQE euna87.kim)

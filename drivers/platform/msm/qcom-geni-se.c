@@ -334,7 +334,6 @@ static int geni_se_select_dma_mode(void __iomem *base)
 			~(M_TX_FIFO_WATERMARK_EN | M_RX_FIFO_WATERMARK_EN);
 
 	geni_write_reg(common_geni_m_irq_en, base, SE_GENI_M_IRQ_EN);
-
 	geni_dma_mode = geni_read_reg(base, SE_GENI_DMA_MODE_EN);
 	geni_dma_mode |= GENI_DMA_MODE_EN;
 	geni_write_reg(geni_dma_mode, base, SE_GENI_DMA_MODE_EN);
