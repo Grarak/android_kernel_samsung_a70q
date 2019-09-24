@@ -38,9 +38,9 @@
 #define CRASH 0
 #define PROPERTY_MAXSIZE 32
 
-#define MSM_EEPROM_MEMORY_MAP_MAX_SIZE          80
-#define MSM_EEPROM_MAX_MEM_MAP_CNT              50
-#define MSM_EEPROM_MEM_MAP_PROPERTIES_CNT       6
+#define MSM_EEPROM_MEMORY_MAP_MAX_SIZE         80
+#define MSM_EEPROM_MAX_MEM_MAP_CNT             16
+#define MSM_EEPROM_MEM_MAP_PROPERTIES_CNT      8
 
 #if defined(CONFIG_SAMSUNG_REAR_TRIPLE)
 #define REAR3_MODULE_FW_VERSION                 0x1560

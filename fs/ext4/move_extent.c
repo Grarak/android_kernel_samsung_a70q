@@ -602,13 +602,15 @@ ext4_move_extents(struct file *o_filp, struct file *d_filp, __u64 orig_blk,
 		return -EOPNOTSUPP;
 	}
 
-	if (ext4_encrypted_inode(orig_inode) && S_ISREG(orig_inode->i_mode)
-			&& !fscrypt_inline_encrypted(orig_inode))
+	if (!fscrypt_using_hardware_encryption(orig_inode) ||
+		!fscrypt_using_hardware_encryption(donor_inode)) {
+		if (ext4_encrypted_inode(orig_inode) ||
+		    ext4_encrypted_inode(donor_inode)) {
+			ext4_msg(orig_inode->i_sb, KERN_ERR,
+				 "Online defrag not supported for encrypted files");
 			return -EOPNOTSUPP;
-
-	if (ext4_encrypted_inode(donor_inode) && S_ISREG(donor_inode->i_mode)
-			&& !fscrypt_inline_encrypted(donor_inode))
-			return -EOPNOTSUPP;
+		}
+	}
 
 	/* Protect orig and donor inodes against a truncate */
 	lock_two_nondirectories(orig_inode, donor_inode);

@@ -39,13 +39,13 @@ int usbpd_send_uvdm(struct usbpd *pd, u16 vid, void * vdos, int num_vdos);
 int samsung_usbpd_uvdm_ready(void)
 {
 	int uvdm_ready = 0;
-	struct device *ccic_device = get_ccic_device(); 
+	struct device *ccic_device = get_ccic_device();
 	pccic_data_t ccic_data;
 
 	struct pm6150_phydrv_data *phy_data;
 
-	if (!ccic_device) { 
-		pr_err("%s: ccic_device is null.\n", __func__); 
+	if (!ccic_device) {
+		pr_err("%s: ccic_device is null.\n", __func__);
 		return -ENODEV;
 	}
 	ccic_data = dev_get_drvdata(ccic_device);
@@ -73,11 +73,11 @@ int samsung_usbpd_uvdm_ready(void)
 
 void samsung_usbpd_uvdm_close(void)
 {
-	struct device *ccic_device = get_ccic_device(); 
+	struct device *ccic_device = get_ccic_device();
 	pccic_data_t ccic_data;
 	struct pm6150_phydrv_data *phy_data;
 
-	if (!ccic_device) { 
+	if (!ccic_device) {
 		pr_err("%s: ccic_device is null.\n", __func__);
 		return;
 	}
@@ -109,15 +109,15 @@ int samsung_usbpd_uvdm_out_request_message(void *data, int size)
 	int received_data_index = 0;
 	int time_left = 0;
 	int i;
-	struct device *ccic_device = get_ccic_device(); 
+	struct device *ccic_device = get_ccic_device();
 	pccic_data_t ccic_data;
 	struct pm6150_phydrv_data *phy_data;
 	struct usbpd *pd;
 #ifdef CONFIG_USB_NOTIFY_PROC_LOG
 	int event;
 #endif
-	if (!ccic_device) { 
-		pr_err("%s: ccic_device is null.\n", __func__); 
+	if (!ccic_device) {
+		pr_err("%s: ccic_device is null.\n", __func__);
 		return -ENODEV;
 	}
 	ccic_data = dev_get_drvdata(ccic_device);
@@ -192,7 +192,7 @@ int samsung_usbpd_uvdm_out_request_message(void *data, int size)
 			reinit_completion(&phy_data->uvdm_out_wait);
 
 			usbpd_send_uvdm(pd, USB_C_SAMSUNG_SID,
-				&phy_data->uvdm_data_obj[1], 
+				&phy_data->uvdm_data_obj[1],
 				SEC_UVDM_OUTREQ_NUMOBJ);
 			pr_info("%s : d0 = %x,d1 = %x,d2 = %x,d3 = %x,d4 = %x,d5 = %x,d6 = %x,d7 = %x\n",
 				__func__, phy_data->uvdm_data_obj[0],
@@ -243,15 +243,15 @@ int samsung_usbpd_uvdm_in_request_message(void *data)
 	int time_left = 0;
 	int i;
 	int cal_checksum = 0;
-	struct device *ccic_device = get_ccic_device(); 
+	struct device *ccic_device = get_ccic_device();
 	pccic_data_t ccic_data;
 	struct pm6150_phydrv_data *phy_data;
 	struct usbpd *pd;
 #ifdef CONFIG_USB_NOTIFY_PROC_LOG
 	int event;
 #endif
-	if (!ccic_device) { 
-		pr_err("%s: ccic_device is null.\n", __func__); 
+	if (!ccic_device) {
+		pr_err("%s: ccic_device is null.\n", __func__);
 		return -ENODEV;
 	}
 	ccic_data = dev_get_drvdata(ccic_device);
@@ -274,7 +274,7 @@ int samsung_usbpd_uvdm_in_request_message(void *data)
 
 	// initialize array
 	phy_data->num_vdos = 0;
-	memset(phy_data->uvdm_data_obj,0,sizeof(phy_data->uvdm_data_obj));	
+	memset(phy_data->uvdm_data_obj,0,sizeof(phy_data->uvdm_data_obj));
 
 	phy_data->uvdm_dir = DIR_IN;
 	phy_data->uvdm_first_req = true;
@@ -291,7 +291,7 @@ int samsung_usbpd_uvdm_in_request_message(void *data)
 				phy_data->Product_ID,
 				SEC_UVDM_LONG_DATA,
 				SEC_UVDM_ININIATOR, DIR_IN, 0, 0);
-	
+
 	/* 5. Send data to PDIC */
 	reinit_completion(&phy_data->uvdm_in_wait);
 
@@ -310,7 +310,7 @@ int samsung_usbpd_uvdm_in_request_message(void *data)
 
 	// initialize array
 	phy_data->num_vdos = 0;
-	memset(phy_data->uvdm_data_obj,0,sizeof(phy_data->uvdm_data_obj)); 
+	memset(phy_data->uvdm_data_obj,0,sizeof(phy_data->uvdm_data_obj));
 
 	cur_set_num = 0;
 	total_set_num = 1;
@@ -381,7 +381,7 @@ int samsung_usbpd_uvdm_in_request_message(void *data)
 		ack = (cal_checksum == SEC_TX_TAILER.checksum) ? RX_ACK : RX_NAK;
 
 		phy_data->num_vdos = 0;
-		memset(phy_data->uvdm_data_obj,0,sizeof(phy_data->uvdm_data_obj)); 
+		memset(phy_data->uvdm_data_obj,0,sizeof(phy_data->uvdm_data_obj));
 
 		/* 5. Common : Fill the MSGHeader */
 		set_msg_header(&phy_data->uvdm_msg_header,
@@ -392,7 +392,7 @@ int samsung_usbpd_uvdm_in_request_message(void *data)
 		/* 5.2. Common : Fill the First SEC_VDMHeader*/
 		set_sec_uvdm_rx_header(&phy_data->uvdm_data_obj[0],
 				cur_set_num, cur_set_data, ack);
-		
+
 		reinit_completion(&phy_data->uvdm_in_wait);
 
 		pr_info("%s : send d0 = %x,d1 = %x,d2 = %x,d3 = %x,d4 = %x,d5 = %x,d6 = %x,d7 = %x\n",
@@ -407,7 +407,7 @@ int samsung_usbpd_uvdm_in_request_message(void *data)
 		usbpd_send_uvdm(pd, USB_C_SAMSUNG_SID,
 			&phy_data->uvdm_data_obj[1], SEC_UVDM_INREQ_NUMOBJ);
 		phy_data->num_vdos = 0;
-		memset(phy_data->uvdm_data_obj,0,sizeof(phy_data->uvdm_data_obj)); 
+		memset(phy_data->uvdm_data_obj,0,sizeof(phy_data->uvdm_data_obj));
 	} while (cur_set_num < total_set_num);
 
 	set_endian(in_data, data, size);
@@ -427,8 +427,8 @@ static void samsung_usbpd_receive_uvdm_message(struct usbpd *pd, u32 vdm_hdr, co
 	pccic_data_t ccic_data;
 	struct pm6150_phydrv_data *phy_data;
 
-	if (!ccic_device) { 
-		pr_err("%s: ccic_device is null.\n", __func__); 
+	if (!ccic_device) {
+		pr_err("%s: ccic_device is null.\n", __func__);
 		return;
 	}
 	ccic_data = dev_get_drvdata(ccic_device);
@@ -441,7 +441,7 @@ static void samsung_usbpd_receive_uvdm_message(struct usbpd *pd, u32 vdm_hdr, co
 		pr_err("phy_data is null\n");
 		return;
 	}
-	
+
 	num_objs = num_vdos;
 	for (i = 0; i < num_objs; i++) {
 		uvdm_data_obj[i].object = vdos[i];
@@ -460,7 +460,7 @@ static void samsung_usbpd_receive_uvdm_message(struct usbpd *pd, u32 vdm_hdr, co
 				phy_data->uvdm_data_obj[5],
 				phy_data->uvdm_data_obj[6],
 				phy_data->uvdm_data_obj[7]);
-	
+
 	pr_info("%s dir %s\n", __func__,
 		(phy_data->uvdm_dir == DIR_OUT)?"OUT":"IN");
 	if (phy_data->uvdm_dir == DIR_OUT) {
@@ -535,7 +535,8 @@ static void samsung_usbpd_send_event(struct samsung_usbpd_private *pd,
 	}
 }
 
-static void samsung_usbpd_connect_cb(struct usbpd_svid_handler *hdlr)
+static void samsung_usbpd_connect_cb(struct usbpd_svid_handler *hdlr,
+		bool peer_usb_comm)
 {
 	struct samsung_usbpd_private *pd;
 
@@ -583,7 +584,7 @@ static int samsung_usbpd_validate_callback(u8 cmd,
 	if (cmd_type != SVDM_CMD_TYPE_RESP_ACK) {
 		pr_err("error: invalid cmd type\n");
 		ret = -EINVAL;
-	}	
+	}
 end:
 	return ret;
 }
@@ -623,11 +624,11 @@ static void samsung_usbpd_response_cb(struct usbpd_svid_handler *hdlr, u8 cmd,
 
 static struct pm6150_phydrv_data *link_phy_handler(struct samsung_usbpd_private *usbpd)
 {
-	struct device *ccic_device = get_ccic_device(); 
+	struct device *ccic_device = get_ccic_device();
 	pccic_data_t ccic_data;
 	struct pm6150_phydrv_data *phy_data;
 
-	if (!ccic_device) { 
+	if (!ccic_device) {
 		pr_err("%s: ccic_device is null.\n", __func__);
 		return NULL;
 	}
@@ -651,7 +652,7 @@ static void samsung_usbpd_vdm_response_cb(struct usbpd_svid_handler *hdlr, u32 v
 							const u32 *vdos, int num_vdos)
 {
 	struct samsung_usbpd_private *pd;
-	
+
 	pd = container_of(hdlr, struct samsung_usbpd_private, svid_handler);
 
 	samsung_usbpd_receive_uvdm_message(pd->pd, vdm_hdr, vdos, num_vdos);
@@ -783,4 +784,3 @@ static void __exit samsung_usbpd_cleanup(void)
 	platform_driver_unregister(&samsung_usbpd_driver);
 }
 module_exit(samsung_usbpd_cleanup);
-

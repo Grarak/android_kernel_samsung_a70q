@@ -22,9 +22,7 @@
 #define DCIN_BASE	0x1400
 #define TYPEC_BASE	0X1500
 #define MISC_BASE	0x1600
-#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
-#define MISC_PBS3_BASE	0x7500
-#endif
+#define MISC_PBS_BASE	0x7500
 
 #define PERPH_TYPE_OFFSET	0x04
 #define TYPE_MASK		GENMASK(7, 0)
@@ -570,4 +568,7 @@ enum {
 
 #define SMB_REG_H_THRESHOLD_MSB_REG		(MISC_BASE + 0XBC)
 
+/* SDAM regs */
+#define MISC_PBS_RT_STS_REG			(MISC_PBS_BASE + 0x10)
+#define PULSE_SKIP_IRQ_BIT			BIT(4)
 #endif /* __SMB5_CHARGER_REG_H */

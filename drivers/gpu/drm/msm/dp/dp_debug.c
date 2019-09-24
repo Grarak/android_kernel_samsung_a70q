@@ -1464,8 +1464,8 @@ static void dp_debug_set_sim_mode(struct dp_debug_private *debug, bool sim)
 		debug->aux->set_sim_mode(debug->aux, true,
 			debug->edid, debug->dpcd);
 	} else {
-		debug->aux->abort(debug->aux);
-		debug->ctrl->abort(debug->ctrl);
+		debug->aux->abort(debug->aux, false);
+		debug->ctrl->abort(debug->ctrl, false);
 
 		debug->aux->set_sim_mode(debug->aux, false, NULL, NULL);
 		debug->power->sim_mode = false;
@@ -1943,6 +1943,17 @@ static int dp_debug_init(struct dp_debug *dp_debug)
 			DEBUG_NAME, rc);
 		goto error_remove_dir;
 	}
+
+	file = debugfs_create_bool("hdcp_wait_sink_sync", 0644, dir,
+			&debug->dp_debug.hdcp_wait_sink_sync);
+
+	if (IS_ERR_OR_NULL(file)) {
+		rc = PTR_ERR(file);
+		pr_err("[%s] debugfs hdcp_wait_sink_sync failed, rc=%d\n",
+		       DEBUG_NAME, rc);
+		goto error_remove_dir;
+	}
+
 
 	file = debugfs_create_bool("dsc_feature_enable", 0644, dir,
 			&debug->parser->dsc_feature_enable);
