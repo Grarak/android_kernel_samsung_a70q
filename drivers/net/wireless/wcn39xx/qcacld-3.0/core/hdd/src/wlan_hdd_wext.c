@@ -2933,30 +2933,32 @@ void hdd_wlan_get_stats(struct hdd_adapter *adapter, uint16_t *length,
 	}
 
 	len = scnprintf(buffer, buf_len,
-		"\nTransmit[%lu] - "
-		"called %u, dropped %u orphan %u,"
-		"\n[dropped]    BK %u, BE %u, VI %u, VO %u"
-		"\n[classified] BK %u, BE %u, VI %u, VO %u"
-		"\n\nReceive[%lu] - "
-		"packets %u, dropped %u, delivered %u, refused %u"
-		"\n",
-		qdf_system_ticks(),
-		stats->tx_called,
-		stats->tx_dropped,
-		stats->tx_orphaned,
+			"\nTransmit[%lu] - "
+			"called %u, dropped %u orphan %u,"
+			"\n[dropped]    BK %u, BE %u, VI %u, VO %u"
+			"\n[classified] BK %u, BE %u, VI %u, VO %u"
+			"\n\nReceive[%lu] - "
+			"packets %u, dropped %u, unsolict_arp_n_mcast_drp %u, delivered %u, refused %u"
+			"\n",
+			qdf_system_ticks(),
+			stats->tx_called,
+			stats->tx_dropped,
+			stats->tx_orphaned,
 
-		stats->tx_dropped_ac[SME_AC_BK],
-		stats->tx_dropped_ac[SME_AC_BE],
-		stats->tx_dropped_ac[SME_AC_VI],
-		stats->tx_dropped_ac[SME_AC_VO],
+			stats->tx_dropped_ac[SME_AC_BK],
+			stats->tx_dropped_ac[SME_AC_BE],
+			stats->tx_dropped_ac[SME_AC_VI],
+			stats->tx_dropped_ac[SME_AC_VO],
 
-		stats->tx_classified_ac[SME_AC_BK],
-		stats->tx_classified_ac[SME_AC_BE],
-		stats->tx_classified_ac[SME_AC_VI],
-		stats->tx_classified_ac[SME_AC_VO],
-		qdf_system_ticks(),
-		total_rx_pkt, total_rx_dropped, total_rx_delv, total_rx_refused
-		);
+			stats->tx_classified_ac[SME_AC_BK],
+			stats->tx_classified_ac[SME_AC_BE],
+			stats->tx_classified_ac[SME_AC_VI],
+			stats->tx_classified_ac[SME_AC_VO],
+			qdf_system_ticks(),
+			total_rx_pkt, total_rx_dropped,
+			qdf_atomic_read(&stats->rx_usolict_arp_n_mcast_drp),
+			total_rx_delv, total_rx_refused
+			);
 
 	for (i = 0; i < NUM_CPUS; i++) {
 		if (stats->rx_packets[i] == 0)
@@ -3239,7 +3241,9 @@ static QDF_STATUS hdd_wlan_get_ibss_peer_info(struct hdd_adapter *adapter,
 		hdd_debug("pPeerInfo->numIBSSPeers = %d ", pPeerInfo->numPeers);
 		{
 			uint8_t mac_addr[QDF_MAC_ADDR_SIZE];
+#ifdef WLAN_DEBUG
 			uint32_t tx_rate = pPeerInfo->peerInfoParams[0].txRate;
+#endif
 
 			qdf_mem_copy(mac_addr, pPeerInfo->peerInfoParams[0].
 					mac_addr, sizeof(mac_addr));
@@ -7055,7 +7059,7 @@ static int iw_get_policy_manager_ut_ops(struct hdd_context *hdd_ctx,
  *
  * Return: void
  */
-#if WLAN_DEBUG
+#ifdef WLAN_DEBUG
 static void hdd_ch_avoid_unit_cmd(struct hdd_context *hdd_ctx,
 				  int num_args, int *apps_args)
 {
@@ -7217,7 +7221,7 @@ static int __iw_set_var_ints_getnone(struct net_device *dev,
 			hdd_err("Invalid MODULE ID %d", apps_args[0]);
 			return -EINVAL;
 		}
-		if ((apps_args[1] >= (WMA_MAX_NUM_ARGS)) ||
+		if ((apps_args[1] > (WMA_MAX_NUM_ARGS)) ||
 		    (apps_args[1] < 0)) {
 			hdd_err("Too Many/Few args %d", apps_args[1]);
 			return -EINVAL;
@@ -8090,7 +8094,8 @@ static int __iw_set_packet_filter_params(struct net_device *dev,
 		return -EINVAL;
 	}
 
-	if ((NULL == priv_data.pointer) || (0 == priv_data.length)) {
+	if ((NULL == priv_data.pointer) || (0 == priv_data.length) ||
+	   priv_data.length < sizeof(struct pkt_filter_cfg)) {
 		hdd_err("invalid priv data %pK or invalid priv data length %d",
 			priv_data.pointer, priv_data.length);
 		return -EINVAL;

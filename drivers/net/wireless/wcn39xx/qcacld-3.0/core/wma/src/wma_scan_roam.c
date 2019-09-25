@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -47,6 +47,7 @@
 
 #include "cds_utils.h"
 #include "wlan_policy_mgr_api.h"
+#include <wlan_utility.h>
 
 #if !defined(REMOVE_PKT_LOG)
 #include "pktlog_ac.h"
@@ -353,6 +354,7 @@ QDF_STATUS wma_roam_scan_offload_mode(tp_wma_handle wma_handle,
 			&params->roam_offload_params, roam_req);
 		params->fw_okc = roam_req->pmkid_modes.fw_okc;
 		params->fw_pmksa_cache = roam_req->pmkid_modes.fw_pmksa_cache;
+		params->rct_validity_timer = roam_req->rct_validity_timer;
 #endif
 		params->min_delay_btw_roam_scans =
 				roam_req->min_delay_btw_roam_scans;
@@ -365,6 +367,13 @@ QDF_STATUS wma_roam_scan_offload_mode(tp_wma_handle wma_handle,
 		params->assoc_ie_length = roam_req->assoc_ie.length;
 		qdf_mem_copy(params->assoc_ie, roam_req->assoc_ie.addIEdata,
 						roam_req->assoc_ie.length);
+		/*Configure roaming scan behavior (DBS/Non-DBS scan)*/
+		if (roam_req->roaming_scan_policy)
+			scan_cmd_fp->scan_ctrl_flags_ext |=
+					WMI_SCAN_DBS_POLICY_FORCE_NONDBS;
+		else
+			scan_cmd_fp->scan_ctrl_flags_ext |=
+					WMI_SCAN_DBS_POLICY_DEFAULT;
 
 		wma_roam_scan_fill_fils_params(wma_handle, params, roam_req);
 	}
@@ -1354,6 +1363,7 @@ static QDF_STATUS wma_roam_scan_btm_offload(tp_wma_handle wma_handle,
 	params->btm_solicited_timeout = roam_req->btm_solicited_timeout;
 	params->btm_max_attempt_cnt = roam_req->btm_max_attempt_cnt;
 	params->btm_sticky_time = roam_req->btm_sticky_time;
+	params->disassoc_timer_threshold = roam_req->disassoc_timer_threshold;
 
 	WMA_LOGD("%s: Sending BTM offload to FW for vdev %u btm_offload_config %u",
 		 __func__, params->vdev_id, params->btm_offload_config);
@@ -1363,6 +1373,37 @@ static QDF_STATUS wma_roam_scan_btm_offload(tp_wma_handle wma_handle,
 
 
 	return status;
+}
+
+/**
+ * wma_send_roam_bss_load_config() - API to send load bss trigger
+ * related parameters to fw
+ *
+ * @handle: WMA handle
+ * @roam_req: bss load config parameters from csr to be sent to fw
+ *
+ * Return: None
+ */
+static
+void wma_send_roam_bss_load_config(WMA_HANDLE handle,
+				   struct wmi_bss_load_config *params)
+{
+	QDF_STATUS status;
+	tp_wma_handle wma_handle = (tp_wma_handle) handle;
+
+	if (!wma_handle || !wma_handle->wmi_handle) {
+		WMA_LOGE("WMA is closed, cannot send bss load config");
+		return;
+	}
+
+	WMA_LOGD("%s: Sending bss load trigger parameters to fw vdev %u bss_load_threshold %u bss_load_sample_time:%u",
+		 __func__, params->vdev_id, params->bss_load_threshold,
+		 params->bss_load_sample_time);
+
+	status = wmi_unified_send_bss_load_config(wma_handle->wmi_handle,
+						  params);
+	if (QDF_IS_STATUS_ERROR(status))
+		WMA_LOGE("failed to send bss load trigger config command");
 }
 
 /**
@@ -1425,6 +1466,7 @@ QDF_STATUS wma_process_roaming_config(tp_wma_handle wma_handle,
 	tpAniSirGlobal pMac = cds_get_context(QDF_MODULE_ID_PE);
 	uint32_t mode = 0;
 	struct wma_txrx_node *intr = NULL;
+	struct wmi_bss_load_config *bss_load_cfg;
 
 	if (NULL == pMac) {
 		WMA_LOGE("%s: pMac is NULL", __func__);
@@ -1554,7 +1596,8 @@ QDF_STATUS wma_process_roaming_config(tp_wma_handle wma_handle,
 		}
 
 		/*
-		 * Send 11k offload enable to FW as part of RSO Start
+		 * Send 11k offload enable and bss load trigger parameters
+		 * to FW as part of RSO Start
 		 */
 		if (roam_req->reason == REASON_CTX_INIT) {
 			qdf_status = wma_send_offload_11k_params(wma_handle,
@@ -1563,6 +1606,12 @@ QDF_STATUS wma_process_roaming_config(tp_wma_handle wma_handle,
 				WMA_LOGE("11k offload enable not sent, status %d",
 					 qdf_status);
 				break;
+			}
+
+			if (roam_req->bss_load_trig_enabled) {
+				bss_load_cfg = &roam_req->bss_load_config;
+				wma_send_roam_bss_load_config(wma_handle,
+							      bss_load_cfg);
 			}
 		}
 		break;
@@ -2280,6 +2329,7 @@ int wma_roam_synch_event_handler(void *handle, uint8_t *event,
 	roam_offload_synch_ind *roam_synch_ind_ptr = NULL;
 	tpSirBssDescription  bss_desc_ptr = NULL;
 	uint16_t ie_len = 0;
+	uint8_t channel;
 	int status = -EINVAL;
 	tSirRoamOffloadScanReq *roam_req;
 	qdf_time_t roam_synch_received = qdf_get_system_timestamp();
@@ -2475,6 +2525,18 @@ int wma_roam_synch_event_handler(void *handle, uint8_t *event,
 	if (roam_synch_ind_ptr->join_rsp)
 		wma->interfaces[synch_event->vdev_id].chan_width =
 			roam_synch_ind_ptr->join_rsp->vht_channel_width;
+	/*
+	 * update phy_mode in wma to avoid mismatch in phymode between host and
+	 * firmware. The phymode stored in interface[vdev_id].chanmode is sent
+	 * to firmware as part of opmode update during either - vht opmode
+	 * action frame received or during opmode change detected while
+	 * processing beacon. Any mismatch of this value with firmware phymode
+	 * results in firmware assert.
+	 */
+	channel = cds_freq_to_chan(wma->interfaces[synch_event->vdev_id].mhz);
+	wma_get_phy_mode_cb(channel,
+			    wma->interfaces[synch_event->vdev_id].chan_width,
+			    &wma->interfaces[synch_event->vdev_id].chanmode);
 
 	wma->csr_roam_synch_cb((tpAniSirGlobal)wma->mac_context,
 		roam_synch_ind_ptr, bss_desc_ptr, SIR_ROAM_SYNCH_COMPLETE);
@@ -2681,7 +2743,7 @@ QDF_STATUS wma_roam_scan_fill_self_caps(tp_wma_handle wma_handle,
 		tSirMacExtendedHTCapabilityInfo extHtCapInfo;
 	} uHTCapabilityInfo;
 
-	qdf_mem_set(&macQosInfoSta, sizeof(tSirMacQosInfoStation), 0);
+	qdf_mem_zero(&macQosInfoSta, sizeof(tSirMacQosInfoStation));
 	/* Roaming is done only for INFRA STA type.
 	 * So, ess will be one and ibss will be Zero
 	 */
@@ -3416,6 +3478,12 @@ void wma_register_extscan_event_handler(tp_wma_handle wma_handle)
 			wmi_passpoint_match_event_id,
 			wma_passpoint_match_event_handler,
 			WMA_RX_SERIALIZER_CTX);
+
+	/* Register BTM reject list event handler */
+	wmi_unified_register_event_handler(wma_handle->wmi_handle,
+					   wmi_roam_blacklist_event_id,
+					   wma_handle_btm_blacklist_event,
+					   WMA_RX_SERIALIZER_CTX);
 }
 
 /**
@@ -4038,6 +4106,17 @@ static int wma_group_num_bss_to_scan_id(const u_int8_t *cmd_param_info,
 	src_rssi = param_buf->rssi_list;
 	t_cached_result = cached_result;
 	t_scan_id_grp = &t_cached_result->result[0];
+
+	if ((t_cached_result->num_scan_ids *
+	     QDF_MIN(t_scan_id_grp->num_results,
+		     param_buf->num_bssid_list)) > param_buf->num_bssid_list) {
+		WMA_LOGE("%s:num_scan_ids %d, num_results %d num_bssid_list %d",
+			 __func__,
+			 t_cached_result->num_scan_ids,
+			 t_scan_id_grp->num_results,
+			 param_buf->num_bssid_list);
+		return -EINVAL;
+	}
 
 	WMA_LOGD("%s: num_scan_ids:%d", __func__,
 			t_cached_result->num_scan_ids);
@@ -5016,7 +5095,7 @@ QDF_STATUS wma_scan_probe_setoui(tp_wma_handle wma, tSirScanMacOui *psetoui)
 {
 	struct scan_mac_oui set_oui;
 
-	qdf_mem_set(&set_oui, sizeof(struct scan_mac_oui), 0);
+	qdf_mem_zero(&set_oui, sizeof(struct scan_mac_oui));
 
 	if (!wma || !wma->wmi_handle) {
 		WMA_LOGE("%s: WMA is closed, can not issue  cmd", __func__);
@@ -5447,4 +5526,75 @@ QDF_STATUS wma_send_ht40_obss_scanind(tp_wma_handle wma,
 		return QDF_STATUS_E_FAILURE;
 	}
 	return QDF_STATUS_SUCCESS;
+}
+
+int wma_handle_btm_blacklist_event(void *handle, uint8_t *cmd_param_info,
+				   uint32_t len)
+{
+	tp_wma_handle wma = (tp_wma_handle) handle;
+	WMI_ROAM_BLACKLIST_EVENTID_param_tlvs *param_buf;
+	wmi_roam_blacklist_event_fixed_param *resp_event;
+	wmi_roam_blacklist_with_timeout_tlv_param *src_list;
+	struct roam_blacklist_event *dst_list;
+	struct roam_blacklist_timeout *roam_blacklist;
+	uint32_t num_entries, i;
+
+	param_buf = (WMI_ROAM_BLACKLIST_EVENTID_param_tlvs *)cmd_param_info;
+	if (!param_buf) {
+		WMA_LOGE("Invalid event buffer");
+		return -EINVAL;
+	}
+
+	resp_event = param_buf->fixed_param;
+	if (!resp_event) {
+		WMA_LOGE("%s: received null event data from target", __func__);
+		return -EINVAL;
+	}
+
+	if (resp_event->vdev_id >= wma->max_bssid) {
+		WMA_LOGE("%s: received invalid vdev_id %d",
+			 __func__, resp_event->vdev_id);
+		return -EINVAL;
+	}
+
+	num_entries = param_buf->num_blacklist_with_timeout;
+	if (num_entries == 0) {
+		/* no aps to blacklist just return*/
+		WMA_LOGE("%s: No APs in blacklist received", __func__);
+		return 0;
+	}
+
+	if (num_entries > MAX_RSSI_AVOID_BSSID_LIST) {
+		WMA_LOGE("%s: num blacklist entries:%d exceeds maximum value",
+			 __func__, num_entries);
+		return -EINVAL;
+	}
+
+	src_list = param_buf->blacklist_with_timeout;
+	if (len < (sizeof(*resp_event) + (num_entries * sizeof(*src_list)))) {
+		WMA_LOGE("%s: Invalid length:%d", __func__, len);
+		return -EINVAL;
+	}
+
+	dst_list = qdf_mem_malloc(sizeof(struct roam_blacklist_event) +
+				 (sizeof(struct roam_blacklist_timeout) *
+				 num_entries));
+	if (!dst_list)
+		return -ENOMEM;
+
+	roam_blacklist = &dst_list->roam_blacklist[0];
+	for (i = 0; i < num_entries; i++) {
+		WMI_MAC_ADDR_TO_CHAR_ARRAY(&src_list->bssid,
+					   roam_blacklist->bssid.bytes);
+		roam_blacklist->timeout = src_list->timeout;
+		roam_blacklist->received_time =
+			qdf_do_div(qdf_get_monotonic_boottime(),
+				   QDF_MC_TIMER_TO_MS_UNIT);
+		roam_blacklist++;
+		src_list++;
+	}
+
+	dst_list->num_entries = num_entries;
+	wma_send_msg(wma, WMA_ROAM_BLACKLIST_MSG, (void *)dst_list, 0);
+	return 0;
 }

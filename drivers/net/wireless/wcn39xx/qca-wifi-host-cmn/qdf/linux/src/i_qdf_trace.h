@@ -224,7 +224,7 @@ static inline void qdf_trace_msg(QDF_MODULE_ID module, QDF_TRACE_LEVEL level,
 #endif
 
 #ifdef PANIC_ON_BUG
-#ifdef CONFIG_SLUB_DEBUG_ON
+#ifdef CONFIG_SLUB_DEBUG
 /**
  * __qdf_bug() - Calls BUG() when the PANIC_ON_BUG compilation option is enabled
  *
@@ -257,12 +257,12 @@ static inline void qdf_trace_msg(QDF_MODULE_ID module, QDF_TRACE_LEVEL level,
  * Return: None
  */
 void __qdf_bug(void);
-#else /* CONFIG_SLUB_DEBUG_ON */
+#else /* CONFIG_SLUB_DEBUG */
 static inline void __qdf_bug(void)
 {
 	BUG();
 }
-#endif /* CONFIG_SLUB_DEBUG_ON */
+#endif /* CONFIG_SLUB_DEBUG */
 
 /**
  * QDF_DEBUG_PANIC() - In debug builds, panic, otherwise do nothing

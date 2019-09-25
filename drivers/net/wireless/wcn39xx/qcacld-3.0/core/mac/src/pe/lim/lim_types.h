@@ -137,7 +137,7 @@
 #endif
 
 #define LIM_DOS_PROTECTION_TIME 1000 //1000ms
-
+#define LIM_MIN_RSSI 0 /* 0dbm */
 /* enums used by LIM are as follows */
 
 enum eLimDisassocTrigger {
@@ -273,6 +273,7 @@ typedef struct sLimMlmAssocInd {
 
 	tDot11fIEHTCaps ht_caps;
 	tDot11fIEVHTCaps vht_caps;
+	bool he_caps_present;
 } tLimMlmAssocInd, *tpLimMlmAssocInd;
 
 typedef struct sLimMlmReassocReq {
@@ -680,6 +681,17 @@ QDF_STATUS lim_process_tdls_add_sta_rsp(tpAniSirGlobal pMac, void *msg, tpPESess
 void lim_process_tdls_del_sta_rsp(tpAniSirGlobal mac_ctx,
 				  struct scheduler_msg *lim_msg,
 				  tpPESession session_entry);
+
+/**
+ * lim_update_tdls_state_in_fw() - Update TDLS state in FW
+ *
+ * @session_entry - PE sessions
+ * @value  -value to be updated
+ *
+ *
+ * Return: void
+ */
+void lim_update_tdls_set_state_for_fw(tpPESession session_entry, bool value);
 #else
 static inline QDF_STATUS lim_delete_tdls_peers(tpAniSirGlobal mac_ctx,
 						tpPESession session_entry)
@@ -690,6 +702,11 @@ static inline void lim_init_tdls_data(tpAniSirGlobal pMac,
 					tpPESession pSessionEntry)
 {
 
+}
+
+static inline void lim_update_tdls_set_state_for_fw(tpPESession session_entry,
+						    bool value)
+{
 }
 #endif
 
@@ -1001,6 +1018,27 @@ QDF_STATUS lim_process_sme_del_all_tdls_peers(tpAniSirGlobal p_mac,
  * Return: None
  */
 void lim_send_bcn_rsp(tpAniSirGlobal mac_ctx, tpSendbeaconParams rsp);
+
+/**
+ * lim_remove_duplicate_bssid_node() - remove duplicate bssid from the
+ * @entry: entry to check for which the duplicate entry is present
+ * @list:  mac_ctx->roam.rssi_disallow_bssid list
+ *
+ * Return: None
+ */
+void lim_remove_duplicate_bssid_node(struct sir_rssi_disallow_lst *entry,
+				     qdf_list_t *list);
+
+/**
+ * lim_add_roam_blacklist_ap() - handle the blacklist bssid list received from
+ * firmware
+ * @mac_ctx: Pointer to Global MAC structure
+ * @list: roam blacklist ap list
+ *
+ * Return: None
+ */
+void lim_add_roam_blacklist_ap(tpAniSirGlobal mac_ctx,
+			       struct roam_blacklist_event *src_lst);
 
 /**
  * lim_process_rx_channel_status_event() - processes

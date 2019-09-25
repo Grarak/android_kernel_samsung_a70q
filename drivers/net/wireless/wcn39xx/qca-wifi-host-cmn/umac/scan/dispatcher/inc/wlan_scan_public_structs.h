@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -32,9 +32,9 @@
 typedef uint16_t wlan_scan_requester;
 typedef uint32_t wlan_scan_id;
 
-#define WLAN_SCAN_MAX_NUM_SSID          10
-#define WLAN_SCAN_MAX_NUM_BSSID         10
-#define WLAN_SCAN_MAX_NUM_CHANNELS      40
+#define WLAN_SCAN_MAX_NUM_SSID          16
+#define WLAN_SCAN_MAX_NUM_BSSID         4
+#define WLAN_SCAN_MAX_NUM_CHANNELS      68
 
 #define SCM_CANCEL_SCAN_WAIT_TIME 50
 #define SCM_CANCEL_SCAN_WAIT_ITERATION 600
@@ -270,6 +270,7 @@ struct security_info {
  * @bssid: bssid
  * @mac_addr: mac address
  * @ssid: ssid
+ * @is_hidden_ssid: is AP having hidden ssid.
  * @seq_num: sequence number
  * @phy_mode: Phy mode of the AP
  * @avg_rssi: Average RSSI fof the AP
@@ -306,6 +307,7 @@ struct scan_cache_entry {
 	struct qdf_mac_addr bssid;
 	struct qdf_mac_addr mac_addr;
 	struct wlan_ssid ssid;
+	bool is_hidden_ssid;
 	uint16_t seq_num;
 	enum wlan_phymode phy_mode;
 	int32_t avg_rssi;
@@ -1118,12 +1120,14 @@ typedef void (*scan_event_handler) (struct wlan_objmgr_vdev *vdev,
  * enum scan_cb_type - update beacon cb type
  * @SCAN_CB_TYPE_INFORM_BCN: Calback to indicate beacon to OS
  * @SCAN_CB_TYPE_UPDATE_BCN: Calback to indicate beacon
+ * @SCAN_CB_TYPE_UNLINK_BSS: cb to unlink bss entry
  *                    to MLME and update MLME info
  *
  */
 enum scan_cb_type {
 	SCAN_CB_TYPE_INFORM_BCN,
 	SCAN_CB_TYPE_UPDATE_BCN,
+	SCAN_CB_TYPE_UNLINK_BSS,
 };
 
 /* Set PNO */
@@ -1274,6 +1278,9 @@ struct pno_scan_req_params {
  * @top_k_num_of_channels: def top K number of channels are used for tanimoto
  * distance calculation.
  * @stationary_thresh: def threshold val to determine that STA is stationary.
+ * @scan_timer_repeat_value: PNO scan timer repeat value
+ * @slow_scan_multiplier: PNO slow scan timer multiplier
+ * @dfs_chnl_scan_enable: Enable dfs channel PNO scan
  * @pnoscan_adaptive_dwell_mode: def adaptive dwelltime mode for pno scan
  * @channel_prediction_full_scan: def periodic timer upon which full scan needs
  * to be triggered.
@@ -1283,6 +1290,9 @@ struct pno_user_cfg {
 	bool channel_prediction;
 	uint8_t top_k_num_of_channels;
 	uint8_t stationary_thresh;
+	uint32_t scan_timer_repeat_value;
+	uint32_t slow_scan_multiplier;
+	bool dfs_chnl_scan_enabled;
 	enum scan_dwelltime_adaptive_mode adaptive_dwell_mode;
 	uint32_t channel_prediction_full_scan;
 	struct nlo_mawc_params mawc_params;
@@ -1292,6 +1302,7 @@ struct pno_user_cfg {
  * struct scan_user_cfg - user configuration required for for scan
  * @allow_dfs_chan_in_first_scan: first scan should contain dfs channels or not.
  * @allow_dfs_chan_in_scan: Scan DFS channels or not.
+ * @skip_dfs_chan_in_p2p_search: Skip DFS channels in P2P search.
  * @use_wake_lock_in_user_scan: if wake lock will be acquired during user scan
  * @active_dwell: default active dwell time
  * @active_dwell_2g: default active dwell time for 2G channels
@@ -1313,6 +1324,7 @@ struct pno_user_cfg {
  * bucket
  * @rssi_cat_gap: set rssi category gap
  * @scan_dwell_time_mode: Adaptive dweltime mode
+ * @scan_dwell_time_mode_nc: Adaptive dweltime mode without connection
  * @pno_cfg: Pno related config params
  * @ie_whitelist: probe req IE whitelist attrs
  * @is_bssid_hint_priority: True if bssid_hint is priority
@@ -1323,6 +1335,7 @@ struct pno_user_cfg {
 struct scan_user_cfg {
 	bool allow_dfs_chan_in_first_scan;
 	bool allow_dfs_chan_in_scan;
+	bool skip_dfs_chan_in_p2p_search;
 	bool use_wake_lock_in_user_scan;
 	uint32_t active_dwell;
 	uint32_t active_dwell_2g;
@@ -1339,6 +1352,7 @@ struct scan_user_cfg {
 	int32_t scan_bucket_threshold;
 	uint32_t rssi_cat_gap;
 	enum scan_dwelltime_adaptive_mode scan_dwell_time_mode;
+	enum scan_dwelltime_adaptive_mode scan_dwell_time_mode_nc;
 	struct pno_user_cfg pno_cfg;
 	struct probe_req_whitelist_attr ie_whitelist;
 	uint32_t usr_cfg_probe_rpt_time;
@@ -1350,7 +1364,6 @@ struct scan_user_cfg {
 	uint8_t p2p_scan_burst_duration;
 	uint8_t go_scan_burst_duration;
 	uint8_t ap_scan_burst_duration;
-	bool skip_dfs_chan_in_p2p_search;
 	struct scoring_config score_config;
 };
 

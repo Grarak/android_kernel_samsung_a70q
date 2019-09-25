@@ -1413,6 +1413,18 @@ typedef struct sTdlsLinkEstablishParams {
 } tTdlsLinkEstablishParams, *tpTdlsLinkEstablishParams;
 
 /**
+ * struct send_peer_unmap_conf_params - Send Peer Unmap Conf param
+ * @vdev_id: vdev ID
+ * @peer_id_cnt: peer_id count
+ * @peer_id_list: list of peer IDs
+ */
+struct send_peer_unmap_conf_params {
+	uint8_t vdev_id;
+	uint32_t peer_id_cnt;
+	uint16_t *peer_id_list;
+};
+
+/**
  * struct tHalHiddenSsidVdevRestart - hidden ssid vdev restart params
  * @ssidHidden: is hidden ssid or not
  * @sessionId: session id
@@ -1505,5 +1517,27 @@ typedef struct sNanRequest {
 	uint8_t request_data[];
 } tNanRequest, *tpNanRequest;
 #endif /* WLAN_FEATURE_NAN */
+
+/*
+ * struct roam_blacklist_timeout - BTM blacklist entry
+ * @bssid - bssid that is to be blacklisted
+ * @timeout - time duration for which the bssid is blacklisted
+ * @received_time - timestamp at which the firmware event was received
+ */
+struct roam_blacklist_timeout {
+	struct qdf_mac_addr bssid;
+	uint32_t timeout;
+	qdf_time_t received_time;
+};
+
+/*
+ * struct roam_blacklist_event - Blacklist event entries destination structure
+ * @num_entries: total entries sent over the event
+ * @roam_blacklist: blacklist details
+ */
+struct roam_blacklist_event {
+	uint32_t num_entries;
+	struct roam_blacklist_timeout roam_blacklist[];
+};
 
 #endif /* _HALMSGAPI_H_ */

@@ -58,7 +58,6 @@
 #include <qca_vendor.h>
 #include <wlan_spectral_utils_api.h>
 #include <wlan_mlme_main.h>
-#include <wlan_utility.h>
 
 static tSelfRecoveryStats g_self_recovery_stats;
 
@@ -278,6 +277,41 @@ static QDF_STATUS sme_process_hw_mode_trans_ind(tpAniSirGlobal mac,
 	return QDF_STATUS_SUCCESS;
 }
 
+QDF_STATUS sme_purge_pdev_all_ser_cmd_list_sync(mac_handle_t mac_handle,
+						sir_purge_pdev_cmd_cb cb)
+{
+	QDF_STATUS status;
+	tpAniSirGlobal mac_ctx = PMAC_STRUCT(mac_handle);
+	struct scheduler_msg msg = {0};
+	struct sir_purge_pdev_cmd_req *req;
+
+	status = sme_acquire_global_lock(&mac_ctx->sme);
+	if (QDF_IS_STATUS_ERROR(status))
+		return status;
+
+	req = qdf_mem_malloc(sizeof(*req));
+	if (!req) {
+		sme_release_global_lock(&mac_ctx->sme);
+		sme_err("failed to get req");
+		return QDF_STATUS_E_NOMEM;
+	}
+
+	req->message_type = eWNI_SME_PURGE_ALL_PDEV_CMDS_REQ;
+	req->length = (uint16_t) sizeof(tAniGetRssiReq);
+	req->purge_complete_cb = cb;
+	msg.type = eWNI_SME_PURGE_ALL_PDEV_CMDS_REQ;
+	msg.bodyptr = req;
+	status = scheduler_post_message(QDF_MODULE_ID_SME, QDF_MODULE_ID_SME,
+					QDF_MODULE_ID_SME, &msg);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		qdf_mem_free(req);
+		sme_err("Failed to post eWNI_SME_PURGE_ALL_PDEV_CMDS_REQ to self");
+	}
+	sme_release_global_lock(&mac_ctx->sme);
+
+	return status;
+}
+
 /**
  * free_sme_cmds() - This function frees memory allocated for SME commands
  * @mac_ctx:      Pointer to Global MAC structure
@@ -472,11 +506,11 @@ tSmeCmd *sme_get_command_buffer(tpAniSirGlobal pMac)
 
 	/* memset to zero */
 	if (pRetCmd) {
-		qdf_mem_set((uint8_t *)&pRetCmd->command,
-			    sizeof(pRetCmd->command), 0);
-		qdf_mem_set((uint8_t *)&pRetCmd->sessionId,
-			    sizeof(pRetCmd->sessionId), 0);
-		qdf_mem_set((uint8_t *)&pRetCmd->u, sizeof(pRetCmd->u), 0);
+		qdf_mem_zero((uint8_t *)&pRetCmd->command,
+			    sizeof(pRetCmd->command));
+		qdf_mem_zero((uint8_t *)&pRetCmd->sessionId,
+			    sizeof(pRetCmd->sessionId));
+		qdf_mem_zero((uint8_t *)&pRetCmd->u, sizeof(pRetCmd->u));
 	}
 
 	return pRetCmd;
@@ -559,10 +593,9 @@ QDF_STATUS sme_ser_handle_active_cmd(struct wlan_serialization_command *cmd)
 	return status;
 }
 
-QDF_STATUS sme_ser_cmd_callback(void *buf,
+QDF_STATUS sme_ser_cmd_callback(struct wlan_serialization_command *cmd,
 				enum wlan_serialization_cb_reason reason)
 {
-	struct wlan_serialization_command *cmd = buf;
 	tHalHandle hal;
 	tpAniSirGlobal mac_ctx;
 	QDF_STATUS status = QDF_STATUS_SUCCESS;
@@ -768,7 +801,6 @@ QDF_STATUS sme_open(tHalHandle hHal)
 	}
 	sme_trace_init(pMac);
 	sme_register_debug_callback();
-	wlan_serialization_legacy_init_callback();
 
 	return status;
 }
@@ -1043,7 +1075,7 @@ QDF_STATUS sme_update_roam_params(tHalHandle hal,
 		roam_params_dst->is_5g_pref_enabled = true;
 		break;
 	case REASON_ROAM_SET_SSID_ALLOWED:
-		qdf_mem_set(&roam_params_dst->ssid_allowed_list, 0,
+		qdf_mem_zero(&roam_params_dst->ssid_allowed_list,
 				sizeof(tSirMacSSid) * MAX_SSID_ALLOWED_LIST);
 		roam_params_dst->num_ssid_allowed_list =
 			roam_params_src->num_ssid_allowed_list;
@@ -1056,7 +1088,7 @@ QDF_STATUS sme_update_roam_params(tHalHandle hal,
 		}
 		break;
 	case REASON_ROAM_SET_FAVORED_BSSID:
-		qdf_mem_set(&roam_params_dst->bssid_favored, 0,
+		qdf_mem_zero(&roam_params_dst->bssid_favored,
 			sizeof(tSirMacAddr) * MAX_BSSID_FAVORED);
 		roam_params_dst->num_bssid_favored =
 			roam_params_src->num_bssid_favored;
@@ -1069,7 +1101,7 @@ QDF_STATUS sme_update_roam_params(tHalHandle hal,
 		}
 		break;
 	case REASON_ROAM_SET_BLACKLIST_BSSID:
-		qdf_mem_set(&roam_params_dst->bssid_avoid_list, 0,
+		qdf_mem_zero(&roam_params_dst->bssid_avoid_list,
 			QDF_MAC_ADDR_SIZE * MAX_BSSID_AVOID_LIST);
 		roam_params_dst->num_bssid_avoid_list =
 			roam_params_src->num_bssid_avoid_list;
@@ -1570,8 +1602,8 @@ QDF_STATUS sme_set_plm_request(tHalHandle hHal, tpSirPlmReq pPlmReq)
 	} /* End of for () */
 
 	/* Copying back the valid channel list to plm struct */
-	qdf_mem_set((void *)pPlmReq->plmChList,
-		    pPlmReq->plmNumCh, 0);
+	qdf_mem_zero((void *)pPlmReq->plmChList,
+		    pPlmReq->plmNumCh);
 	if (valid_count)
 		qdf_mem_copy(pPlmReq->plmChList, ch_list,
 			     valid_count);
@@ -2283,59 +2315,6 @@ QDF_STATUS sme_process_msg(tpAniSirGlobal pMac, struct scheduler_msg *pMsg)
 			sme_err("Empty message for: %d", pMsg->type);
 		}
 		break;
-	case eWNI_SME_OCB_SET_CONFIG_RSP:
-		if (pMac->sme.ocb_set_config_callback)
-			pMac->sme.ocb_set_config_callback(
-				pMac->sme.ocb_set_config_context,
-				pMsg->bodyptr);
-		else
-			sme_err("No callback for Msg type: %d", pMsg->type);
-		pMac->sme.ocb_set_config_callback = NULL;
-		pMac->sme.ocb_set_config_context = NULL;
-		qdf_mem_free(pMsg->bodyptr);
-		break;
-	case eWNI_SME_OCB_GET_TSF_TIMER_RSP:
-		if (pMac->sme.ocb_get_tsf_timer_callback)
-			pMac->sme.ocb_get_tsf_timer_callback(
-				pMac->sme.ocb_get_tsf_timer_context,
-				pMsg->bodyptr);
-		else
-			sme_err("No callback for Msg type: %d", pMsg->type);
-		pMac->sme.ocb_get_tsf_timer_callback = NULL;
-		pMac->sme.ocb_get_tsf_timer_context = NULL;
-		qdf_mem_free(pMsg->bodyptr);
-		break;
-	case eWNI_SME_DCC_GET_STATS_RSP:
-		if (pMac->sme.dcc_get_stats_callback)
-			pMac->sme.dcc_get_stats_callback(
-				pMac->sme.dcc_get_stats_context,
-				pMsg->bodyptr);
-		else
-			sme_err("No callback for Msg type: %d", pMsg->type);
-		pMac->sme.dcc_get_stats_callback = NULL;
-		pMac->sme.dcc_get_stats_context = NULL;
-		qdf_mem_free(pMsg->bodyptr);
-		break;
-	case eWNI_SME_DCC_UPDATE_NDL_RSP:
-		if (pMac->sme.dcc_update_ndl_callback)
-			pMac->sme.dcc_update_ndl_callback(
-				pMac->sme.dcc_update_ndl_context,
-				pMsg->bodyptr);
-		else
-			sme_err("No callback for Msg type: %d", pMsg->type);
-		pMac->sme.dcc_update_ndl_callback = NULL;
-		pMac->sme.dcc_update_ndl_context = NULL;
-		qdf_mem_free(pMsg->bodyptr);
-		break;
-	case eWNI_SME_DCC_STATS_EVENT:
-		if (pMac->sme.dcc_stats_event_callback)
-			pMac->sme.dcc_stats_event_callback(
-				pMac->sme.dcc_stats_event_context,
-				pMsg->bodyptr);
-		else
-			sme_err("No callback for Msg type: %d", pMsg->type);
-		qdf_mem_free(pMsg->bodyptr);
-		break;
 	case eWNI_SME_SET_DUAL_MAC_CFG_RESP:
 		if (pMsg->bodyptr) {
 			status = sme_process_dual_mac_config_resp(pMac,
@@ -2385,6 +2364,12 @@ QDF_STATUS sme_process_msg(tpAniSirGlobal pMac, struct scheduler_msg *pMsg)
 		if (pMac->sme.bt_activity_info_cb)
 			pMac->sme.bt_activity_info_cb(pMac->hdd_handle,
 						      pMsg->bodyval);
+		break;
+	case eWNI_SME_HIDDEN_SSID_RESTART_RSP:
+		if (pMac->sme.hidden_ssid_cb)
+			pMac->sme.hidden_ssid_cb(pMac->hdd_handle, pMsg->bodyval);
+		else
+			sme_err("callback is NULL");
 		break;
 	default:
 
@@ -2702,7 +2687,7 @@ QDF_STATUS sme_get_ap_channel_from_scan_cache(
 				FL("scan_filter mem alloc failed"));
 		return QDF_STATUS_E_FAILURE;
 	}
-	qdf_mem_set(&first_ap_profile, sizeof(tSirBssDescription), 0);
+	qdf_mem_zero(&first_ap_profile, sizeof(tSirBssDescription));
 	if (NULL == profile) {
 		scan_filter->EncryptionType.numEntries = 1;
 		scan_filter->EncryptionType.encryptionType[0]
@@ -5785,6 +5770,7 @@ QDF_STATUS sme_get_cfg_valid_channels(uint8_t *aValidChannels,
 	return status;
 }
 
+#ifdef WLAN_DEBUG
 static uint8_t *sme_reg_hint_to_str(const enum country_src src)
 {
 	switch (src) {
@@ -5804,6 +5790,7 @@ static uint8_t *sme_reg_hint_to_str(const enum country_src src)
 		return "unknown";
 	}
 }
+#endif
 
 void sme_set_cc_src(tHalHandle hHal, enum country_src cc_src)
 {
@@ -9059,265 +9046,6 @@ void sme_set_dot11p_config(tHalHandle hHal, bool enable_dot11p)
 }
 
 /**
- * copy_sir_ocb_config() - Performs deep copy of an OCB configuration
- * @src: the source configuration
- *
- * Return: pointer to the copied OCB configuration
- */
-static struct sir_ocb_config *sme_copy_sir_ocb_config(
-	struct sir_ocb_config *src)
-{
-	struct sir_ocb_config *dst;
-	uint32_t length;
-	void *cursor;
-
-	length = sizeof(*src) +
-		src->channel_count * sizeof(*src->channels) +
-		src->schedule_size * sizeof(*src->schedule) +
-		src->dcc_ndl_chan_list_len +
-		src->dcc_ndl_active_state_list_len;
-
-	dst = qdf_mem_malloc(length);
-	if (!dst)
-		return NULL;
-
-	*dst = *src;
-
-	cursor = dst;
-	cursor += sizeof(*dst);
-	dst->channels = cursor;
-	cursor += src->channel_count * sizeof(*src->channels);
-	qdf_mem_copy(dst->channels, src->channels,
-		     src->channel_count * sizeof(*src->channels));
-	dst->schedule = cursor;
-	cursor += src->schedule_size * sizeof(*src->schedule);
-	qdf_mem_copy(dst->schedule, src->schedule,
-		     src->schedule_size * sizeof(*src->schedule));
-	dst->dcc_ndl_chan_list = cursor;
-	cursor += src->dcc_ndl_chan_list_len;
-	qdf_mem_copy(dst->dcc_ndl_chan_list, src->dcc_ndl_chan_list,
-		     src->dcc_ndl_chan_list_len);
-	dst->dcc_ndl_active_state_list = cursor;
-	cursor += src->dcc_ndl_active_state_list_len;
-	qdf_mem_copy(dst->dcc_ndl_active_state_list,
-		     src->dcc_ndl_active_state_list,
-		     src->dcc_ndl_active_state_list_len);
-	return dst;
-}
-
-/**
- * sme_ocb_set_config() - Set the OCB configuration
- * @hHal: reference to the HAL
- * @context: the context of the call
- * @callback: the callback to hdd
- * @config: the OCB configuration
- *
- * Return: QDF_STATUS_SUCCESS on success, QDF_STATUS_E_FAILURE on failure
- */
-QDF_STATUS sme_ocb_set_config(tHalHandle hHal, void *context,
-			      ocb_callback callback,
-			      struct sir_ocb_config *config)
-{
-	QDF_STATUS status = QDF_STATUS_E_FAILURE;
-	tpAniSirGlobal pMac = PMAC_STRUCT(hHal);
-	struct scheduler_msg msg = {0};
-	struct sir_ocb_config *msg_body;
-
-	/* Lock the SME structure */
-	status = sme_acquire_global_lock(&pMac->sme);
-	if (!QDF_IS_STATUS_SUCCESS(status))
-		return status;
-
-	/*
-	 * Check if there is a pending request and return an error if one
-	 * exists
-	 */
-	if (pMac->sme.ocb_set_config_callback) {
-		status = QDF_STATUS_E_BUSY;
-		goto end;
-	}
-
-	msg_body = sme_copy_sir_ocb_config(config);
-
-	if (!msg_body) {
-		status = QDF_STATUS_E_NOMEM;
-		goto end;
-	}
-
-	msg.type = WMA_OCB_SET_CONFIG_CMD;
-	msg.bodyptr = msg_body;
-
-	/* Set the request callback and context */
-	pMac->sme.ocb_set_config_callback = callback;
-	pMac->sme.ocb_set_config_context = context;
-
-	status = scheduler_post_message(QDF_MODULE_ID_SME,
-					QDF_MODULE_ID_WMA,
-					QDF_MODULE_ID_WMA, &msg);
-	if (!QDF_IS_STATUS_SUCCESS(status)) {
-		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
-		      FL("Error posting message to WDA: %d"), status);
-		pMac->sme.ocb_set_config_callback = callback;
-		pMac->sme.ocb_set_config_context = context;
-		qdf_mem_free(msg_body);
-		goto end;
-	}
-
-end:
-	sme_release_global_lock(&pMac->sme);
-
-	return status;
-}
-
-/**
- * sme_ocb_set_utc_time() - Set the OCB UTC time
- * @hHal: reference to the HAL
- * @utc: the UTC time struct
- *
- * Return: QDF_STATUS_SUCCESS on success, QDF_STATUS_E_FAILURE on failure
- */
-QDF_STATUS sme_ocb_set_utc_time(tHalHandle hHal, struct sir_ocb_utc *utc)
-{
-	QDF_STATUS status = QDF_STATUS_E_FAILURE;
-	tpAniSirGlobal pMac = PMAC_STRUCT(hHal);
-	struct scheduler_msg msg = {0};
-	struct sir_ocb_utc *sme_utc;
-
-	/* Lock the SME structure */
-	status = sme_acquire_global_lock(&pMac->sme);
-	if (!QDF_IS_STATUS_SUCCESS(status))
-		return status;
-
-	sme_utc = qdf_mem_malloc(sizeof(*sme_utc));
-	if (!sme_utc) {
-		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
-			  FL("Malloc failed"));
-		status = QDF_STATUS_E_NOMEM;
-		goto end;
-	}
-	*sme_utc = *utc;
-
-	msg.type = WMA_OCB_SET_UTC_TIME_CMD;
-	msg.reserved = 0;
-	msg.bodyptr = sme_utc;
-	status = scheduler_post_message(QDF_MODULE_ID_SME,
-					QDF_MODULE_ID_WMA,
-					QDF_MODULE_ID_WMA, &msg);
-	if (!QDF_IS_STATUS_SUCCESS(status)) {
-		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
-			  FL("Not able to post message to WDA"));
-		qdf_mem_free(utc);
-		goto end;
-	}
-
-end:
-	sme_release_global_lock(&pMac->sme);
-
-	return status;
-}
-
-/**
- * sme_ocb_start_timing_advert() - Start sending timing advert frames
- * @hHal: reference to the HAL
- * @timing_advert: the timing advertisement struct
- *
- * Return: QDF_STATUS_SUCCESS on success, QDF_STATUS_E_FAILURE on failure
- */
-QDF_STATUS sme_ocb_start_timing_advert(tHalHandle hHal,
-	struct sir_ocb_timing_advert *timing_advert)
-{
-	QDF_STATUS status = QDF_STATUS_E_FAILURE;
-	tpAniSirGlobal pMac = PMAC_STRUCT(hHal);
-	struct scheduler_msg msg = {0};
-	void *buf;
-	struct sir_ocb_timing_advert *sme_timing_advert;
-
-	/* Lock the SME structure */
-	status = sme_acquire_global_lock(&pMac->sme);
-	if (!QDF_IS_STATUS_SUCCESS(status))
-		return status;
-
-	buf = qdf_mem_malloc(sizeof(*sme_timing_advert) +
-			     timing_advert->template_length);
-	if (!buf) {
-		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
-			  FL("Not able to allocate memory for start TA"));
-		status = QDF_STATUS_E_NOMEM;
-		goto end;
-	}
-
-	sme_timing_advert = (struct sir_ocb_timing_advert *)buf;
-	*sme_timing_advert = *timing_advert;
-	sme_timing_advert->template_value = buf + sizeof(*sme_timing_advert);
-	qdf_mem_copy(sme_timing_advert->template_value,
-	timing_advert->template_value, timing_advert->template_length);
-
-	msg.type = WMA_OCB_START_TIMING_ADVERT_CMD;
-	msg.reserved = 0;
-	msg.bodyptr = buf;
-	status = scheduler_post_message(QDF_MODULE_ID_SME,
-					QDF_MODULE_ID_WMA,
-					QDF_MODULE_ID_WMA, &msg);
-	if (!QDF_IS_STATUS_SUCCESS(status)) {
-		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
-			  FL("Not able to post msg to WDA"));
-		goto end;
-	}
-
-end:
-	sme_release_global_lock(&pMac->sme);
-
-	return status;
-}
-
-/**
- * sme_ocb_stop_timing_advert() - Stop sending timing advert frames on a channel
- * @hHal: reference to the HAL
- * @timing_advert: the timing advertisement struct
- *
- * Return: QDF_STATUS_SUCCESS on success, QDF_STATUS_E_FAILURE on failure
- */
-QDF_STATUS sme_ocb_stop_timing_advert(tHalHandle hHal,
-	struct sir_ocb_timing_advert *timing_advert)
-{
-	QDF_STATUS status = QDF_STATUS_E_FAILURE;
-	tpAniSirGlobal pMac = PMAC_STRUCT(hHal);
-	struct scheduler_msg msg = {0};
-	struct sir_ocb_timing_advert *sme_timing_advert;
-
-	/* Lock the SME structure */
-	status = sme_acquire_global_lock(&pMac->sme);
-	if (!QDF_IS_STATUS_SUCCESS(status))
-		return status;
-
-	sme_timing_advert = qdf_mem_malloc(sizeof(*timing_advert));
-	if (!sme_timing_advert) {
-		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
-			  FL("Not able to allocate memory for stop TA"));
-		status = QDF_STATUS_E_NOMEM;
-		goto end;
-	}
-	*sme_timing_advert = *timing_advert;
-
-	msg.type = WMA_OCB_STOP_TIMING_ADVERT_CMD;
-	msg.reserved = 0;
-	msg.bodyptr = sme_timing_advert;
-	status = scheduler_post_message(QDF_MODULE_ID_SME,
-					QDF_MODULE_ID_WMA,
-					QDF_MODULE_ID_WMA, &msg);
-	if (!QDF_IS_STATUS_SUCCESS(status)) {
-		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
-			  FL("Not able to post msg to WDA"));
-		goto end;
-	}
-
-end:
-	sme_release_global_lock(&pMac->sme);
-
-	return status;
-}
-
-/**
  * sme_ocb_gen_timing_advert_frame() - generate TA frame and populate the buffer
  * @hal_handle: reference to the HAL
  * @self_addr: the self MAC address
@@ -9340,300 +9068,7 @@ int sme_ocb_gen_timing_advert_frame(tHalHandle hal_handle,
 						  time_value_offset);
 	return template_length;
 }
-/**
- * sme_ocb_get_tsf_timer() - Get the TSF timer value
- * @hHal: reference to the HAL
- * @context: the context of the call
- * @callback: the callback to hdd
- * @request: the TSF timer request
- *
- * Return: QDF_STATUS_SUCCESS on success, QDF_STATUS_E_FAILURE on failure
- */
-QDF_STATUS sme_ocb_get_tsf_timer(tHalHandle hHal, void *context,
-				 ocb_callback callback,
-				 struct sir_ocb_get_tsf_timer *request)
-{
-	QDF_STATUS status = QDF_STATUS_E_FAILURE;
-	tpAniSirGlobal pMac = PMAC_STRUCT(hHal);
-	struct scheduler_msg msg = {0};
-	struct sir_ocb_get_tsf_timer *msg_body;
 
-	/* Lock the SME structure */
-	status = sme_acquire_global_lock(&pMac->sme);
-	if (!QDF_IS_STATUS_SUCCESS(status))
-		return status;
-
-	/* Allocate memory for the WMI request, and copy the parameter */
-	msg_body = qdf_mem_malloc(sizeof(*msg_body));
-	if (!msg_body) {
-		status = QDF_STATUS_E_NOMEM;
-		goto end;
-	}
-	*msg_body = *request;
-
-	msg.type = WMA_OCB_GET_TSF_TIMER_CMD;
-	msg.bodyptr = msg_body;
-
-	/* Set the request callback and the context */
-	pMac->sme.ocb_get_tsf_timer_callback = callback;
-	pMac->sme.ocb_get_tsf_timer_context = context;
-
-	/* Post the message to WDA */
-	status = scheduler_post_message(QDF_MODULE_ID_SME,
-					QDF_MODULE_ID_WMA,
-					QDF_MODULE_ID_WMA, &msg);
-	if (!QDF_IS_STATUS_SUCCESS(status)) {
-		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
-			  FL("Error posting message to WDA: %d"), status);
-		pMac->sme.ocb_get_tsf_timer_callback = NULL;
-		pMac->sme.ocb_get_tsf_timer_context = NULL;
-		qdf_mem_free(msg_body);
-		goto end;
-	}
-
-end:
-	sme_release_global_lock(&pMac->sme);
-
-	return status;
-}
-
-/**
- * sme_dcc_get_stats() - Get the DCC stats
- * @hHal: reference to the HAL
- * @context: the context of the call
- * @callback: the callback to hdd
- * @request: the get DCC stats request
- *
- * Return: QDF_STATUS_SUCCESS on success, QDF_STATUS_E_FAILURE on failure
- */
-QDF_STATUS sme_dcc_get_stats(tHalHandle hHal, void *context,
-			     ocb_callback callback,
-			     struct sir_dcc_get_stats *request)
-{
-	QDF_STATUS status = QDF_STATUS_E_FAILURE;
-	tpAniSirGlobal pMac = PMAC_STRUCT(hHal);
-	struct scheduler_msg msg = {0};
-	struct sir_dcc_get_stats *msg_body;
-
-	/* Lock the SME structure */
-	status = sme_acquire_global_lock(&pMac->sme);
-	if (!QDF_IS_STATUS_SUCCESS(status))
-		return status;
-
-	/* Allocate memory for the WMI request, and copy the parameter */
-	msg_body = qdf_mem_malloc(sizeof(*msg_body) +
-				  request->request_array_len);
-	if (!msg_body) {
-		status = QDF_STATUS_E_NOMEM;
-		goto end;
-	}
-	*msg_body = *request;
-	msg_body->request_array = (void *)msg_body + sizeof(*msg_body);
-	qdf_mem_copy(msg_body->request_array, request->request_array,
-		     request->request_array_len);
-
-	msg.type = WMA_DCC_GET_STATS_CMD;
-	msg.bodyptr = msg_body;
-
-	/* Set the request callback and context */
-	pMac->sme.dcc_get_stats_callback = callback;
-	pMac->sme.dcc_get_stats_context = context;
-
-	status = scheduler_post_message(QDF_MODULE_ID_SME,
-					QDF_MODULE_ID_WMA,
-					QDF_MODULE_ID_WMA, &msg);
-	if (!QDF_IS_STATUS_SUCCESS(status)) {
-		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
-			  FL("Error posting message to WDA: %d"), status);
-		pMac->sme.dcc_get_stats_callback = callback;
-		pMac->sme.dcc_get_stats_context = context;
-		qdf_mem_free(msg_body);
-		goto end;
-	}
-
-end:
-	sme_release_global_lock(&pMac->sme);
-
-	return status;
-}
-
-/**
- * sme_dcc_clear_stats() - Clear the DCC stats
- * @hHal: reference to the HAL
- * @vdev_id: vdev id for OCB interface
- * @dcc_stats_bitmap: the entries in the stats to clear
- *
- * Return: QDF_STATUS_SUCCESS on success, QDF_STATUS_E_FAILURE on failure
- */
-QDF_STATUS sme_dcc_clear_stats(tHalHandle hHal, uint32_t vdev_id,
-			       uint32_t dcc_stats_bitmap)
-{
-	QDF_STATUS status = QDF_STATUS_E_FAILURE;
-	tpAniSirGlobal pMac = PMAC_STRUCT(hHal);
-	struct scheduler_msg msg = {0};
-	struct sir_dcc_clear_stats *request;
-
-	/* Lock the SME structure */
-	status = sme_acquire_global_lock(&pMac->sme);
-	if (!QDF_IS_STATUS_SUCCESS(status))
-		return status;
-
-	request = qdf_mem_malloc(sizeof(struct sir_dcc_clear_stats));
-	if (!request) {
-		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
-			  FL("Not able to allocate memory"));
-		status = QDF_STATUS_E_NOMEM;
-		goto end;
-	}
-
-	request->vdev_id = vdev_id;
-	request->dcc_stats_bitmap = dcc_stats_bitmap;
-
-	msg.type = WMA_DCC_CLEAR_STATS_CMD;
-	msg.bodyptr = request;
-
-	status = scheduler_post_message(QDF_MODULE_ID_SME,
-					QDF_MODULE_ID_WMA,
-					QDF_MODULE_ID_WMA, &msg);
-	if (!QDF_IS_STATUS_SUCCESS(status)) {
-		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
-			  FL("Not able to post msg to WDA"));
-		qdf_mem_free(request);
-		goto end;
-	}
-
-end:
-	sme_release_global_lock(&pMac->sme);
-
-	return status;
-}
-
-/**
- * sme_dcc_update_ndl() - Update the DCC settings
- * @hHal: reference to the HAL
- * @context: the context of the call
- * @callback: the callback to hdd
- * @request: the update DCC request
- *
- * Return: QDF_STATUS_SUCCESS on success, QDF_STATUS_E_FAILURE on failure
- */
-QDF_STATUS sme_dcc_update_ndl(tHalHandle hHal, void *context,
-			      ocb_callback callback,
-			      struct sir_dcc_update_ndl *request)
-{
-	QDF_STATUS status = QDF_STATUS_E_FAILURE;
-	tpAniSirGlobal pMac = PMAC_STRUCT(hHal);
-	struct scheduler_msg msg = {0};
-	struct sir_dcc_update_ndl *msg_body;
-
-	/* Lock the SME structure */
-	status = sme_acquire_global_lock(&pMac->sme);
-	if (!QDF_IS_STATUS_SUCCESS(status))
-		return status;
-
-	/* Allocate memory for the WMI request, and copy the parameter */
-	msg_body = qdf_mem_malloc(sizeof(*msg_body) +
-				  request->dcc_ndl_chan_list_len +
-				  request->dcc_ndl_active_state_list_len);
-	if (!msg_body) {
-		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
-			  FL("Failed to allocate memory"));
-		status = QDF_STATUS_E_NOMEM;
-		goto end;
-	}
-
-	*msg_body = *request;
-
-	msg_body->dcc_ndl_chan_list = (void *)msg_body + sizeof(*msg_body);
-	msg_body->dcc_ndl_active_state_list = msg_body->dcc_ndl_chan_list +
-		request->dcc_ndl_chan_list_len;
-	qdf_mem_copy(msg_body->dcc_ndl_chan_list, request->dcc_ndl_chan_list,
-		     request->dcc_ndl_active_state_list_len);
-	qdf_mem_copy(msg_body->dcc_ndl_active_state_list,
-		     request->dcc_ndl_active_state_list,
-		     request->dcc_ndl_active_state_list_len);
-
-	msg.type = WMA_DCC_UPDATE_NDL_CMD;
-	msg.bodyptr = msg_body;
-
-	/* Set the request callback and the context */
-	pMac->sme.dcc_update_ndl_callback = callback;
-	pMac->sme.dcc_update_ndl_context = context;
-
-	status = scheduler_post_message(QDF_MODULE_ID_SME,
-					QDF_MODULE_ID_WMA,
-					QDF_MODULE_ID_WMA, &msg);
-	if (!QDF_IS_STATUS_SUCCESS(status)) {
-		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
-			  FL("Error posting message to WDA: %d"), status);
-		pMac->sme.dcc_update_ndl_callback = NULL;
-		pMac->sme.dcc_update_ndl_context = NULL;
-		qdf_mem_free(msg_body);
-		goto end;
-	}
-
-end:
-	sme_release_global_lock(&pMac->sme);
-
-	return status;
-}
-
-/**
- * sme_register_for_dcc_stats_event() - Register for the periodic DCC stats
- *                                      event
- * @hHal: reference to the HAL
- * @context: the context of the call
- * @callback: the callback to hdd
- *
- * Return: QDF_STATUS_SUCCESS on success, QDF_STATUS_E_FAILURE on failure
- */
-QDF_STATUS sme_register_for_dcc_stats_event(tHalHandle hHal, void *context,
-					    ocb_callback callback)
-{
-	tpAniSirGlobal pMac = PMAC_STRUCT(hHal);
-	QDF_STATUS status = QDF_STATUS_E_FAILURE;
-
-	status = sme_acquire_global_lock(&pMac->sme);
-	pMac->sme.dcc_stats_event_callback = callback;
-	pMac->sme.dcc_stats_event_context = context;
-	sme_release_global_lock(&pMac->sme);
-
-	return 0;
-}
-
-/**
- * sme_deregister_for_dcc_stats_event() - De-Register for the periodic DCC stats
- *					  event
- * @h_hal: Hal Handle
- *
- * This function de-registers the DCC perioc stats callback
- *
- * Return: QDF_STATUS Enumeration
- */
-QDF_STATUS sme_deregister_for_dcc_stats_event(tHalHandle h_hal)
-{
-	tpAniSirGlobal mac;
-	QDF_STATUS status;
-
-	if (!h_hal) {
-		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
-				  FL("h_hal is not valid"));
-		return QDF_STATUS_E_INVAL;
-	}
-	mac = PMAC_STRUCT(h_hal);
-
-	status = sme_acquire_global_lock(&mac->sme);
-	if (!QDF_IS_STATUS_SUCCESS(status)) {
-		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
-			  FL("Failed to acquire global lock"));
-		return status;
-	}
-	mac->sme.dcc_stats_event_callback = NULL;
-	mac->sme.dcc_stats_event_context = NULL;
-	sme_release_global_lock(&mac->sme);
-
-	return status;
-}
 #else
 void sme_set_etsi13_srd_ch_in_master_mode(tHalHandle hal,
 					  bool etsi13_srd_chan_support)
@@ -10868,7 +10303,7 @@ QDF_STATUS sme_set_thermal_level(tHalHandle hal, uint8_t level)
 	QDF_STATUS qdf_status = QDF_STATUS_SUCCESS;
 
 	if (QDF_STATUS_SUCCESS == sme_acquire_global_lock(&pMac->sme)) {
-		qdf_mem_set(&msg, sizeof(msg), 0);
+		qdf_mem_zero(&msg, sizeof(msg));
 		msg.type = WMA_SET_THERMAL_LEVEL;
 		msg.bodyval = level;
 
@@ -12368,6 +11803,57 @@ QDF_STATUS sme_power_debug_stats_req(tHalHandle hal, void (*callback_fn)
 						QDF_MODULE_ID_WMA, &msg);
 		if (!QDF_IS_STATUS_SUCCESS(status))
 			sme_err("not able to post WDA_POWER_DEBUG_STATS_REQ");
+		sme_release_global_lock(&mac_ctx->sme);
+	}
+	return status;
+}
+#endif
+
+#ifdef WLAN_FEATURE_BEACON_RECEPTION_STATS
+QDF_STATUS sme_beacon_debug_stats_req(
+		mac_handle_t mac_handle, uint32_t vdev_id,
+		void (*callback_fn)(struct bcn_reception_stats_rsp
+				    *response, void *context),
+		void *beacon_stats_context)
+{
+	QDF_STATUS status;
+	struct sAniSirGlobal *mac_ctx = MAC_CONTEXT(mac_handle);
+	uint32_t *val;
+	struct scheduler_msg msg = {0};
+
+	status = sme_acquire_global_lock(&mac_ctx->sme);
+	if (QDF_IS_STATUS_SUCCESS(status)) {
+		if (!callback_fn) {
+			sme_err("Indication callback did not registered");
+			sme_release_global_lock(&mac_ctx->sme);
+			return QDF_STATUS_E_FAILURE;
+		}
+
+		if (!mac_ctx->bcn_reception_stats &&
+		    !mac_ctx->enable_beacon_reception_stats) {
+			sme_err("Beacon Reception stats not supported");
+			sme_release_global_lock(&mac_ctx->sme);
+			return QDF_STATUS_E_NOSUPPORT;
+		}
+
+		val = qdf_mem_malloc(sizeof(*val));
+		if (!val) {
+			sme_release_global_lock(&mac_ctx->sme);
+			return QDF_STATUS_E_NOMEM;
+		}
+
+		*val = vdev_id;
+		mac_ctx->sme.beacon_stats_context = beacon_stats_context;
+		mac_ctx->sme.beacon_stats_resp_callback = callback_fn;
+		msg.bodyptr = val;
+		msg.type = WMA_BEACON_DEBUG_STATS_REQ;
+		status = scheduler_post_message(QDF_MODULE_ID_SME,
+						QDF_MODULE_ID_WMA,
+						QDF_MODULE_ID_WMA, &msg);
+		if (!QDF_IS_STATUS_SUCCESS(status)) {
+			sme_err("not able to post WMA_BEACON_DEBUG_STATS_REQ");
+			qdf_mem_free(val);
+		}
 		sme_release_global_lock(&mac_ctx->sme);
 	}
 	return status;
@@ -14026,6 +13512,7 @@ void sme_update_tgt_services(tHalHandle hal, struct wma_tgt_services *cfg)
 	sme_debug("pmf_offload: %d fils_roam support %d 11k_offload %d",
 		  mac_ctx->pmf_offload, mac_ctx->is_fils_roaming_supported,
 		  mac_ctx->is_11k_offload_supported);
+	mac_ctx->bcn_reception_stats = cfg->bcn_reception_stats;
 }
 
 /**
@@ -14398,53 +13885,16 @@ QDF_STATUS sme_get_apf_capabilities(tHalHandle hal,
 QDF_STATUS sme_set_apf_instructions(tHalHandle hal,
 				    struct sir_apf_set_offload *req)
 {
-	QDF_STATUS          status     = QDF_STATUS_SUCCESS;
-	tpAniSirGlobal      mac_ctx    = PMAC_STRUCT(hal);
-	struct scheduler_msg           cds_msg = {0};
-	struct sir_apf_set_offload *set_offload;
+	void *wma_handle;
 
-	set_offload = qdf_mem_malloc(sizeof(*set_offload) +
-					req->current_length);
-
-	if (NULL == set_offload) {
+	wma_handle = cds_get_context(QDF_MODULE_ID_WMA);
+	if (!wma_handle) {
 		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
-			FL("Failed to alloc set_offload"));
-		return QDF_STATUS_E_NOMEM;
+				"wma handle is NULL");
+		return QDF_STATUS_E_FAILURE;
 	}
 
-	set_offload->session_id = req->session_id;
-	set_offload->filter_id = req->filter_id;
-	set_offload->current_offset = req->current_offset;
-	set_offload->total_length = req->total_length;
-	set_offload->current_length = req->current_length;
-	if (set_offload->total_length) {
-		set_offload->program = ((uint8_t *)set_offload) +
-					sizeof(*set_offload);
-		qdf_mem_copy(set_offload->program, req->program,
-				set_offload->current_length);
-	}
-	status = sme_acquire_global_lock(&mac_ctx->sme);
-	if (QDF_STATUS_SUCCESS == status) {
-		/* Serialize the req through MC thread */
-		cds_msg.bodyptr = set_offload;
-		cds_msg.type = WDA_APF_SET_INSTRUCTIONS_REQ;
-		status = scheduler_post_message(QDF_MODULE_ID_SME,
-						QDF_MODULE_ID_WMA,
-						QDF_MODULE_ID_WMA, &cds_msg);
-
-		if (!QDF_IS_STATUS_SUCCESS(status)) {
-			QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
-				FL("Post APF set offload msg fail"));
-			status = QDF_STATUS_E_FAILURE;
-			qdf_mem_free(set_offload);
-		}
-		sme_release_global_lock(&mac_ctx->sme);
-	} else {
-		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
-				FL("sme_acquire_global_lock failed"));
-		qdf_mem_free(set_offload);
-	}
-	return status;
+	return wma_set_apf_instructions(wma_handle, req);
 }
 
 QDF_STATUS sme_set_apf_enable_disable(tHalHandle hal, uint8_t vdev_id,
@@ -15509,7 +14959,7 @@ QDF_STATUS sme_fast_reassoc(tHalHandle hal, struct csr_roam_profile *profile,
 	}
 
 	roam_profile = session->pCurRoamProfile;
-	if (session->pCurRoamProfile->driver_disabled_roaming) {
+	if (roam_profile->driver_disabled_roaming) {
 		sme_debug("roaming status in driver %d",
 			  roam_profile->driver_disabled_roaming);
 		return QDF_STATUS_E_FAILURE;
@@ -15588,7 +15038,7 @@ QDF_STATUS sme_set_del_pmkid_cache(tHalHandle hal, uint8_t session_id,
 		return QDF_STATUS_E_NOMEM;
 	}
 
-	qdf_mem_set(pmk_cache, sizeof(*pmk_cache), 0);
+	qdf_mem_zero(pmk_cache, sizeof(*pmk_cache));
 
 	pmk_cache->session_id = session_id;
 
@@ -15631,7 +15081,10 @@ send_flush_cmd:
 				   QDF_MODULE_ID_WMA,
 				   QDF_MODULE_ID_WMA, &msg)) {
 		sme_err("Not able to post message to WDA");
-		qdf_mem_free(pmk_cache);
+		if (pmk_cache) {
+			qdf_mem_zero(pmk_cache, sizeof(*pmk_cache));
+			qdf_mem_free(pmk_cache);
+		}
 		return QDF_STATUS_E_FAILURE;
 	}
 
@@ -16620,53 +16073,16 @@ sme_get_roam_scan_stats(tHalHandle hal, roam_scan_stats_cb cb, void *context,
 	return status;
 }
 
-
-QDF_STATUS sme_update_oce_flags(mac_handle_t mac_handle, bool sta_connected)
+QDF_STATUS sme_update_hidden_ssid_status_cb(mac_handle_t mac_handle,
+					    hidden_ssid_cb cb)
 {
-	uint16_t sap_connected_peer = 0;
-	uint16_t go_connected_peer = 0;
-	uint8_t updated_fw_value = 0;
-	struct wlan_objmgr_vdev *sta_vdev = NULL;
-	uint8_t vdev_id;
-	QDF_STATUS status = QDF_STATUS_E_FAILURE;
-	tpAniSirGlobal mac_ctx = MAC_CONTEXT(mac_handle);
-	struct wlan_objmgr_pdev *pdev = mac_ctx->pdev;
-	struct wlan_objmgr_psoc *psoc = mac_ctx->psoc;
+	QDF_STATUS status;
+	tpAniSirGlobal mac = MAC_CONTEXT(mac_handle);
 
-	sap_connected_peer = wlan_util_get_peer_count_for_mode(pdev,
-							       QDF_SAP_MODE);
-	go_connected_peer =  wlan_util_get_peer_count_for_mode(pdev,
-							       QDF_P2P_GO_MODE);
-	if (sta_connected && (sap_connected_peer == 1 ||
-			      go_connected_peer == 1)) {
-		updated_fw_value = mac_ctx->roam.configParam.oce_feature_bitmap;
-
-		sme_debug("Disable STA OCE probe req rate and defferal");
-		updated_fw_value &=
-			~(WMI_VDEV_OCE_PROBE_REQUEST_RATE_FEATURE_BITMAP);
-		updated_fw_value &=
-		~(WMI_VDEV_OCE_PROBE_REQUEST_DEFERRAL_FEATURE_BITMAP);
-		sme_debug("Updated_fw_value :%d", updated_fw_value);
-	} else if (!sta_connected && (!sap_connected_peer &&
-				      !go_connected_peer)) {
-		sme_debug("Enable STA OCE probe req rate and defferal");
-		sme_debug("updated_fw_value :%d", updated_fw_value);
-		updated_fw_value = mac_ctx->roam.configParam.oce_feature_bitmap;
-	} else {
-		return QDF_STATUS_SUCCESS;
-	}
-
-	sta_vdev = wlan_objmgr_get_vdev_by_opmode_from_psoc(psoc, QDF_STA_MODE,
-							    WLAN_MLME_NB_ID);
-
-	if (sta_vdev) {
-		vdev_id = wlan_vdev_get_id(sta_vdev);
-		wlan_objmgr_vdev_release_ref(sta_vdev, WLAN_MLME_NB_ID);
-
-		status =
-		wma_cli_set_command(vdev_id,
-				    WMI_VDEV_PARAM_ENABLE_DISABLE_OCE_FEATURES,
-				    updated_fw_value, VDEV_CMD);
+	status = sme_acquire_global_lock(&mac->sme);
+	if (QDF_IS_STATUS_SUCCESS(status)) {
+		mac->sme.hidden_ssid_cb = cb;
+		sme_release_global_lock(&mac->sme);
 	}
 
 	return status;

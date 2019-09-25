@@ -39,16 +39,6 @@ struct wlan_find_vdev_filter {
 };
 
 /**
- * struct wlan_peer_count- vdev connected peer count
- * @opmode: QDF mode
- * @peer_count: peer count
- **/
-struct wlan_op_mode_peer_count {
-        enum QDF_OPMODE opmode;
-        uint16_t peer_count;
-};
-
-/**
  * wlan_chan_to_freq() - converts channel to frequency
  * @chan: channel number
  *
@@ -177,6 +167,14 @@ struct wlan_objmgr_vdev *wlan_util_get_vdev_by_ifname(
 uint8_t *wlan_util_vdev_get_if_name(struct wlan_objmgr_vdev *vdev);
 
 /*
+ * wlan_vdev_is_up() - Check for vdev is in UP state
+ * @vdev: vdev pointer
+ *
+ * @Return: true in case of vdev is in UP state
+ */
+bool wlan_vdev_is_up(struct wlan_objmgr_vdev *vdev);
+
+/*
  * wlan_util_is_vap_active() - Check for vap active
  * @pdev: pdev pointer
  * @dbg_id: debug id for ref counting
@@ -185,15 +183,4 @@ uint8_t *wlan_util_vdev_get_if_name(struct wlan_objmgr_vdev *vdev);
  */
 QDF_STATUS wlan_util_is_vap_active(struct wlan_objmgr_pdev *pdev,
 				   wlan_objmgr_ref_dbgid dbg_id);
-
-/**
- * wlan_util_get_mode_specific_peer_coun - This api gives vdev mode specific
- * peer count`
- * @pdev: PDEV object
- * @mode: Operation mode.
- *
- * Return: int- peer count
- */
-uint16_t wlan_util_get_peer_count_for_mode(struct wlan_objmgr_pdev *pdev,
-                                           enum QDF_OPMODE mode);
 #endif /* _WLAN_UTILITY_H_ */

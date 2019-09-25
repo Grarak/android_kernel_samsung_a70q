@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -4358,11 +4358,14 @@ static int wlan_hdd_get_sta_stats(struct wiphy *wiphy,
 	struct hdd_context *hdd_ctx = (struct hdd_context *) wiphy_priv(wiphy);
 	struct hdd_config *pCfg = hdd_ctx->config;
 	mac_handle_t mac_handle;
-	uint16_t maxRate = 0;
 	int8_t snr = 0;
 	uint16_t my_tx_rate, my_rx_rate;
 	uint8_t tx_nss = 1, rx_nss = 1;
 	int32_t rcpi_value;
+
+	qdf_mtrace(QDF_MODULE_ID_HDD, QDF_MODULE_ID_HDD,
+		   TRACE_CODE_HDD_CFG80211_GET_STA,
+		   adapter->session_id, 0);
 
 	if (eConnectionState_Associated != sta_ctx->conn_info.connState) {
 		hdd_debug("Not associated");
@@ -4425,8 +4428,8 @@ static int wlan_hdd_get_sta_stats(struct wiphy *wiphy,
 	mac_handle = hdd_ctx->mac_handle;
 
 	/* convert to the UI units of 100kbps */
-	my_tx_rate = adapter->hdd_stats.class_a_stat.tx_rate * 5;
-	my_rx_rate = adapter->hdd_stats.class_a_stat.rx_rate * 5;
+	my_tx_rate = adapter->hdd_stats.class_a_stat.tx_rate;
+	my_rx_rate = adapter->hdd_stats.class_a_stat.rx_rate;
 
 	if (!(rate_flags & TX_RATE_LEGACY)) {
 		tx_nss = adapter->hdd_stats.class_a_stat.tx_nss;
@@ -4528,10 +4531,6 @@ static int wlan_hdd_get_sta_stats(struct wiphy *wiphy,
 			sinfo->tx_packets, sinfo->rx_packets);
 
 	hdd_wlan_fill_per_chain_rssi_stats(sinfo, adapter);
-
-	MTRACE(qdf_trace(QDF_MODULE_ID_HDD,
-			 TRACE_CODE_HDD_CFG80211_GET_STA,
-			 adapter->session_id, maxRate));
 
 	hdd_exit();
 
@@ -5899,16 +5898,18 @@ int wlan_hdd_get_station_stats(struct hdd_adapter *adapter)
 	/* save class a stats to legacy location */
 	adapter->hdd_stats.class_a_stat.tx_nss =
 		wlan_vdev_mlme_get_nss(adapter->vdev);
+	adapter->hdd_stats.class_a_stat.rx_nss =
+		wlan_vdev_mlme_get_nss(adapter->vdev);
 	adapter->hdd_stats.class_a_stat.tx_rate = stats->tx_rate;
 	adapter->hdd_stats.class_a_stat.rx_rate = stats->rx_rate;
 	adapter->hdd_stats.class_a_stat.tx_rx_rate_flags = stats->tx_rate_flags;
 	adapter->hdd_stats.class_a_stat.tx_mcs_index =
-		sme_get_mcs_idx(stats->tx_rate * 5, stats->tx_rate_flags,
+		sme_get_mcs_idx(stats->tx_rate, stats->tx_rate_flags,
 				&adapter->hdd_stats.class_a_stat.tx_nss,
 				&mcs_rate_flags);
 	adapter->hdd_stats.class_a_stat.tx_mcs_rate_flags = mcs_rate_flags;
 	adapter->hdd_stats.class_a_stat.rx_mcs_index =
-		sme_get_mcs_idx(stats->rx_rate * 5, stats->tx_rate_flags,
+		sme_get_mcs_idx(stats->rx_rate, stats->tx_rate_flags,
 				&adapter->hdd_stats.class_a_stat.rx_nss,
 				&mcs_rate_flags);
 	adapter->hdd_stats.class_a_stat.rx_mcs_rate_flags = mcs_rate_flags;
@@ -6122,4 +6123,45 @@ int wlan_hdd_get_temperature(struct hdd_adapter *adapter, int *temperature)
 	*temperature = adapter->temperature;
 	hdd_exit();
 	return 0;
+}
+
+void wlan_hdd_display_txrx_stats(struct hdd_context *ctx)
+{
+	struct hdd_adapter *adapter = NULL;
+	struct hdd_tx_rx_stats *stats;
+	int i = 0;
+	uint32_t total_rx_pkt, total_rx_dropped,
+		 total_rx_delv, total_rx_refused;
+
+	hdd_for_each_adapter(ctx, adapter) {
+		total_rx_pkt = 0;
+		total_rx_dropped = 0;
+		total_rx_delv = 0;
+		total_rx_refused = 0;
+		stats = &adapter->hdd_stats.tx_rx_stats;
+		hdd_debug("adapter: %u", adapter->session_id);
+		for (; i < NUM_CPUS; i++) {
+			total_rx_pkt += stats->rx_packets[i];
+			total_rx_dropped += stats->rx_dropped[i];
+			total_rx_delv += stats->rx_delivered[i];
+			total_rx_refused += stats->rx_refused[i];
+		}
+
+		hdd_debug("TX - called %u, dropped %u orphan %u",
+			  stats->tx_called, stats->tx_dropped,
+			  stats->tx_orphaned);
+
+		for (i = 0; i < NUM_CPUS; i++) {
+			if (stats->rx_packets[i] == 0)
+				continue;
+			hdd_debug("Rx CPU[%d]: packets %u, dropped %u, delivered %u, refused %u",
+				  i, stats->rx_packets[i], stats->rx_dropped[i],
+				  stats->rx_delivered[i], stats->rx_refused[i]);
+		}
+		hdd_debug("RX - packets %u, dropped %u, unsolict_arp_n_mcast_drp %u, delivered %u, refused %u",
+			  total_rx_pkt, total_rx_dropped,
+			  qdf_atomic_read(&stats->rx_usolict_arp_n_mcast_drp),
+			  total_rx_delv,
+			  total_rx_refused);
+	}
 }

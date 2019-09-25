@@ -377,12 +377,12 @@ static int hdd_soc_probe(struct device *dev,
 	hdd_soc_load_lock(dev, eHDD_DRV_OP_PROBE);
 	cds_set_load_in_progress(true);
 	cds_set_driver_in_bad_state(false);
-	
-	/* 
-	 * Set Recovery in progress flag to flase 
-	 * as probe is started which ensures that FW is ready 
-	 */ 
-	cds_set_recovery_in_progress(false);  
+
+	/*
+	 * Set Recovery in progress flag to flase
+	 * as probe is started which ensures that FW is ready
+	 */
+	cds_set_recovery_in_progress(false);
 
 	errno = hdd_init_qdf_ctx(dev, bdev, bus_type, bid);
 	if (errno)
@@ -1289,12 +1289,6 @@ static int wlan_hdd_pld_probe(struct device *dev,
 		return -EINVAL;
 	}
 
-	/*
-	 * If PLD_RECOVERY is received before probe then clear
-	 * CDS_DRIVER_STATE_RECOVERING.
-	 */
-	cds_set_recovery_in_progress(false);
-
 	return wlan_hdd_probe(dev, bdev, id, bus_type, false);
 }
 
@@ -1482,8 +1476,6 @@ static void wlan_hdd_purge_notifier(void)
 		return;
 	}
 
-	qdf_cancel_delayed_work(&hdd_ctx->iface_idle_work);
-
 	mutex_lock(&hdd_ctx->iface_change_lock);
 	cds_shutdown_notifier_call();
 	cds_shutdown_notifier_purge();
@@ -1569,10 +1561,23 @@ static void wlan_hdd_handle_the_pld_uevent(struct pld_uevent_data *uevent)
 static void wlan_hdd_pld_uevent(struct device *dev,
 				struct pld_uevent_data *uevent)
 {
+
+	struct hdd_context *hdd_ctx;
+
 	hdd_enter();
+
+	hdd_ctx = cds_get_context(QDF_MODULE_ID_HDD);
+	if (!hdd_ctx) {
+		hdd_err("hdd_ctx is NULL return");
+		return;
+	}
+
 	hdd_info("pld event %d", uevent->uevent);
 
 	wlan_hdd_set_the_pld_uevent(uevent);
+
+	qdf_cancel_delayed_work(&hdd_ctx->iface_idle_work);
+
 	mutex_lock(&hdd_init_deinit_lock);
 	wlan_hdd_handle_the_pld_uevent(uevent);
 	mutex_unlock(&hdd_init_deinit_lock);

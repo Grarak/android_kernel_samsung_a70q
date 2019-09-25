@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -51,8 +51,7 @@ extern void lim_send_set_sta_key_req(tpAniSirGlobal pMac,
 void lim_ft_open(tpAniSirGlobal pMac, tpPESession psessionEntry)
 {
 	if (psessionEntry)
-		qdf_mem_set(&psessionEntry->ftPEContext, sizeof(tftPEContext),
-			    0);
+		qdf_mem_zero(&psessionEntry->ftPEContext, sizeof(tftPEContext));
 }
 
 void lim_ft_cleanup_all_ft_sessions(tpAniSirGlobal pMac)
@@ -107,7 +106,7 @@ void lim_ft_cleanup(tpAniSirGlobal pMac, tpPESession psessionEntry)
 	}
 
 	/* The session is being deleted, cleanup the contents */
-	qdf_mem_set(&psessionEntry->ftPEContext, sizeof(tftPEContext), 0);
+	qdf_mem_zero(&psessionEntry->ftPEContext, sizeof(tftPEContext));
 }
 
 #if defined(WLAN_FEATURE_HOST_ROAM) || defined(WLAN_FEATURE_ROAM_OFFLOAD)
@@ -531,7 +530,6 @@ void lim_fill_ft_session(tpAniSirGlobal pMac,
 	int8_t regMax;
 	tSchBeaconStruct *pBeaconStruct;
 	ePhyChanBondState cbEnabledMode;
-	struct lim_max_tx_pwr_attr tx_pwr_attr = {0};
 
 	pBeaconStruct = qdf_mem_malloc(sizeof(tSchBeaconStruct));
 	if (NULL == pBeaconStruct) {
@@ -689,13 +687,10 @@ void lim_fill_ft_session(tpAniSirGlobal pMac,
 	pftSessionEntry->isFastRoamIniFeatureEnabled =
 		psessionEntry->isFastRoamIniFeatureEnabled;
 
-	tx_pwr_attr.reg_max = regMax;
-	tx_pwr_attr.ap_tx_power = localPowerConstraint;
-	tx_pwr_attr.ini_tx_power = pMac->roam.configParam.nTxPowerCap;
-	tx_pwr_attr.op_ch = pftSessionEntry->currentOperChannel;
-
 #ifdef FEATURE_WLAN_ESE
-	pftSessionEntry->maxTxPower = lim_get_max_tx_power(pMac, tx_pwr_attr);
+	pftSessionEntry->maxTxPower =
+		lim_get_max_tx_power(regMax, localPowerConstraint,
+				     pMac->roam.configParam.nTxPowerCap);
 #else
 	pftSessionEntry->maxTxPower = QDF_MIN(regMax, (localPowerConstraint));
 #endif

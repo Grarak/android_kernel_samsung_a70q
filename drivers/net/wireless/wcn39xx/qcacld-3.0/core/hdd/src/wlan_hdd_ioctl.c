@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -52,6 +52,13 @@
  */
 #define SIZE_OF_SETROAMMODE             11      /* size of SETROAMMODE */
 #define SIZE_OF_GETROAMMODE             11      /* size of GETROAMMODE */
+
+/*
+ * Size of GETCOUNTRYREV output = (sizeof("GETCOUNTRYREV") = 14) + one (space) +
+ *				  (sizeof("country_code") = 3) +
+ *                                one (NULL terminating character)
+ */
+#define SIZE_OF_GETCOUNTRYREV_OUTPUT 20
 
 /*
  * Ibss prop IE from command will be of size:
@@ -1470,9 +1477,9 @@ hdd_parse_set_roam_scan_channels_v1(struct hdd_adapter *adapter,
 		goto exit;
 	}
 
-	MTRACE(qdf_trace(QDF_MODULE_ID_HDD,
-			 TRACE_CODE_HDD_SETROAMSCANCHANNELS_IOCTL,
-			 adapter->session_id, num_chan));
+	qdf_mtrace(QDF_MODULE_ID_HDD, QDF_MODULE_ID_HDD,
+		   TRACE_CODE_HDD_SETROAMSCANCHANNELS_IOCTL,
+		   adapter->session_id, num_chan);
 
 	if (num_chan > WNI_CFG_VALID_CHANNEL_LIST_LEN) {
 		hdd_err("number of channels (%d) supported exceeded max (%d)",
@@ -1543,9 +1550,10 @@ hdd_parse_set_roam_scan_channels_v2(struct hdd_adapter *adapter,
 		goto exit;
 	}
 
-	MTRACE(qdf_trace(QDF_MODULE_ID_HDD,
-			 TRACE_CODE_HDD_SETROAMSCANCHANNELS_IOCTL,
-			 adapter->session_id, num_chan));
+	qdf_mtrace(QDF_MODULE_ID_HDD, QDF_MODULE_ID_HDD,
+		   TRACE_CODE_HDD_SETROAMSCANCHANNELS_IOCTL,
+		   adapter->session_id, num_chan);
+
 
 	for (i = 0; i < num_chan; i++) {
 		channel = *value++;
@@ -2411,7 +2419,6 @@ struct link_status_priv {
 	uint8_t link_status;
 };
 
-#ifdef WLAN_AP_STA_CONCURRENCY
 /**
  * hdd_conc_set_dwell_time() - Set Concurrent dwell time parameters
  * @adapter: Adapter upon which the command was received
@@ -2425,16 +2432,17 @@ struct link_status_priv {
  *
  * Return: 0 for success non-zero for failure
  */
-static int hdd_conc_set_dwell_time(hdd_context_t *hdd_ctx, uint8_t *command)
+static int hdd_conc_set_dwell_time(struct hdd_adapter *adapter,
+				   uint8_t *command)
 {
-	mac_handle_t mac_handle = hdd_ctx->mac_handle;
+	mac_handle_t mac_handle = hdd_adapter_get_mac_handle(adapter);
 	struct hdd_config *p_cfg;
 	u8 *value = command;
 	tSmeConfigParams *sme_config;
 	int val = 0, temp = 0;
 	int retval = 0;
 
-	p_cfg = hdd_ctx->config;
+	p_cfg = (WLAN_HDD_GET_CTX(adapter))->config;
 	if (!p_cfg || !mac_handle) {
 		hdd_err("Argument passed for CONCSETDWELLTIME is incorrect");
 		return -EINVAL;
@@ -2533,7 +2541,6 @@ sme_config_free:
 	qdf_mem_free(sme_config);
 	return retval;
 }
-#endif
 
 static void hdd_get_link_status_cb(uint8_t status, void *context)
 {
@@ -3035,13 +3042,14 @@ static int drv_cmd_p2p_dev_addr(struct hdd_adapter *adapter,
 	size_t user_size = qdf_min(sizeof(addr->bytes),
 				   (size_t)priv_data->total_len);
 
-	MTRACE(qdf_trace(QDF_MODULE_ID_HDD,
-			 TRACE_CODE_HDD_P2P_DEV_ADDR_IOCTL,
-			 adapter->session_id,
-			 (unsigned int)(*(addr->bytes + 2) << 24 |
+	qdf_mtrace(QDF_MODULE_ID_HDD, QDF_MODULE_ID_HDD,
+		   TRACE_CODE_HDD_P2P_DEV_ADDR_IOCTL,
+		   adapter->session_id,
+		   (unsigned int)(*(addr->bytes + 2) << 24 |
 				*(addr->bytes + 3) << 16 |
 				*(addr->bytes + 4) << 8 |
-				*(addr->bytes + 5))));
+				*(addr->bytes + 5)));
+
 
 	if (copy_to_user(priv_data->buf, addr->bytes, user_size)) {
 		hdd_err("failed to copy data to user buffer");
@@ -3157,6 +3165,40 @@ static inline int drv_cmd_country(struct hdd_adapter *adapter,
 	return hdd_reg_set_country(hdd_ctx, country_code);
 }
 
+/**
+ * drv_cmd_get_country() - Helper function to get current county code
+ * @adapter: pointer to adapter on which request is received
+ * @hdd_ctx: pointer to hdd context
+ * @command: command name
+ * @command_len: command buffer length
+ * @priv_data: output pointer to hold current country code
+ *
+ * Return: On success 0, negative value on error.
+ */
+static int drv_cmd_get_country(struct hdd_adapter *adapter,
+			       struct hdd_context *hdd_ctx,
+			       uint8_t *command, uint8_t command_len,
+			       struct hdd_priv_data *priv_data)
+{
+	uint8_t buf[SIZE_OF_GETCOUNTRYREV_OUTPUT] = {0};
+	uint8_t cc[REG_ALPHA2_LEN + 1];
+	int ret = 0, len;
+
+	qdf_mem_copy(cc, hdd_ctx->reg.alpha2, REG_ALPHA2_LEN);
+	cc[REG_ALPHA2_LEN] = '\0';
+
+	len = scnprintf(buf, sizeof(buf), "%s %s",
+			"GETCOUNTRYREV", cc);
+	hdd_debug("buf = %s", buf);
+	len = QDF_MIN(priv_data->total_len, len + 1);
+	if (copy_to_user(priv_data->buf, buf, len)) {
+		hdd_err("failed to copy data to user buffer");
+		ret = -EFAULT;
+	}
+
+	return ret;
+}
+
 static int drv_cmd_set_roam_trigger(struct hdd_adapter *adapter,
 				    struct hdd_context *hdd_ctx,
 				    uint8_t *command,
@@ -3198,9 +3240,10 @@ static int drv_cmd_set_roam_trigger(struct hdd_adapter *adapter,
 		goto exit;
 	}
 
-	MTRACE(qdf_trace(QDF_MODULE_ID_HDD,
-			 TRACE_CODE_HDD_SETROAMTRIGGER_IOCTL,
-			 adapter->session_id, lookUpThreshold));
+	qdf_mtrace(QDF_MODULE_ID_HDD, QDF_MODULE_ID_HDD,
+		   TRACE_CODE_HDD_SETROAMTRIGGER_IOCTL,
+		   adapter->session_id, lookUpThreshold);
+
 	hdd_debug("Received Command to Set Roam trigger (Neighbor lookup threshold) = %d",
 		  lookUpThreshold);
 
@@ -3231,9 +3274,9 @@ static int drv_cmd_get_roam_trigger(struct hdd_adapter *adapter,
 	char extra[32];
 	uint8_t len = 0;
 
-	MTRACE(qdf_trace(QDF_MODULE_ID_HDD,
-			 TRACE_CODE_HDD_GETROAMTRIGGER_IOCTL,
-			 adapter->session_id, lookUpThreshold));
+	qdf_mtrace(QDF_MODULE_ID_HDD, QDF_MODULE_ID_HDD,
+		   TRACE_CODE_HDD_GETROAMTRIGGER_IOCTL,
+		   adapter->session_id, lookUpThreshold);
 
 	len = scnprintf(extra, sizeof(extra), "%s %d", command, rssi);
 	len = QDF_MIN(priv_data->total_len, len + 1);
@@ -3285,9 +3328,10 @@ static int drv_cmd_set_roam_scan_period(struct hdd_adapter *adapter,
 		ret = -EINVAL;
 		goto exit;
 	}
-	MTRACE(qdf_trace(QDF_MODULE_ID_HDD,
-			 TRACE_CODE_HDD_SETROAMSCANPERIOD_IOCTL,
-			 adapter->session_id, roamScanPeriod));
+
+	qdf_mtrace(QDF_MODULE_ID_HDD, QDF_MODULE_ID_HDD,
+		   TRACE_CODE_HDD_SETROAMSCANPERIOD_IOCTL,
+		   adapter->session_id, roamScanPeriod);
 	neighborEmptyScanRefreshPeriod = roamScanPeriod * 1000;
 
 	hdd_debug("Received Command to Set roam scan period (Empty Scan refresh period) = %d",
@@ -3315,10 +3359,11 @@ static int drv_cmd_get_roam_scan_period(struct hdd_adapter *adapter,
 	char extra[32];
 	uint8_t len;
 
-	MTRACE(qdf_trace(QDF_MODULE_ID_HDD,
-			 TRACE_CODE_HDD_GETROAMSCANPERIOD_IOCTL,
-			 adapter->session_id,
-			 nEmptyScanRefreshPeriod));
+	qdf_mtrace(QDF_MODULE_ID_HDD, QDF_MODULE_ID_HDD,
+		   TRACE_CODE_HDD_GETROAMSCANPERIOD_IOCTL,
+		   adapter->session_id,
+		   nEmptyScanRefreshPeriod);
+
 	len = scnprintf(extra, sizeof(extra), "%s %d",
 			"GETROAMSCANPERIOD",
 			(nEmptyScanRefreshPeriod / 1000));
@@ -3578,9 +3623,9 @@ static int drv_cmd_get_roam_delta(struct hdd_adapter *adapter,
 	char extra[32];
 	uint8_t len;
 
-	MTRACE(qdf_trace(QDF_MODULE_ID_HDD,
-			 TRACE_CODE_HDD_GETROAMDELTA_IOCTL,
-			 adapter->session_id, roamRssiDiff));
+	qdf_mtrace(QDF_MODULE_ID_HDD, QDF_MODULE_ID_HDD,
+		   TRACE_CODE_HDD_GETROAMDELTA_IOCTL,
+		   adapter->session_id, roamRssiDiff);
 
 	len = scnprintf(extra, sizeof(extra), "%s %d",
 			command, roamRssiDiff);
@@ -3607,9 +3652,9 @@ static int drv_cmd_get_band(struct hdd_adapter *adapter,
 
 	hdd_get_band_helper(hdd_ctx, &band);
 
-	MTRACE(qdf_trace(QDF_MODULE_ID_HDD,
-			 TRACE_CODE_HDD_GETBAND_IOCTL,
-			 adapter->session_id, band));
+	qdf_mtrace(QDF_MODULE_ID_HDD, QDF_MODULE_ID_HDD,
+		   TRACE_CODE_HDD_GETBAND_IOCTL,
+		   adapter->session_id, band);
 
 	len = scnprintf(extra, sizeof(extra), "%s %d", command, band);
 	len = QDF_MIN(priv_data->total_len, len + 1);
@@ -3654,9 +3699,10 @@ static int drv_cmd_get_roam_scan_channels(struct hdd_adapter *adapter,
 		goto exit;
 	}
 
-	MTRACE(qdf_trace(QDF_MODULE_ID_HDD,
-			 TRACE_CODE_HDD_GETROAMSCANCHANNELS_IOCTL,
-			 adapter->session_id, numChannels));
+	qdf_mtrace(QDF_MODULE_ID_HDD, QDF_MODULE_ID_HDD,
+		   TRACE_CODE_HDD_GETROAMSCANCHANNELS_IOCTL,
+		   adapter->session_id, numChannels);
+
 	/*
 	 * output channel list is of the format
 	 * [Number of roam scan channels][Channel1][Channel2]...
@@ -3840,9 +3886,9 @@ static int drv_cmd_set_roam_scan_channel_min_time(struct hdd_adapter *adapter,
 		goto exit;
 	}
 
-	MTRACE(qdf_trace(QDF_MODULE_ID_HDD,
-			 TRACE_CODE_HDD_SETROAMSCANCHANNELMINTIME_IOCTL,
-			 adapter->session_id, minTime));
+	qdf_mtrace(QDF_MODULE_ID_HDD, QDF_MODULE_ID_HDD,
+		   TRACE_CODE_HDD_SETROAMSCANCHANNELMINTIME_IOCTL,
+		   adapter->session_id, minTime);
 	hdd_debug("Received Command to change channel min time = %d",
 		  minTime);
 
@@ -3882,9 +3928,9 @@ static int drv_cmd_get_roam_scan_channel_min_time(struct hdd_adapter *adapter,
 			"GETROAMSCANCHANNELMINTIME", val);
 	len = QDF_MIN(priv_data->total_len, len + 1);
 
-	MTRACE(qdf_trace(QDF_MODULE_ID_HDD,
-			 TRACE_CODE_HDD_GETROAMSCANCHANNELMINTIME_IOCTL,
-			 adapter->session_id, val));
+	qdf_mtrace(QDF_MODULE_ID_HDD, QDF_MODULE_ID_HDD,
+		   TRACE_CODE_HDD_GETROAMSCANCHANNELMINTIME_IOCTL,
+		   adapter->session_id, val);
 
 	if (copy_to_user(priv_data->buf, &extra, len)) {
 		hdd_err("failed to copy data to user buffer");
@@ -4837,16 +4883,14 @@ static int drv_cmd_set_dwell_time(struct hdd_adapter *adapter,
 	return hdd_set_dwell_time(adapter, command);
 }
 
-#ifdef WLAN_AP_STA_CONCURRENCY
-static int drv_cmd_conc_set_dwell_time(hdd_adapter_t *adapter,
-				       hdd_context_t *hdd_ctx,
+static int drv_cmd_conc_set_dwell_time(struct hdd_adapter *adapter,
+				       struct hdd_context *hdd_ctx,
 				       u8 *command,
 				       u8 command_len,
-				       hdd_priv_data_t *priv_data)
+				       struct hdd_priv_data *priv_data)
 {
-	return hdd_conc_set_dwell_time(hdd_ctx, command);
+	return hdd_conc_set_dwell_time(adapter, command);
 }
-#endif
 
 static int drv_cmd_miracast(struct hdd_adapter *adapter,
 			    struct hdd_context *hdd_ctx,
@@ -5359,9 +5403,10 @@ static int drv_cmd_get_ibss_peer_info(struct hdd_adapter *adapter,
 				(int)txRate,
 				(int)sta_ctx->ibss_peer_info.
 				peerInfoParams[0].rssi);
+		length = QDF_MIN(priv_data->total_len, length + 1);
 
 		/* Copy the data back into buffer */
-		if (copy_to_user(priv_data->buf, &extra, length + 1)) {
+		if (copy_to_user(priv_data->buf, &extra, length)) {
 			hdd_err("copy data to user buffer failed GETIBSSPEERINFO command");
 			ret = -EFAULT;
 			goto exit;
@@ -6942,9 +6987,9 @@ static int drv_cmd_invalid(struct hdd_adapter *adapter,
 			   uint8_t command_len,
 			   struct hdd_priv_data *priv_data)
 {
-	MTRACE(qdf_trace(QDF_MODULE_ID_HDD,
-			 TRACE_CODE_HDD_UNSUPPORTED_IOCTL,
-			 adapter->session_id, 0));
+	qdf_mtrace(QDF_MODULE_ID_HDD, QDF_MODULE_ID_HDD,
+		   TRACE_CODE_HDD_UNSUPPORTED_IOCTL,
+		   adapter->session_id, 0);
 
 	hdd_warn("%s: Unsupported driver command \"%s\"",
 		 adapter->dev->name, command);
@@ -6969,8 +7014,7 @@ static int drv_cmd_set_fcc_channel(struct hdd_adapter *adapter,
 				   struct hdd_priv_data *priv_data)
 {
 	QDF_STATUS status;
-	int8_t input_value;
-	bool fcc_constraint;
+	uint8_t fcc_constraint;
 	int err;
 
 	/*
@@ -6983,21 +7027,17 @@ static int drv_cmd_set_fcc_channel(struct hdd_adapter *adapter,
 	 * country code is set
 	 */
 
-	err = kstrtou8(command + command_len + 1, 10, &input_value);
+	err = kstrtou8(command + command_len + 1, 10, &fcc_constraint);
 	if (err) {
 		hdd_err("error %d parsing userspace fcc parameter", err);
 		return err;
 	}
 
-	fcc_constraint = input_value ? false : true;
-	hdd_debug("input_value = %d && fcc_constraint = %u",
-		  input_value, fcc_constraint);
-
 	status = ucfg_reg_set_fcc_constraint(hdd_ctx->pdev, fcc_constraint);
 
 	if (QDF_IS_STATUS_ERROR(status))
 		hdd_err("Failed to %s tx power for channels 12/13",
-			fcc_constraint ? "restore" : "reduce");
+			fcc_constraint ? "reduce" : "restore");
 
 	return qdf_status_to_os_return(status);
 }
@@ -7347,10 +7387,6 @@ static int hdd_parse_disable_chan_cmd(struct hdd_adapter *adapter, uint8_t *ptr)
 mem_alloc_failed:
 
 	qdf_mutex_release(&hdd_ctx->cache_channel_lock);
-	/* Disable the channels received in command SET_DISABLE_CHANNEL_LIST*/
-	wlan_hdd_disable_channels(hdd_ctx);
-	hdd_check_and_disconnect_sta_on_invalid_channel(hdd_ctx);
-
 	hdd_exit();
 
 	return ret;
@@ -7457,73 +7493,6 @@ static int drv_cmd_get_disable_chan_list(struct hdd_adapter *adapter,
 	return 0;
 }
 #endif
-
-#ifdef SEC_CONFIG_POWER_BACKOFF
-
-#define WLAN_HDD_UI_SET_GRIP_TX_PWR_VALUE_OFFSET 21
-int sec_sar_index = 0;
-int hdd_set_sar_power_limit(struct hdd_context *hdd_ctx, uint8_t index, bool enable)
-{
-	int status = 0;
-	struct sar_limit_cmd_params sar_limit_cmd = {0};
-	mac_handle_t mac_handle;
-
-	/* Vendor command manadates all SAR Specs in single call */
-	sar_limit_cmd.commit_limits = 1;
-	sar_limit_cmd.num_limit_rows = 0;
-
-	if (enable) {
-		sec_sar_index |= (1 << index);
-	} else {
-		sec_sar_index &= ~(1 << index);
-	}
-
-	hdd_info("sec_sar_index 0x%x - 0: no backoff, 1: grip, 2: dbs, 3: grip+dbs", sec_sar_index);
-
-	if (!sec_sar_index) {
-		sar_limit_cmd.sar_enable = WMI_SAR_FEATURE_OFF;
-	} else if (sec_sar_index == (1 << SAR_POWER_LIMIT_FOR_GRIP_SENSOR)) {
-		sar_limit_cmd.sar_enable = WMI_SAR_FEATURE_ON_SET_0;
-	} else if (sec_sar_index == (1 << SAR_POWER_LIMIT_FOR_DBS)) {
-		sar_limit_cmd.sar_enable = WMI_SAR_FEATURE_ON_SET_1;
-	} else if (sec_sar_index == (1 << SAR_POWER_LIMIT_FOR_GRIP_SENSOR |
-				   1 << SAR_POWER_LIMIT_FOR_DBS)) {
-		sar_limit_cmd.sar_enable = WMI_SAR_FEATURE_ON_SET_2;
-	}
-
-	hdd_info("sar_enable = %d", sar_limit_cmd.sar_enable);
-
-	mac_handle = hdd_ctx->mac_handle;
-	status = sme_set_sar_power_limits(mac_handle, &sar_limit_cmd);
-	if (status < 0)
-		hdd_err("Failed to sme_set_sar_power_limits status %d", status);
-
-	return status;
-}
-
-static int drv_cmd_grip_power_set_tx_power_calling(struct hdd_adapter *adapter,
-			 struct hdd_context *hdd_ctx,
-			 uint8_t *command,
-			 uint8_t command_len,
-			 struct hdd_priv_data *priv_data)
-{
-	int status = 0;
-	uint8_t set_value;
-
-	hdd_info("command %s UL %d, TL %d", command, priv_data->used_len,
-		 priv_data->total_len);
-
-	/* convert the value from ascii to integer */
-	set_value = command[WLAN_HDD_UI_SET_GRIP_TX_PWR_VALUE_OFFSET] - '0';
-	if (!set_value)
-		hdd_set_sar_power_limit(hdd_ctx, SAR_POWER_LIMIT_FOR_GRIP_SENSOR, 1);
-	else
-		hdd_set_sar_power_limit(hdd_ctx, SAR_POWER_LIMIT_FOR_GRIP_SENSOR, 0);
-
-	return status;
-}
-#endif /* SEC_CONFIG_POWER_BACKOFF */
-
 /*
  * The following table contains all supported WLAN HDD
  * IOCTL driver commands and the handler for each of them.
@@ -7535,6 +7504,8 @@ static const struct hdd_drv_cmd hdd_drv_cmds[] = {
 	{"SETBAND",                   drv_cmd_set_band, true},
 	{"SETWMMPS",                  drv_cmd_set_wmmps, true},
 	{"COUNTRY",                   drv_cmd_country, true},
+	{"SETCOUNTRYREV",             drv_cmd_country, true},
+	{"GETCOUNTRYREV",             drv_cmd_get_country, false},
 	{"SETSUSPENDMODE",            drv_cmd_dummy, false},
 	{"SET_AP_WPS_P2P_IE",         drv_cmd_dummy, false},
 	{"SETROAMTRIGGER",            drv_cmd_set_roam_trigger, true},
@@ -7589,9 +7560,7 @@ static const struct hdd_drv_cmd hdd_drv_cmds[] = {
 	{"BTCOEXMODE",                drv_cmd_bt_coex_mode, true},
 	{"SCAN-ACTIVE",               drv_cmd_scan_active, false},
 	{"SCAN-PASSIVE",              drv_cmd_scan_passive, false},
-#ifdef WLAN_AP_STA_CONCURRENCY
 	{"CONCSETDWELLTIME",          drv_cmd_conc_set_dwell_time, true},
-#endif
 	{"GETDWELLTIME",              drv_cmd_get_dwell_time, false},
 	{"SETDWELLTIME",              drv_cmd_set_dwell_time, true},
 	{"MIRACAST",                  drv_cmd_miracast, true},
@@ -7635,16 +7604,8 @@ static const struct hdd_drv_cmd hdd_drv_cmds[] = {
 	{"CHANNEL_SWITCH",            drv_cmd_set_channel_switch, true},
 	{"SETANTENNAMODE",            drv_cmd_set_antenna_mode, true},
 	{"GETANTENNAMODE",            drv_cmd_get_antenna_mode, false},
-#ifdef CONFIG_SEC
-	{"SET_INDOOR_CHANNELS",       drv_cmd_set_disable_chan_list, true},
-	{"GET_INDOOR_CHANNELS",       drv_cmd_get_disable_chan_list, false},
-#else
 	{"SET_DISABLE_CHANNEL_LIST",  drv_cmd_set_disable_chan_list, true},
 	{"GET_DISABLE_CHANNEL_LIST",  drv_cmd_get_disable_chan_list, false},
-#endif /* CONFIG_SEC */
-#ifdef SEC_CONFIG_POWER_BACKOFF
-	{"SET_TX_POWER_CALLING",      drv_cmd_grip_power_set_tx_power_calling},
-#endif /* SEC_CONFIG_POWER_BACKOFF */
 	{"STOP",                      drv_cmd_dummy, false},
 	/* Deprecated commands */
 	{"RXFILTER-START",            drv_cmd_dummy, false},

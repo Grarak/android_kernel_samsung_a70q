@@ -1041,6 +1041,7 @@ static enum wlan_phymode wma_fw_to_host_phymode_11ac(WLAN_PHY_MODE phymode)
 	switch (phymode) {
 	default:
 		return WLAN_PHYMODE_AUTO;
+#if SUPPORT_11AX
 	case MODE_11AX_HE20:
 		return WLAN_PHYMODE_11AC_VHT20;
 	case MODE_11AX_HE40:
@@ -1057,6 +1058,7 @@ static enum wlan_phymode wma_fw_to_host_phymode_11ac(WLAN_PHY_MODE phymode)
 		return WLAN_PHYMODE_11AC_VHT40;
 	case MODE_11AX_HE80_2G:
 		return WLAN_PHYMODE_11AC_VHT80;
+#endif
 	}
 	return WLAN_PHYMODE_AUTO;
 }
@@ -1812,8 +1814,8 @@ static QDF_STATUS wma_setup_install_key_cmd(tp_wma_handle wma_handle,
 	qdf_mem_copy(params.peer_mac, key_params->peer_mac, IEEE80211_ADDR_LEN);
 
 #ifdef FEATURE_WLAN_WAPI
-	qdf_mem_set(params.tx_iv, 16, 0);
-	qdf_mem_set(params.rx_iv, 16, 0);
+	qdf_mem_zero(params.tx_iv, 16);
+	qdf_mem_zero(params.rx_iv, 16);
 #endif
 	params.key_txmic_len = 0;
 	params.key_rxmic_len = 0;
@@ -2037,7 +2039,7 @@ void wma_set_bsskey(tp_wma_handle wma_handle, tpSetBssKeyParams key_info)
 			     sizeof(tSetBssKeyParams));
 	}
 
-	qdf_mem_set(&key_params, sizeof(key_params), 0);
+	qdf_mem_zero(&key_params, sizeof(key_params));
 	key_params.vdev_id = key_info->smesessionId;
 	key_params.key_type = key_info->encType;
 	key_params.singl_tid_rc = key_info->singleTidRc;
@@ -2256,9 +2258,9 @@ static void wma_set_ibsskey_helper(tp_wma_handle wma_handle,
 		return;
 	}
 
-	qdf_mem_set(&key_params, sizeof(key_params), 0);
+	qdf_mem_zero(&key_params, sizeof(key_params));
 	opmode = cdp_get_opmode(soc, txrx_vdev);
-	qdf_mem_set(&key_params, sizeof(key_params), 0);
+	qdf_mem_zero(&key_params, sizeof(key_params));
 	key_params.vdev_id = key_info->smesessionId;
 	key_params.key_type = key_info->encType;
 	key_params.singl_tid_rc = key_info->singleTidRc;
@@ -2383,7 +2385,7 @@ void wma_set_stakey(tp_wma_handle wma_handle, tpSetStaKeyParams key_info)
 			}
 		}
 	}
-	qdf_mem_set(&key_params, sizeof(key_params), 0);
+	qdf_mem_zero(&key_params, sizeof(key_params));
 	key_params.vdev_id = key_info->smesessionId;
 	key_params.key_type = key_info->encType;
 	key_params.singl_tid_rc = key_info->singleTidRc;
@@ -2994,6 +2996,7 @@ void wma_beacon_miss_handler(tp_wma_handle wma, uint32_t vdev_id, int32_t rssi)
  *
  * Return: converted string of tx status
  */
+#ifdef WLAN_DEBUG
 static const char *wma_get_status_str(uint32_t status)
 {
 	switch (status) {
@@ -3006,6 +3009,7 @@ static const char *wma_get_status_str(uint32_t status)
 	CASE_RETURN_STRING(WMI_MGMT_TX_COMP_TYPE_MAX);
 	}
 }
+#endif
 
 /**
  * wma_process_mgmt_tx_completion() - process mgmt completion
@@ -3173,6 +3177,11 @@ void wma_process_update_opmode(tp_wma_handle wma_handle,
 				ch_width);
 		return;
 	}
+	WMA_LOGD("%s: phymode = %d", __func__, iface->chanmode);
+	/* Always send phymode before BW to avoid any mismatch in FW */
+	wma_set_peer_param(wma_handle, update_vht_opmode->peer_mac,
+			   WMI_PEER_PHYMODE, iface->chanmode,
+			   update_vht_opmode->smesessionId);
 	WMA_LOGD("%s: opMode = %d", __func__, update_vht_opmode->opMode);
 	wma_set_peer_param(wma_handle, update_vht_opmode->peer_mac,
 			   WMI_PEER_CHWIDTH, update_vht_opmode->opMode,
@@ -3922,12 +3931,6 @@ int wma_form_rx_packet(qdf_nbuf_t buf,
 	/* If it is a beacon/probe response, save it for future use */
 	mgt_type = (wh)->i_fc[0] & IEEE80211_FC0_TYPE_MASK;
 	mgt_subtype = (wh)->i_fc[0] & IEEE80211_FC0_SUBTYPE_MASK;
-
-	WMA_LOGD(FL("BSSID: "MAC_ADDRESS_STR" snr = %d, Type = %x, Subtype = %x, seq_num = %u, rssi = %d, rssi_raw = %d tsf_delta: %u"),
-			MAC_ADDR_ARRAY(wh->i_addr3),
-			mgmt_rx_params->snr, mgt_type, mgt_subtype,
-			*(uint16_t *)wh->i_seq, rx_pkt->pkt_meta.rssi,
-			rx_pkt->pkt_meta.rssi_raw, mgmt_rx_params->tsf_delta);
 
 	if (mgt_type == IEEE80211_FC0_TYPE_MGT &&
 	    (mgt_subtype == IEEE80211_FC0_SUBTYPE_DISASSOC ||

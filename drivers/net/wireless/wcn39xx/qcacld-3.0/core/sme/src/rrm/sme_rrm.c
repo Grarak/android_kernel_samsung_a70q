@@ -298,9 +298,11 @@ static QDF_STATUS sme_ese_send_beacon_req_scan_results(
 	if (result_arr)
 		cur_result = result_arr[bss_counter];
 
-	qdf_mem_zero(&bcn_rpt_rsp, sizeof(tSirEseBcnReportRsp));
 	do {
 		cur_meas_req = NULL;
+		/* memset bcn_rpt_rsp for each iteration */
+		qdf_mem_zero(&bcn_rpt_rsp, sizeof(bcn_rpt_rsp));
+
 		for (i = 0; i < rrm_ctx->eseBcnReqInfo.numBcnReqIe; i++) {
 			if (rrm_ctx->eseBcnReqInfo.bcnReq[i].channel ==
 				channel) {
@@ -359,14 +361,13 @@ static QDF_STATUS sme_ese_send_beacon_req_scan_results(
 			bcn_report->numBss++;
 			if (++j >= SIR_BCN_REPORT_MAX_BSS_DESC)
 				break;
-			if (j >= bss_count)
+			if ((bss_counter + j) >= bss_count)
 				break;
-			cur_result = result_arr[j];
+			cur_result = result_arr[bss_counter + j];
 		}
 
 		bss_counter += j;
-		if (!result_arr || !cur_result
-		|| (bss_counter >= SIR_BCN_REPORT_MAX_BSS_DESC)) {
+		if (!result_arr || !cur_result || (bss_counter >= bss_count)) {
 			cur_result = NULL;
 			sme_err("Reached to the max/last BSS in cur_result list");
 		} else {
@@ -393,6 +394,18 @@ static QDF_STATUS sme_ese_send_beacon_req_scan_results(
 	return status;
 }
 
+static inline
+void sme_reset_ese_bcn_req_in_progress(tpRrmSMEContext sme_rrm_ctx)
+{
+	if (sme_rrm_ctx)
+		sme_rrm_ctx->eseBcnReqInProgress = false;
+}
+
+#else
+
+static inline
+void sme_reset_ese_bcn_req_in_progress(tpRrmSMEContext sme_rrm_ctx)
+{}
 #endif /* FEATURE_WLAN_ESE */
 
 /**
@@ -422,7 +435,7 @@ static QDF_STATUS sme_rrm_send_scan_result(tpAniSirGlobal mac_ctx,
 	uint8_t num_scan_results, counter = 0;
 	tpRrmSMEContext rrm_ctx = &mac_ctx->rrm.rrmSmeContext;
 	uint32_t session_id;
-	struct csr_roam_info *roam_info;
+	struct csr_roam_info *roam_info = NULL;
 	tSirScanType scan_type;
 	struct csr_roam_session *session;
 
@@ -584,7 +597,6 @@ static QDF_STATUS sme_rrm_send_scan_result(tpAniSirGlobal mac_ctx,
 		if (counter >= num_scan_results)
 			break;
 	}
-	qdf_mem_free(roam_info);
 	/*
 	 * The beacon report should be sent whether the counter is zero or
 	 * non-zero. There might be a few scan results in the cache but not
@@ -613,6 +625,7 @@ static QDF_STATUS sme_rrm_send_scan_result(tpAniSirGlobal mac_ctx,
 rrm_send_scan_results_done:
 	if (scanresults_arr)
 		qdf_mem_free(scanresults_arr);
+	qdf_mem_free(roam_info);
 	sme_scan_result_purge(result_handle);
 
 	return status;
@@ -641,6 +654,7 @@ static QDF_STATUS sme_rrm_scan_request_callback(tHalHandle halHandle,
 	tpAniSirGlobal pMac = (tpAniSirGlobal) halHandle;
 	tpRrmSMEContext pSmeRrmContext = &pMac->rrm.rrmSmeContext;
 	uint32_t time_tick;
+	QDF_STATUS qdf_status;
 
 	/* if any more channels are pending, start a timer of a random value
 	 * within randomization interval.
@@ -663,7 +677,13 @@ static QDF_STATUS sme_rrm_scan_request_callback(tHalHandle halHandle,
 			time_tick % (pSmeRrmContext->randnIntvl - 10 + 1) + 10;
 
 		sme_debug("Set timer for interval %d ", interval);
-		qdf_mc_timer_start(&pSmeRrmContext->IterMeasTimer, interval);
+		qdf_status = qdf_mc_timer_start(&pSmeRrmContext->IterMeasTimer,
+						interval);
+		if (QDF_IS_STATUS_ERROR(qdf_status)) {
+			qdf_mem_free(pSmeRrmContext->channelList.ChannelList);
+			pSmeRrmContext->channelList.ChannelList = NULL;
+			sme_reset_ese_bcn_req_in_progress(pSmeRrmContext);
+		}
 
 	} else {
 		/* Done with the measurement. Clean up all context and send a
@@ -675,9 +695,8 @@ static QDF_STATUS sme_rrm_scan_request_callback(tHalHandle halHandle,
 					->currentIndex],
 					 true);
 		qdf_mem_free(pSmeRrmContext->channelList.ChannelList);
-#ifdef FEATURE_WLAN_ESE
-		pSmeRrmContext->eseBcnReqInProgress = false;
-#endif
+		pSmeRrmContext->channelList.ChannelList = NULL;
+		sme_reset_ese_bcn_req_in_progress(pSmeRrmContext);
 	}
 
 	return QDF_STATUS_SUCCESS;
@@ -777,7 +796,6 @@ static QDF_STATUS sme_rrm_issue_scan_req(tpAniSirGlobal mac_ctx)
 			goto free_ch_lst;
 		}
 		ucfg_scan_init_default_params(vdev, req);
-		req->scan_req.dwell_time_active = 0;
 		req->scan_req.scan_id = ucfg_scan_get_scan_id(mac_ctx->psoc);
 		req->scan_req.scan_f_passive =
 				(scan_type == eSIR_ACTIVE_SCAN) ? false : true;
@@ -800,30 +818,26 @@ static QDF_STATUS sme_rrm_issue_scan_req(tpAniSirGlobal mac_ctx)
 		 */
 		if (eRRM_MSG_SOURCE_ESE_UPLOAD == sme_rrm_ctx->msgSource ||
 			eRRM_MSG_SOURCE_LEGACY_ESE == sme_rrm_ctx->msgSource)
-			req->scan_req.dwell_time_active = sme_rrm_ctx->duration[
-						sme_rrm_ctx->currentIndex];
+			max_chan_time =
+			      sme_rrm_ctx->duration[sme_rrm_ctx->currentIndex];
 		else
-			req->scan_req.dwell_time_active =
-						sme_rrm_ctx->duration[0];
+			max_chan_time = sme_rrm_ctx->duration[0];
 
-		sme_debug("Scan Type(%d) Max Dwell Time(%d)",
-				scan_type,
-				req->scan_req.dwell_time_active);
 		/*
-		 * Use gPassive/gActiveMaxChannelTime if maxChanTime is less
-		 * than default.
+		 * Use max_chan_time if max_chan_time is more than def value
+		 * depending on type of scan.
 		 */
-		if (eSIR_ACTIVE_SCAN == scan_type)
-			max_chan_time =
-				mac_ctx->roam.configParam.nActiveMaxChnTime;
-		else
-			max_chan_time =
-				mac_ctx->roam.configParam.nPassiveMaxChnTime;
-
-		if (req->scan_req.dwell_time_active < max_chan_time) {
-			req->scan_req.dwell_time_active = max_chan_time;
-			sme_debug("Setting default max %d ChanTime",
-				max_chan_time);
+		if (req->scan_req.scan_f_passive) {
+			if (max_chan_time > req->scan_req.dwell_time_passive)
+				req->scan_req.dwell_time_passive =
+								max_chan_time;
+			sme_debug("Passive Max Dwell Time(%d)",
+				  req->scan_req.dwell_time_passive);
+		} else {
+			if (max_chan_time > req->scan_req.dwell_time_active)
+				req->scan_req.dwell_time_active = max_chan_time;
+			sme_debug("Active Max Dwell Time(%d)",
+				  req->scan_req.dwell_time_active);
 		}
 
 		req->scan_req.adaptive_dwell_time_mode = SCAN_DWELL_MODE_STATIC;
@@ -950,6 +964,10 @@ QDF_STATUS sme_rrm_process_beacon_report_req_ind(tpAniSirGlobal pMac,
 	     && (pBeaconReq->channelList.numChannels == 0))) {
 		/* Add all the channel in the regulatory domain. */
 		wlan_cfg_get_str_len(pMac, WNI_CFG_VALID_CHANNEL_LIST, &len);
+		if (pSmeRrmContext->channelList.ChannelList) {
+			qdf_mem_free(pSmeRrmContext->channelList.ChannelList);
+			pSmeRrmContext->channelList.ChannelList = NULL;
+		}
 		pSmeRrmContext->channelList.ChannelList = qdf_mem_malloc(len);
 		if (pSmeRrmContext->channelList.ChannelList == NULL) {
 			sme_err("qdf_mem_malloc failed");
@@ -971,6 +989,10 @@ QDF_STATUS sme_rrm_process_beacon_report_req_ind(tpAniSirGlobal pMac,
 
 		len += pBeaconReq->channelList.numChannels;
 
+		if (pSmeRrmContext->channelList.ChannelList) {
+			qdf_mem_free(pSmeRrmContext->channelList.ChannelList);
+			pSmeRrmContext->channelList.ChannelList = NULL;
+		}
 		pSmeRrmContext->channelList.ChannelList = qdf_mem_malloc(len);
 		if (pSmeRrmContext->channelList.ChannelList == NULL) {
 			sme_err("qdf_mem_malloc failed");
@@ -1506,6 +1528,11 @@ QDF_STATUS rrm_close(tpAniSirGlobal pMac)
 			QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
 				  FL("Timer stop fail"));
 		}
+	}
+
+	if (pSmeRrmContext->channelList.ChannelList) {
+		qdf_mem_free(pSmeRrmContext->channelList.ChannelList);
+		pSmeRrmContext->channelList.ChannelList = NULL;
 	}
 
 	qdf_status = qdf_mc_timer_destroy(&pSmeRrmContext->IterMeasTimer);

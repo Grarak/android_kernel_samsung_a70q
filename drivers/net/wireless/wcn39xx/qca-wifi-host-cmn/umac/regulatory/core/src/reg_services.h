@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2018 The Linux Foundation. All rights reserved.
  *
  *
  * Permission to use, copy, modify, and/or distribute this software for
@@ -196,13 +196,6 @@ QDF_STATUS reg_notify_sap_event(struct wlan_objmgr_pdev *pdev,
 QDF_STATUS reg_set_fcc_constraint(struct wlan_objmgr_pdev *pdev,
 		bool fcc_constraint);
 
-/**
- * reg_get_fcc_constraint() - Get FCC constraint set status
- * @pdev: physical dev to get
- *
- * Return: If FCC constraint is set return true else false.
- */
-bool reg_get_fcc_constraint(struct wlan_objmgr_pdev *pdev);
 
 /**
  * reg_read_default_country() - Get the default regulatory country

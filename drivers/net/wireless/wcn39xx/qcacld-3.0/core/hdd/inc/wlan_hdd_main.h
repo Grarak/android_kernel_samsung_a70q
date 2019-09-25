@@ -533,6 +533,10 @@ struct hdd_tx_rx_stats {
 	__u32 rx_dropped[NUM_CPUS];
 	__u32 rx_delivered[NUM_CPUS];
 	__u32 rx_refused[NUM_CPUS];
+	qdf_atomic_t rx_usolict_arp_n_mcast_drp;
+	/* rx gro */
+	__u32 rx_aggregated;
+	__u32 rx_non_aggregated;
 
 	/* txflow stats */
 	bool     is_txflow_paused;
@@ -998,6 +1002,9 @@ enum dhcp_nego_status {
  * @vht_caps: VHT capabilities of current station
  * @reason_code: Disconnection reason code for current station
  * @rssi: RSSI of the current station reported from F/W
+ * @capability: Capability information of current station
+ * @support_mode: Max supported mode of a station currently
+ * connected to sap
  */
 struct hdd_station_info {
 	bool in_use;
@@ -1041,6 +1048,8 @@ struct hdd_station_info {
 	int8_t rssi;
 	enum dhcp_phase dhcp_phase;
 	enum dhcp_nego_status dhcp_nego_status;
+	uint16_t capability;
+	uint8_t support_mode;
 };
 
 /**
@@ -1207,6 +1216,7 @@ struct hdd_context;
 /**
  * struct hdd_adapter - hdd vdev/net_device context
  * @vdev: object manager vdev context
+ * @vdev_lock: lock to protect vdev context access
  * @event_flags: a bitmap of hdd_adapter_flags
  */
 struct hdd_adapter {
@@ -1222,6 +1232,7 @@ struct hdd_adapter {
 
 	struct hdd_context *hdd_ctx;
 	struct wlan_objmgr_vdev *vdev;
+	qdf_spinlock_t vdev_lock;
 
 	void *txrx_vdev;
 
@@ -1329,12 +1340,13 @@ struct hdd_adapter {
 		struct hdd_ap_ctx ap;
 	} session;
 
-	qdf_atomic_t dfs_radar_found;
+	qdf_atomic_t ch_switch_in_progress;
 
 #ifdef WLAN_FEATURE_TSF
 	/* tsf value received from firmware */
 	uint64_t cur_target_time;
-	uint64_t tsf_sync_soc_timer;
+	uint64_t cur_tsf_sync_soc_time;
+	uint64_t last_tsf_sync_soc_time;
 	qdf_mc_timer_t host_capture_req_timer;
 #ifdef WLAN_FEATURE_TSF_PLUS
 	/* spin lock for read/write timestamps */
@@ -2002,6 +2014,8 @@ struct hdd_context {
 #endif
 	struct hdd_dynamic_mac dynamic_mac_list[QDF_MAX_CONCURRENCY_PERSONA];
 	bool dynamic_nss_chains_support;
+	/* Completion variable to indicate that all pdev cmds are flushed */
+	struct completion pdev_cmd_flushed_var;
 
 	struct qdf_mac_addr hw_macaddr;
 	struct qdf_mac_addr provisioned_mac_addr[QDF_MAX_CONCURRENCY_PERSONA];
@@ -2010,6 +2024,7 @@ struct hdd_context {
 	uint32_t num_derived_addr;
 	unsigned long provisioned_intf_addr_mask;
 	unsigned long derived_intf_addr_mask;
+	struct wlan_mlme_chain_cfg fw_chain_cfg;
 };
 
 /**
@@ -2102,9 +2117,7 @@ enum {
 /*
  * Function declarations and documentation
  */
-#ifdef SEC_CONFIG_PSM_SYSFS
-int wlan_hdd_sec_get_psm(void);
-#endif /* SEC_CONFIG_PSM_SYSFS */
+
 int hdd_validate_channel_and_bandwidth(struct hdd_adapter *adapter,
 				uint32_t chan_number,
 				enum phy_ch_width chan_bw);
@@ -2157,6 +2170,20 @@ struct hdd_adapter *hdd_get_adapter_by_vdev(struct hdd_context *hdd_ctx,
 				       uint32_t vdev_id);
 struct hdd_adapter *hdd_get_adapter_by_macaddr(struct hdd_context *hdd_ctx,
 					  tSirMacAddr macAddr);
+
+/*
+ * hdd_get_adapter_by_rand_macaddr() - find Random mac adapter
+ * @hdd_ctx: hdd context
+ * @mac_addr: random mac addr
+ *
+ * Find the Adapter based on random mac addr. Adapter's vdev
+ * have active random mac list.
+ *
+ * Return: adapter ptr or null
+ */
+struct hdd_adapter *
+hdd_get_adapter_by_rand_macaddr(struct hdd_context *hdd_ctx,
+				tSirMacAddr mac_addr);
 
 int hdd_vdev_create(struct hdd_adapter *adapter,
 		    csr_roam_complete_cb callback, void *ctx);
@@ -3390,15 +3417,6 @@ static inline void hdd_driver_memdump_deinit(void)
 }
 #endif /* WLAN_FEATURE_MEMDUMP_ENABLE */
 /**
- * hdd_is_cli_iface_up() - check if there is any cli iface up
- * @hdd_ctx: HDD context
- *
- * Return: return true if there is any cli iface(STA/P2P_CLI) is up
- *         else return false
- */
-bool hdd_is_cli_iface_up(struct hdd_context *hdd_ctx);
-
-/**
  * hdd_set_disconnect_status() - set adapter disconnection status
  * @hdd_adapter: Pointer to hdd adapter
  * @disconnecting: Disconnect status to set
@@ -3583,4 +3601,15 @@ void wlan_hdd_send_tcp_param_update_event(struct hdd_context *hdd_ctx,
 }
 
 #endif /* MSM_PLATFORM */
+
+/**
+ * hdd_hidden_ssid_enable_roaming() - enable roaming after hidden ssid rsp
+ * @hdd_handle: Hdd handler
+ * @vdev_id: Vdev Id
+ *
+ * This is a wrapper function to enable roaming after getting hidden
+ * ssid rsp
+ */
+void hdd_hidden_ssid_enable_roaming(hdd_handle_t hdd_handle, uint8_t vdev_id);
+
 #endif /* end #if !defined(WLAN_HDD_MAIN_H) */

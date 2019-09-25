@@ -41,6 +41,7 @@
  * @is_fw_mawc_capable: Motion Aided Wireless Connectivity feature
  * @twt_requestor: TWT requestor capability
  * @twt_responder: TWT responder capability
+ * @bcn_reception_stats: Beacon Reception stats capability
  */
 struct wma_tgt_services {
 	uint32_t sta_power_save;
@@ -71,6 +72,7 @@ struct wma_tgt_services {
 	bool is_11k_offload_supported;
 	bool twt_requestor;
 	bool twt_responder;
+	bool bcn_reception_stats;
 };
 
 /**
@@ -186,6 +188,7 @@ struct wma_tgt_cfg {
 	uint32_t target_fw_version;
 	uint32_t target_fw_vers_ext;
 	uint8_t band_cap;
+	struct wlan_mlme_chain_cfg chain_cfg;
 	uint32_t reg_domain;
 	uint32_t eeprom_rd_ext;
 	struct qdf_mac_addr hw_macaddr;

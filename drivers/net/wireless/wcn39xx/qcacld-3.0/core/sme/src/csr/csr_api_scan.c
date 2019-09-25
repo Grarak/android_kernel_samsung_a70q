@@ -738,14 +738,14 @@ void csr_apply_channel_power_info_wrapper(tpAniSirGlobal pMac)
 	csr_apply_channel_power_info_to_fw(pMac,
 		&pMac->scan.base_channels, pMac->scan.countryCodeCurrent);
 	/* clear the 11d channel list */
-	qdf_mem_set(&pMac->scan.channels11d, sizeof(pMac->scan.channels11d), 0);
+	qdf_mem_zero(&pMac->scan.channels11d, sizeof(pMac->scan.channels11d));
 }
 
 void csr_clear_votes_for_country_info(tpAniSirGlobal pMac)
 {
 	pMac->scan.countryCodeCount = 0;
-	qdf_mem_set(pMac->scan.votes11d,
-		    sizeof(struct csr_votes11d) * CSR_MAX_NUM_COUNTRY_CODE, 0);
+	qdf_mem_zero(pMac->scan.votes11d,
+		    sizeof(struct csr_votes11d) * CSR_MAX_NUM_COUNTRY_CODE);
 }
 
 /* caller allocated memory for pNumChn and pChnPowerInfo */
@@ -1466,7 +1466,7 @@ QDF_STATUS csr_scan_for_ssid(tpAniSirGlobal mac_ctx, uint32_t session_id,
 		status = csr_roam_copy_profile(mac_ctx,
 					session->scan_info.profile,
 					profile);
-	if (!QDF_IS_STATUS_SUCCESS(status))
+	if (QDF_IS_STATUS_ERROR(status))
 		goto error;
 	scan_id = ucfg_scan_get_scan_id(mac_ctx->psoc);
 	session->scan_info.scan_id = scan_id;
@@ -1476,6 +1476,7 @@ QDF_STATUS csr_scan_for_ssid(tpAniSirGlobal mac_ctx, uint32_t session_id,
 	if (!req) {
 		QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_ERROR,
 			  FL("Failed to allocate memory"));
+		status = QDF_STATUS_E_NOMEM;
 		goto error;
 	}
 
@@ -1484,13 +1485,11 @@ QDF_STATUS csr_scan_for_ssid(tpAniSirGlobal mac_ctx, uint32_t session_id,
 				session->selfMacAddr.bytes,
 				WLAN_LEGACY_SME_ID);
 	ucfg_scan_init_default_params(vdev, req);
-	req->scan_req.dwell_time_active = 0;
 	req->scan_req.scan_id = scan_id;
 	req->scan_req.vdev_id = session_id;
 	req->scan_req.scan_req_id = mac_ctx->scan.requester_id;
 	req->scan_req.scan_f_passive = false;
 	req->scan_req.scan_f_bcast_probe = false;
-
 
 	if (QDF_P2P_CLIENT_MODE == profile->csrPersona)
 		req->scan_req.scan_priority = SCAN_PRIORITY_HIGH;
@@ -1555,7 +1554,7 @@ QDF_STATUS csr_scan_for_ssid(tpAniSirGlobal mac_ctx, uint32_t session_id,
 	status = ucfg_scan_start(req);
 	wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_SME_ID);
 error:
-	if (!QDF_IS_STATUS_SUCCESS(status)) {
+	if (QDF_IS_STATUS_ERROR(status)) {
 		sme_err("failed to initiate scan with status: %d", status);
 		csr_release_profile(mac_ctx, session->scan_info.profile);
 		qdf_mem_free(session->scan_info.profile);
@@ -2883,9 +2882,13 @@ static void csr_filter_ap_due_to_rssi_reject(tpAniSirGlobal mac_ctx,
 					Link);
 		next_entry = csr_ll_next(&scan_list->List,
 						cur_entry, LL_ACCESS_NOLOCK);
+
+		qdf_mutex_acquire(&mac_ctx->roam.rssi_disallow_bssid_lock);
 		remove = csr_remove_ap_due_to_rssi(
 			&mac_ctx->roam.rssi_disallow_bssid,
 			&scan_res->Result.BssDescriptor);
+		qdf_mutex_release(&mac_ctx->roam.rssi_disallow_bssid_lock);
+
 		if (remove) {
 			csr_ll_remove_entry(&scan_list->List,
 				cur_entry, LL_ACCESS_NOLOCK);

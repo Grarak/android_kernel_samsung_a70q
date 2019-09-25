@@ -342,6 +342,13 @@ wlan_cfg80211_tdls_extract_params(struct tdls_update_peer_params *req_info,
 	if (params->supported_channels_len)
 		tdls_calc_channels_from_staparams(req_info, params);
 
+	if (params->supported_oper_classes_len > WLAN_MAX_SUPP_OPER_CLASSES) {
+		cfg80211_debug("received oper classes:%d, resetting it to max supported: %d",
+			       params->supported_oper_classes_len,
+			       WLAN_MAX_SUPP_OPER_CLASSES);
+		params->supported_oper_classes_len = WLAN_MAX_SUPP_OPER_CLASSES;
+	}
+
 	qdf_mem_copy(req_info->supported_oper_classes,
 		     params->supported_oper_classes,
 		     params->supported_oper_classes_len);
@@ -729,8 +736,6 @@ int wlan_cfg80211_tdls_mgmt(struct wlan_objmgr_pdev *pdev,
 	struct osif_tdls_vdev *tdls_priv;
 	int status;
 	unsigned long rc;
-	int max_sta_failed = 0;
-	struct tdls_validate_action_req chk_frame;
 	struct tdls_set_responder_req set_responder;
 
 	status = wlan_cfg80211_tdls_validate_mac_addr(peer_mac);
@@ -765,16 +770,13 @@ int wlan_cfg80211_tdls_mgmt(struct wlan_objmgr_pdev *pdev,
 	/*prepare the request */
 
 	/* Validate the management Request */
-	chk_frame.vdev = vdev;
-	chk_frame.action_code = action_code;
-	qdf_mem_copy(chk_frame.peer_mac, peer_mac, QDF_MAC_ADDR_SIZE);
-	chk_frame.dialog_token = dialog_token;
-	chk_frame.action_code = action_code;
-	chk_frame.status_code = status_code;
-	chk_frame.len = len;
-	chk_frame.max_sta_failed = max_sta_failed;
+	mgmt_req.chk_frame.action_code = action_code;
+	qdf_mem_copy(mgmt_req.chk_frame.peer_mac, peer_mac, QDF_MAC_ADDR_SIZE);
+	mgmt_req.chk_frame.dialog_token = dialog_token;
+	mgmt_req.chk_frame.action_code = action_code;
+	mgmt_req.chk_frame.status_code = status_code;
+	mgmt_req.chk_frame.len = len;
 
-	mgmt_req.chk_frame = &chk_frame;
 
 	mgmt_req.vdev = vdev;
 	mgmt_req.vdev_id = wlan_vdev_get_id(vdev);
@@ -786,7 +788,7 @@ int wlan_cfg80211_tdls_mgmt(struct wlan_objmgr_pdev *pdev,
 	mgmt_req.tdls_mgmt.frame_type = action_code;
 	mgmt_req.tdls_mgmt.len = len;
 	mgmt_req.tdls_mgmt.peer_capability = peer_capability;
-	mgmt_req.tdls_mgmt.status_code = chk_frame.status_code;
+	mgmt_req.tdls_mgmt.status_code = mgmt_req.chk_frame.status_code;
 
 	/*populate the additional IE's */
 	mgmt_req.cmd_buf = buf;
@@ -808,7 +810,8 @@ int wlan_cfg80211_tdls_mgmt(struct wlan_objmgr_pdev *pdev,
 		&tdls_priv->tdls_mgmt_comp,
 		msecs_to_jiffies(WAIT_TIME_FOR_TDLS_MGMT));
 
-	if ((0 == rc) || (true != tdls_priv->mgmt_tx_completion_status)) {
+	if ((0 == rc) || (QDF_STATUS_SUCCESS !=
+				tdls_priv->mgmt_tx_completion_status)) {
 		cfg80211_err("%s rc %ld mgmtTxCompletionStatus %u",
 			     !rc ? "Mgmt Tx Completion timed out" :
 			     "Mgmt Tx Completion failed",
@@ -821,11 +824,6 @@ int wlan_cfg80211_tdls_mgmt(struct wlan_objmgr_pdev *pdev,
 
 	cfg80211_debug("Mgmt Tx Completion status %ld TxCompletion %u",
 		       rc, tdls_priv->mgmt_tx_completion_status);
-
-	if (chk_frame.max_sta_failed) {
-		status = max_sta_failed;
-		goto error_mgmt_req;
-	}
 
 	if (TDLS_SETUP_RESPONSE == action_code ||
 	    TDLS_SETUP_CONFIRM == action_code) {
@@ -855,7 +853,11 @@ int wlan_tdls_antenna_switch(struct wlan_objmgr_vdev *vdev, uint32_t mode)
 		cfg80211_err("vdev is NULL");
 		return -EAGAIN;
 	}
-	wlan_objmgr_vdev_get_ref(vdev, WLAN_OSIF_ID);
+	if (wlan_objmgr_vdev_try_get_ref(vdev, WLAN_OSIF_ID) !=
+	    QDF_STATUS_SUCCESS) {
+		cfg80211_err("Failed to get vdev reference");
+		return -EAGAIN;
+	}
 
 	osif_priv = wlan_vdev_get_ospriv(vdev);
 	tdls_priv = osif_priv->osif_tdls;

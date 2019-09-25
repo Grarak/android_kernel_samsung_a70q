@@ -212,10 +212,8 @@
 /*
  * total number of descriptors to use in the target
  */
-#ifndef HIF_SDIO
+#ifndef CFG_TGT_NUM_MSDU_DESC
 #define CFG_TGT_NUM_MSDU_DESC    (32)
-#else
-#define CFG_TGT_NUM_MSDU_DESC    (0)
 #endif
 /*
  * Maximum number of frag table entries
@@ -244,14 +242,18 @@
 #define CFG_TGT_NUM_TDLS_CONC_BUFFER_STAS    1
 
 #define CFG_TGT_MAX_MULTICAST_FILTER_ENTRIES 16
+
 /*
  * Maximum number of VDEV that beacon tx offload will support
  */
+#ifndef CFG_TGT_DEFAULT_BEACON_TX_OFFLOAD_MAX_VDEV
+/* For Naples/Rome/Tufello */
 #ifdef HIF_SDIO
 #define CFG_TGT_DEFAULT_BEACON_TX_OFFLOAD_MAX_VDEV 2
 #else
 #define CFG_TGT_DEFAULT_BEACON_TX_OFFLOAD_MAX_VDEV 1
 #endif
+#endif /* CFG_TGT_DEFAULT_BEACON_TX_OFFLOAD_MAX_VDEV */
 
 /*
  * ht enable highest MCS by default

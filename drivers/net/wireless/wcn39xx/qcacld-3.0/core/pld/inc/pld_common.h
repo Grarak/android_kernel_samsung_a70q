@@ -455,22 +455,7 @@ static inline uint8_t *pld_get_wlan_derived_mac_address(struct device *dev,
 {
 	return cnss_utils_get_wlan_derived_mac_address(dev, num);
 }
-#ifdef SEC_READ_MACADDR_SYSFS
-/**
- * pld_set_wlan_mac_address() - API to set MAC address
- * to platform Driver
- * @dev: Device Structure
- * @num: Pointer to number of MAC address supported
- *
- * Return: 0 for success
- *         Non zero failure code for errors
- */
-static inline int pld_set_wlan_mac_address(const u8 *mac_list,
-							const uint32_t len)
-{
-	return cnss_utils_set_wlan_mac_address(mac_list, len);
-}
-#endif /*SEC_READ_MACADDR_SYSFS*/
+
 /**
  * pld_increment_driver_load_cnt() - Maintain driver load count
  * @dev: device
@@ -532,13 +517,7 @@ static inline uint8_t *pld_get_wlan_derived_mac_address(struct device *dev,
 	*num = 0;
 	return NULL;
 }
-#ifdef SEC_READ_MACADDR_SYSFS
-static inline int pld_set_wlan_mac_address(const u8 *mac_list,
-							const uint32_t len)
-{
-	return -EINVAL;
-}
-#endif /*SEC_READ_MACADDR_SYSFS*/
+
 static inline void pld_increment_driver_load_cnt(struct device *dev) {}
 static inline int pld_get_driver_load_cnt(struct device *dev)
 {

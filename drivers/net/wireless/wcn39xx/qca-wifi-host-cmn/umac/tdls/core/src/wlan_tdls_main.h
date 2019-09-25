@@ -682,6 +682,16 @@ QDF_STATUS
 tdls_process_policy_mgr_notification(struct wlan_objmgr_psoc *psoc);
 
 /**
+ * tdls_process_decrement_active_session() - process policy manager decrement
+ * sessions.
+ * @psoc: soc object manager
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS
+tdls_process_decrement_active_session(struct wlan_objmgr_psoc *psoc);
+
+/**
  * tdls_scan_complete_event_handler() - scan complete event handler for tdls
  * @vdev: vdev object
  * @event: scan event
@@ -732,4 +742,15 @@ void tdls_scan_serialization_comp_info_cb(struct wlan_objmgr_vdev *vdev,
 QDF_STATUS tdls_set_offchan_mode(struct wlan_objmgr_psoc *psoc,
 				     struct tdls_channel_switch_params *param);
 
+/**
+ * tdls_delete_all_peers_indication() - update tdls status info
+ * @delete_peers_ind: Delete peers indication params
+ *
+ * Notify tdls component to cleanup all peers
+ *
+ * Return: QDF_STATUS.
+ */
+
+QDF_STATUS tdls_delete_all_peers_indication(
+		struct tdls_delete_all_peers_params *delete_peers_ind);
 #endif

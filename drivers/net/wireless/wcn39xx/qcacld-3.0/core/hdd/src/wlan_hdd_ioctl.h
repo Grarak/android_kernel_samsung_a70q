@@ -48,11 +48,5 @@ QDF_STATUS hdd_update_smps_antenna_mode(struct hdd_context *hdd_ctx, int mode);
 int hdd_set_antenna_mode(struct hdd_adapter *adapter,
 			  struct hdd_context *hdd_ctx, int mode);
 
-#ifdef SEC_CONFIG_POWER_BACKOFF
-#define SAR_POWER_LIMIT_FOR_GRIP_SENSOR	0
-#define SAR_POWER_LIMIT_FOR_DBS		1
-int hdd_set_sar_power_limit(struct hdd_context *hdd_ctx, uint8_t index, bool enable);
-#endif /* SEC_CONFIG_POWER_BACKOFF */
-
 #endif /* end #if !defined(WLAN_HDD_IOCTL_H) */
 

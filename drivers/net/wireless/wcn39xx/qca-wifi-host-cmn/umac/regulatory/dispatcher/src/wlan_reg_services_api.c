@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2018 The Linux Foundation. All rights reserved.
  *
  *
  * Permission to use, copy, modify, and/or distribute this software for
@@ -535,11 +535,6 @@ bool wlan_reg_is_etsi13_srd_chan_allowed_master_mode(struct wlan_objmgr_pdev
 						     *pdev)
 {
 	return reg_is_etsi13_srd_chan_allowed_master_mode(pdev);
-}
-
-bool wlan_reg_get_fcc_constraint(struct wlan_objmgr_pdev *pdev)
-{
-	return reg_get_fcc_constraint(pdev);
 }
 
 QDF_STATUS wlan_reg_get_chip_mode(struct wlan_objmgr_pdev *pdev,

@@ -1024,7 +1024,7 @@ void lim_handle_update_olbc_cache(tpAniSirGlobal mac_ctx)
 		pe_debug("protection offloaded");
 		return;
 	}
-	qdf_mem_set((uint8_t *) &beaconParams, sizeof(tUpdateBeaconParams), 0);
+	qdf_mem_zero((uint8_t *) &beaconParams, sizeof(tUpdateBeaconParams));
 	beaconParams.bssIdx = psessionEntry->bssIdx;
 
 	beaconParams.paramChangeBitmap = 0;
@@ -1423,8 +1423,10 @@ lim_update_short_preamble(tpAniSirGlobal mac_ctx, tSirMacAddr peer_mac_addr,
 	}
 
 	if (i >= LIM_PROT_STA_CACHE_SIZE) {
+#ifdef WLAN_DEBUG
 		tLimNoShortParams *lim_params =
 				&psession_entry->gLimNoShortParams;
+#endif
 		if (LIM_IS_AP_ROLE(psession_entry)) {
 			pe_err("No space in Short cache active: %d sta: %d for sta",
 				i, lim_params->numNonShortPreambleSta);
@@ -4291,8 +4293,14 @@ void lim_update_sta_run_time_ht_switch_chnl_params(tpAniSirGlobal pMac,
 
 	if (reg_get_chan_enum(pHTInfo->primaryChannel) == INVALID_CHANNEL) {
 		pe_debug("Ignore Invalid channel in HT info");
- 		return;
- 	}
+		return;
+	}
+
+	/* If channel mismatch the CSA will take care of this change */
+	if (pHTInfo->primaryChannel != psessionEntry->currentOperChannel) {
+		pe_debug("Current channel doesnt match HT info ignore");
+		return;
+	}
 
 	/* If channel mismatch the CSA will take care of this change */
 	if (pHTInfo->primaryChannel != psessionEntry->currentOperChannel) {
@@ -4333,11 +4341,16 @@ void lim_update_sta_run_time_ht_switch_chnl_params(tpAniSirGlobal pMac,
 		pMac->lim.gpchangeChannelCallback = NULL;
 		pMac->lim.gpchangeChannelData = NULL;
 
+		/* Before restarting vdev, delete the tdls peers */
+		lim_update_tdls_set_state_for_fw(psessionEntry, false);
+		lim_delete_tdls_peers(pMac, psessionEntry);
 		lim_send_switch_chnl_params(pMac, (uint8_t) pHTInfo->primaryChannel,
 					    center_freq, 0, ch_width,
 					    psessionEntry->maxTxPower,
 					    psessionEntry->peSessionId,
 					    true, 0, 0);
+
+
 
 		/* In case of IBSS, if STA should update HT Info IE in its beacons. */
 		if (LIM_IS_IBSS_ROLE(psessionEntry)) {
@@ -5607,7 +5620,7 @@ void lim_diag_event_report(tpAniSirGlobal pMac, uint16_t eventType,
 
 	WLAN_HOST_DIAG_EVENT_DEF(peEvent, host_event_wlan_pe_payload_type);
 
-	qdf_mem_set(&peEvent, sizeof(host_event_wlan_pe_payload_type), 0);
+	qdf_mem_zero(&peEvent, sizeof(host_event_wlan_pe_payload_type));
 
 	if (NULL == pSessionEntry) {
 		qdf_mem_copy(peEvent.bssid, nullBssid, sizeof(tSirMacAddr));
@@ -5636,7 +5649,7 @@ static void lim_diag_fill_mgmt_event_report(tpAniSirGlobal mac_ctx,
 {
 	uint8_t length;
 
-	qdf_mem_set(mgmt_event, sizeof(*mgmt_event), 0);
+	qdf_mem_zero(mgmt_event, sizeof(*mgmt_event));
 	mgmt_event->mgmt_type = mac_hdr->fc.type;
 	mgmt_event->mgmt_subtype = mac_hdr->fc.subType;
 	qdf_mem_copy(mgmt_event->self_mac_addr, session->selfMacAddr,
@@ -6728,9 +6741,8 @@ QDF_STATUS lim_strip_ie(tpAniSirGlobal mac_ctx,
 			 * take oui IE and store in provided buffer.
 			 */
 			if (NULL != extracted_ie) {
-				qdf_mem_set(extracted_ie,
-					    eid_max_len + size_of_len_field + 1,
-					    0);
+				qdf_mem_zero(extracted_ie,
+					   eid_max_len + size_of_len_field + 1);
 				if (elem_len <= eid_max_len)
 					qdf_mem_copy(extracted_ie, &ptr[0],
 					elem_len + size_of_len_field + 1);
@@ -6781,9 +6793,8 @@ QDF_STATUS lim_strip_supp_op_class_update_struct(tpAniSirGlobal mac_ctx,
 	uint8_t extracted_buff[DOT11F_IE_SUPPOPERATINGCLASSES_MAX_LEN + 2];
 	QDF_STATUS status;
 
-	qdf_mem_set((uint8_t *)&extracted_buff[0],
-		    DOT11F_IE_SUPPOPERATINGCLASSES_MAX_LEN + 2,
-		    0);
+	qdf_mem_zero((uint8_t *)&extracted_buff[0],
+		    DOT11F_IE_SUPPOPERATINGCLASSES_MAX_LEN + 2);
 	status = lim_strip_ie(mac_ctx, addn_ie, addn_ielen,
 			      DOT11F_EID_SUPPOPERATINGCLASSES, ONE_BYTE,
 			      NULL, 0, extracted_buff,
@@ -6843,7 +6854,7 @@ void lim_update_extcap_struct(tpAniSirGlobal mac_ctx,
 		return;
 	}
 
-	qdf_mem_set((uint8_t *)&out[0], DOT11F_IE_EXTCAP_MAX_LEN, 0);
+	qdf_mem_zero((uint8_t *)&out[0], DOT11F_IE_EXTCAP_MAX_LEN);
 	qdf_mem_copy(&out[0], &buf[2], buf[1]);
 
 	status = dot11f_unpack_ie_ext_cap(mac_ctx, &out[0],
@@ -6871,8 +6882,8 @@ QDF_STATUS lim_strip_extcap_update_struct(tpAniSirGlobal mac_ctx,
 	uint8_t extracted_buff[DOT11F_IE_EXTCAP_MAX_LEN + 2];
 	QDF_STATUS status;
 
-	qdf_mem_set((uint8_t *)&extracted_buff[0], DOT11F_IE_EXTCAP_MAX_LEN + 2,
-		     0);
+	qdf_mem_zero((uint8_t *)&extracted_buff[0],
+		      DOT11F_IE_EXTCAP_MAX_LEN + 2);
 	status = lim_strip_ie(mac_ctx, addn_ie, addn_ielen,
 			      DOT11F_EID_EXTCAP, ONE_BYTE,
 			      NULL, 0, extracted_buff,
@@ -8091,14 +8102,7 @@ QDF_STATUS lim_populate_he_mcs_set(tpAniSirGlobal mac_ctx,
 }
 #endif
 
-/**
- * lim_assoc_rej_get_remaining_delta() - Get remaining time delta for
- * the rssi based disallowed list entry
- * @node: rssi based disallowed list entry
- *
- * Return: remaining delta, can be -ve if time has already expired.
- */
-static inline int
+int
 lim_assoc_rej_get_remaining_delta(struct sir_rssi_disallow_lst *node)
 {
 	qdf_time_t cur_time;
@@ -8111,15 +8115,8 @@ lim_assoc_rej_get_remaining_delta(struct sir_rssi_disallow_lst *node)
 	return node->retry_delay - time_diff;
 }
 
-/**
- * lim_assoc_rej_rem_entry_with_lowest_delta() - Remove the entry
- * with lowest time delta
- * @list: rssi based rejected BSSID list
- *
- * Return: QDF_STATUS
- */
-static QDF_STATUS
-lim_assoc_rej_rem_entry_with_lowest_delta(qdf_list_t *list)
+QDF_STATUS
+lim_rem_blacklist_entry_with_lowest_delta(qdf_list_t *list)
 {
 	struct sir_rssi_disallow_lst *oldest_node = NULL;
 	struct sir_rssi_disallow_lst *cur_node;
@@ -8179,9 +8176,10 @@ void lim_assoc_rej_add_to_rssi_based_reject_list(tpAniSirGlobal mac_ctx,
 		qdf_do_div(qdf_get_monotonic_boottime(),
 		QDF_MC_TIMER_TO_MS_UNIT);
 
+	qdf_mutex_acquire(&mac_ctx->roam.rssi_disallow_bssid_lock);
 	if (qdf_list_size(&mac_ctx->roam.rssi_disallow_bssid) >=
 		MAX_RSSI_AVOID_BSSID_LIST) {
-		status = lim_assoc_rej_rem_entry_with_lowest_delta(
+		status = lim_rem_blacklist_entry_with_lowest_delta(
 					&mac_ctx->roam.rssi_disallow_bssid);
 		if (QDF_IS_STATUS_ERROR(status))
 			pe_err("Failed to remove entry with lowest delta");
@@ -8191,6 +8189,7 @@ void lim_assoc_rej_add_to_rssi_based_reject_list(tpAniSirGlobal mac_ctx,
 		status = qdf_list_insert_back(
 				&mac_ctx->roam.rssi_disallow_bssid,
 				&entry->node);
+	qdf_mutex_release(&mac_ctx->roam.rssi_disallow_bssid_lock);
 
 	if (QDF_IS_STATUS_ERROR(status)) {
 		pe_err("Failed to enqueue bssid entry");
@@ -8419,8 +8418,8 @@ void lim_process_ap_ecsa_timeout(void *data)
 	uint8_t bcn_int, ch, ch_width;
 	QDF_STATUS status;
 
-	if (!session) {
-		pe_err("Session is NULL");
+	if (!session || !session->valid) {
+		pe_err("Session is not valid");
 		return;
 	}
 

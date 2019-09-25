@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -476,6 +476,8 @@ typedef enum {
 	eCSR_ROAM_CHANNEL_COMPLETE_IND,
 	eCSR_ROAM_CAC_COMPLETE_IND,
 	eCSR_ROAM_SAE_COMPUTE,
+	/* LFR3 Roam sync complete */
+	eCSR_ROAM_SYNCH_COMPLETE,
 } eRoamCmdStatus;
 
 /* comment inside indicates what roaming callback gets */
@@ -1193,6 +1195,7 @@ typedef struct tagCsrConfigParam {
 	uint32_t ho_delay_for_rx;
 	uint32_t min_delay_btw_roam_scans;
 	uint32_t roam_trigger_reason_bitmask;
+	bool roaming_scan_policy;
 	uint8_t isCoalesingInIBSSAllowed;
 #ifdef FEATURE_WLAN_MCC_TO_SCC_SWITCH
 	uint8_t cc_switch_mode;
@@ -1303,6 +1306,11 @@ typedef struct tagCsrConfigParam {
 	struct csr_neighbor_report_offload_params neighbor_report_offload;
 	bool enable_ftopen;
 	bool roam_force_rssi_trigger;
+	uint32_t btm_validity_timer;
+	uint32_t btm_disassoc_timer_threshold;
+	bool enable_bss_load_roam_trigger;
+	uint32_t bss_load_threshold;
+	uint32_t bss_load_sample_time;
 } tCsrConfigParam;
 
 /* Tush */
@@ -1424,6 +1432,7 @@ struct csr_roam_info {
 #endif
 	tDot11fIEHTCaps ht_caps;
 	tDot11fIEVHTCaps vht_caps;
+	bool he_caps_present;
 	tDot11fIEhs20vendor_ie hs20vendor_ie;
 	tDot11fIEVHTOperation vht_operation;
 	tDot11fIEHTInfo ht_operation;
@@ -1449,6 +1458,7 @@ struct csr_roam_info {
 	int rssi;
 	int tx_rate;
 	int rx_rate;
+	tSirMacCapabilityInfo capability_info;
 #ifdef WLAN_FEATURE_SAE
 	struct sir_sae_info *sae_info;
 #endif
@@ -1495,6 +1505,8 @@ typedef struct sSirSmeAssocIndToUpperLayerCnf {
 
 	tDot11fIEHTCaps ht_caps;
 	tDot11fIEVHTCaps vht_caps;
+	tSirMacCapabilityInfo capability_info;
+	bool he_caps_present;
 } tSirSmeAssocIndToUpperLayerCnf, *tpSirSmeAssocIndToUpperLayerCnf;
 
 typedef struct tagCsrSummaryStatsInfo {

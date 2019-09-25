@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -375,11 +375,16 @@ static inline void ol_txrx_peer_find_add_id(struct ol_txrx_pdev_t *pdev,
 	int i;
 	uint32_t peer_id_ref_cnt;
 	uint32_t peer_ref_cnt;
+	u8 check_valid = 0;
+
+	if (pdev->enable_peer_unmap_conf_support)
+		check_valid = 1;
 
 	/* check if there's already a peer object with this MAC address */
 	peer =
 		ol_txrx_peer_find_hash_find_get_ref(pdev, peer_mac_addr,
-						    1 /* is aligned */, 0,
+						    1 /* is aligned */,
+						    check_valid,
 						    PEER_DEBUG_ID_OL_PEER_MAP);
 
 	if (!peer || peer_id == HTT_INVALID_PEER) {
@@ -465,6 +470,51 @@ void ol_txrx_peer_find_detach(struct ol_txrx_pdev_t *pdev)
 {
 	ol_txrx_peer_find_map_detach(pdev);
 	ol_txrx_peer_find_hash_detach(pdev);
+}
+
+/**
+ * ol_txrx_peer_unmap_conf_handler() - send peer unmap conf cmd to FW
+ * @pdev: pdev_handle
+ * @peer_id: peer_id
+ *
+ * Return: None
+ */
+static inline void
+ol_txrx_peer_unmap_conf_handler(ol_txrx_pdev_handle pdev,
+				uint16_t peer_id)
+{
+	QDF_STATUS status = QDF_STATUS_E_FAILURE;
+
+	if (peer_id == HTT_INVALID_PEER) {
+		ol_txrx_err(
+		   "invalid peer ID %d\n", peer_id);
+		return;
+	}
+
+	qdf_atomic_inc(&pdev->peer_id_to_obj_map[peer_id].peer_id_unmap_cnt);
+
+	if (qdf_atomic_read(
+		&pdev->peer_id_to_obj_map[peer_id].peer_id_unmap_cnt) ==
+		pdev->peer_id_unmap_ref_cnt) {
+		ol_txrx_dbg("send unmap conf cmd: peer_id[%d] unmap_cnt[%d]",
+			    peer_id, pdev->peer_id_unmap_ref_cnt);
+		status = pdev->peer_unmap_sync_cb(
+				DEBUG_INVALID_VDEV_ID,
+				1, &peer_id);
+
+		if (status == QDF_STATUS_SUCCESS ||
+		    status == QDF_STATUS_E_BUSY) {
+			qdf_atomic_init(
+			&pdev->peer_id_to_obj_map[peer_id].peer_id_unmap_cnt);
+		} else {
+			qdf_atomic_set(
+			&pdev->peer_id_to_obj_map[peer_id].peer_id_unmap_cnt,
+			OL_TXRX_INVALID_PEER_UNMAP_COUNT);
+			ol_txrx_err("unable to send unmap conf cmd [%d]",
+				    peer_id);
+		}
+
+	}
 }
 
 /*=== function definitions for message handling =============================*/
@@ -580,6 +630,11 @@ void ol_rx_peer_unmap_handler(ol_txrx_pdev_handle pdev, uint16_t peer_id)
 	}
 
 	qdf_spin_lock_bh(&pdev->peer_map_unmap_lock);
+
+	/* send peer unmap conf cmd to fw for unmapped peer_ids */
+	if (pdev->enable_peer_unmap_conf_support &&
+	    pdev->peer_unmap_sync_cb)
+		ol_txrx_peer_unmap_conf_handler(pdev, peer_id);
 
 	if (qdf_atomic_read(
 		&pdev->peer_id_to_obj_map[peer_id].del_peer_id_ref_cnt)) {

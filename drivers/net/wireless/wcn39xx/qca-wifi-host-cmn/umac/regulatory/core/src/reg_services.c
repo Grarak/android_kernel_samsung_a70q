@@ -27,6 +27,10 @@
 #include <scheduler_api.h>
 #include <qdf_platform.h>
 
+#define CHAN_12_CENT_FREQ 2467
+#define MAX_PWR_FCC_CHAN_12 8
+#define CHAN_13_CENT_FREQ 2472
+#define MAX_PWR_FCC_CHAN_13 2
 #define CHAN_144_CENT_FREQ 5720
 #define DEFAULT_WORLD_REGDMN 0x60
 
@@ -47,7 +51,8 @@ const struct bonded_channel bonded_chan_40mhz_list[] = {
 	{132, 136},
 	{140, 144},
 	{149, 153},
-	{157, 161}
+	{157, 161},
+	{165, 169}
 };
 
 const struct bonded_channel bonded_chan_80mhz_list[] = {
@@ -119,7 +124,7 @@ static const struct chan_map channel_map_old[NUM_CHANNELS] = {
 	[CHAN_ENUM_161] = {5805, 161, 2, 160},
 	[CHAN_ENUM_165] = {5825, 165, 2, 160},
 #ifndef WLAN_FEATURE_DSRC
-	[CHAN_ENUM_169] = {5845, 169, 2, 20},
+	[CHAN_ENUM_169] = {5845, 169, 2, 40},
 	[CHAN_ENUM_173] = {5865, 173, 2, 20},
 #else
 	[CHAN_ENUM_170] = {5852, 170, 2, 20},
@@ -857,7 +862,7 @@ enum channel_enum reg_get_chan_enum(uint32_t chan_num)
 		if (channel_map[count].chan_num == chan_num)
 			return count;
 
-	reg_err("invalid channel number %d", chan_num);
+	reg_debug_rl("invalid channel %d", chan_num);
 
 	return INVALID_CHANNEL;
 }
@@ -1444,6 +1449,7 @@ QDF_STATUS reg_set_country(struct wlan_objmgr_pdev *pdev,
 		reg_err("country code is NULL");
 		return QDF_STATUS_E_INVAL;
 	}
+
 	pdev_id = wlan_objmgr_pdev_get_pdev_id(pdev);
 
 	psoc = wlan_pdev_get_psoc(pdev);
@@ -1522,6 +1528,7 @@ QDF_STATUS reg_set_11d_country(struct wlan_objmgr_pdev *pdev,
 		reg_err("country code is NULL");
 		return QDF_STATUS_E_INVAL;
 	}
+
 	pdev_id = wlan_objmgr_pdev_get_pdev_id(pdev);
 
 	psoc = wlan_pdev_get_psoc(pdev);
@@ -2167,16 +2174,27 @@ static void reg_modify_chan_list_for_dfs_channels(struct regulatory_channel
 		}
 	}
 }
+
 static void reg_modify_chan_list_for_indoor_channels(
 		struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj)
 {
 	enum channel_enum chan_enum;
 	struct regulatory_channel *chan_list = pdev_priv_obj->cur_chan_list;
 
-	if (pdev_priv_obj->indoor_chan_enabled)
-		return;
+	if (!pdev_priv_obj->indoor_chan_enabled) {
+		for (chan_enum = 0; chan_enum < NUM_CHANNELS; chan_enum++) {
+			if (REGULATORY_CHAN_INDOOR_ONLY &
+			    chan_list[chan_enum].chan_flags) {
+				chan_list[chan_enum].state =
+					CHANNEL_STATE_DFS;
+				chan_list[chan_enum].chan_flags |=
+					REGULATORY_CHAN_NO_IR;
+			}
+		}
+	}
 
-	if (!pdev_priv_obj->force_ssc_disable_indoor_channel) {
+	if (pdev_priv_obj->force_ssc_disable_indoor_channel &&
+	    pdev_priv_obj->sap_state) {
 		for (chan_enum = 0; chan_enum < NUM_CHANNELS; chan_enum++) {
 			if (REGULATORY_CHAN_INDOOR_ONLY &
 			    chan_list[chan_enum].chan_flags) {
@@ -2184,30 +2202,6 @@ static void reg_modify_chan_list_for_indoor_channels(
 					CHANNEL_STATE_DISABLE;
 				chan_list[chan_enum].chan_flags |=
 					REGULATORY_CHAN_DISABLED;
-			}
-		}
-	} else {
-
-		for (chan_enum = 0; chan_enum < NUM_CHANNELS; chan_enum++) {
-
-			if (pdev_priv_obj->sap_state) {
-
-				if (REGULATORY_CHAN_INDOOR_ONLY &
-					chan_list[chan_enum].chan_flags) {
-					chan_list[chan_enum].state =
-						CHANNEL_STATE_DISABLE;
-					chan_list[chan_enum].chan_flags |=
-						REGULATORY_CHAN_DISABLED;
-				}
-			} else {
-
-				if (REGULATORY_CHAN_INDOOR_ONLY &
-					chan_list[chan_enum].chan_flags) {
-					chan_list[chan_enum].state =
-						CHANNEL_STATE_DFS;
-					chan_list[chan_enum].chan_flags |=
-						REGULATORY_CHAN_NO_IR;
-				}
 			}
 		}
 	}
@@ -2279,13 +2273,13 @@ static void reg_modify_chan_list_for_fcc_channel(struct regulatory_channel
 	if (set_fcc_channel) {
 		for (chan_enum = 0; chan_enum < NUM_CHANNELS; chan_enum++) {
 			if (chan_list[chan_enum].center_freq ==
-			    REG_CHAN_12_CENT_FREQ)
+			    CHAN_12_CENT_FREQ)
 				chan_list[chan_enum].tx_power =
-					REG_MAX_PWR_FCC_CHAN_12;
+					MAX_PWR_FCC_CHAN_12;
 			if (chan_list[chan_enum].center_freq ==
-			    REG_CHAN_13_CENT_FREQ)
+			    CHAN_13_CENT_FREQ)
 				chan_list[chan_enum].tx_power =
-					REG_MAX_PWR_FCC_CHAN_13;
+					MAX_PWR_FCC_CHAN_13;
 		}
 	}
 }
@@ -2839,9 +2833,15 @@ static QDF_STATUS reg_send_11d_msg_cbk(struct scheduler_msg *msg)
 		wlan_objmgr_psoc_get_comp_private_obj(psoc,
 					 WLAN_UMAC_COMP_REGULATORY);
 
-	if (NULL == psoc_priv_obj) {
+	if (!psoc_priv_obj) {
 		reg_err("psoc priv obj is NULL");
-		return QDF_STATUS_E_FAILURE;
+		goto end;
+	}
+
+	if (psoc_priv_obj->vdev_id_for_11d_scan == INVALID_VDEV_ID) {
+		psoc_priv_obj->enable_11d_supp = false;
+		reg_err("No valid vdev for 11d scan command");
+		goto end;
 	}
 
 	if (psoc_priv_obj->enable_11d_supp) {
@@ -2856,6 +2856,7 @@ static QDF_STATUS reg_send_11d_msg_cbk(struct scheduler_msg *msg)
 		tx_ops->stop_11d_scan(psoc, &stop_req);
 	}
 
+end:
 	wlan_objmgr_psoc_release_ref(psoc, WLAN_REGULATORY_SB_ID);
 	return QDF_STATUS_SUCCESS;
 }
@@ -2995,8 +2996,14 @@ static void reg_run_11d_state_machine(struct wlan_objmgr_psoc *psoc)
 
 	psoc_priv_obj = wlan_objmgr_psoc_get_comp_private_obj(psoc,
 						 WLAN_UMAC_COMP_REGULATORY);
-	if (NULL == psoc_priv_obj) {
+	if (!psoc_priv_obj) {
 		reg_err("reg psoc private obj is NULL");
+		return;
+	}
+
+	if (psoc_priv_obj->vdev_id_for_11d_scan == INVALID_VDEV_ID) {
+		psoc_priv_obj->enable_11d_supp = false;
+		reg_err("No valid vdev for 11d scan command");
 		return;
 	}
 
@@ -3178,7 +3185,6 @@ QDF_STATUS reg_process_master_chan_list(struct cur_regulatory_info
 	}
 
 	reg_debug("process reg master chan list");
-
 
 	if (soc_reg->offload_enabled) {
 		dbg_id = WLAN_REGULATORY_NB_ID;
@@ -3395,6 +3401,7 @@ QDF_STATUS wlan_regulatory_psoc_obj_created_notification(
 	soc_reg_obj->force_ssc_disable_indoor_channel = false;
 	soc_reg_obj->master_vdev_cnt = 0;
 	soc_reg_obj->vdev_cnt_11d = 0;
+	soc_reg_obj->vdev_id_for_11d_scan = INVALID_VDEV_ID;
 	soc_reg_obj->restart_beaconing = CH_AVOID_RULE_RESTART;
 	soc_reg_obj->enable_srd_chan_in_master_mode = false;
 	soc_reg_obj->enable_11d_in_world_mode = false;
@@ -3696,19 +3703,6 @@ QDF_STATUS reg_set_fcc_constraint(struct wlan_objmgr_pdev *pdev,
 	status = reg_send_scheduler_msg_sb(psoc, pdev);
 
 	return status;
-}
-
-bool reg_get_fcc_constraint(struct wlan_objmgr_pdev *pdev)
-{
-	struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj;
-
-	pdev_priv_obj = reg_get_pdev_obj(pdev);
-	if (!IS_VALID_PDEV_REG_OBJ(pdev_priv_obj)) {
-		reg_err("pdev reg component is NULL");
-		return false;
-	}
-
-	return pdev_priv_obj->set_fcc_channel;
 }
 
 QDF_STATUS reg_enable_dfs_channels(struct wlan_objmgr_pdev *pdev,
@@ -4019,9 +4013,14 @@ QDF_STATUS reg_11d_vdev_delete_update(struct wlan_objmgr_vdev *vdev)
 			}
 		}
 
-		if ((psoc_priv_obj->vdev_id_for_11d_scan != vdev_id) ||
-				!psoc_priv_obj->vdev_cnt_11d)
+		if (psoc_priv_obj->vdev_id_for_11d_scan != vdev_id)
 			return QDF_STATUS_SUCCESS;
+
+		if (!psoc_priv_obj->vdev_cnt_11d) {
+			psoc_priv_obj->vdev_id_for_11d_scan = INVALID_VDEV_ID;
+			psoc_priv_obj->enable_11d_supp = false;
+			return QDF_STATUS_SUCCESS;
+		}
 
 		for (i = 0; i < MAX_STA_VDEV_CNT; i++) {
 			if (psoc_priv_obj->vdev_ids_11d[i] ==
@@ -4491,7 +4490,7 @@ QDF_STATUS reg_program_chan_list(struct wlan_objmgr_pdev *pdev,
 		tx_ops = reg_get_psoc_tx_ops(psoc);
 		if (tx_ops->set_user_country_code) {
 			soc_reg->new_init_ctry_pending[pdev_id] = true;
- 			return tx_ops->set_user_country_code(psoc, pdev_id, rd);
+			return tx_ops->set_user_country_code(psoc, pdev_id, rd);
 		}
 
 		return QDF_STATUS_E_FAILURE;
@@ -4781,6 +4780,8 @@ QDF_STATUS reg_save_new_11d_country(struct wlan_objmgr_psoc *psoc,
 				    uint8_t *country)
 {
 	struct wlan_regulatory_psoc_priv_obj *psoc_priv_obj;
+	struct wlan_lmac_if_reg_tx_ops *tx_ops;
+	struct set_country country_code;
 	uint8_t pdev_id;
 
 	psoc_priv_obj = wlan_objmgr_psoc_get_comp_private_obj(psoc,
@@ -4794,6 +4795,19 @@ QDF_STATUS reg_save_new_11d_country(struct wlan_objmgr_psoc *psoc,
 
 	pdev_id = psoc_priv_obj->def_pdev_id;
 	psoc_priv_obj->new_11d_ctry_pending[pdev_id] = true;
+	qdf_mem_copy(country_code.country, country, REG_ALPHA2_LEN + 1);
+	country_code.pdev_id = pdev_id;
+
+	if (psoc_priv_obj->offload_enabled) {
+		tx_ops = reg_get_psoc_tx_ops(psoc);
+		if (tx_ops->set_country_code) {
+			tx_ops->set_country_code(psoc, &country_code);
+		} else {
+			reg_err("country set handler is not present");
+			psoc_priv_obj->new_11d_ctry_pending[pdev_id] = false;
+			return QDF_STATUS_E_FAULT;
+		}
+	}
 
 	return QDF_STATUS_SUCCESS;
 }

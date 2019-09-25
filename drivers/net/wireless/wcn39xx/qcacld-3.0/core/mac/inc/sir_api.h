@@ -200,6 +200,20 @@ struct rsn_caps {
 	uint16_t Reserved:8;
 };
 
+/**
+ * struct wlan_mlme_chain_cfg - Chain info related structure
+ * @max_tx_chains_2g: max tx chains supported in 2.4ghz band
+ * @max_rx_chains_2g: max rx chains supported in 2.4ghz band
+ * @max_tx_chains_5g: max tx chains supported in 5ghz band
+ * @max_rx_chains_5g: max rx chains supported in 5ghz band
+ */
+struct wlan_mlme_chain_cfg {
+	uint8_t max_tx_chains_2g;
+	uint8_t max_rx_chains_2g;
+	uint8_t max_tx_chains_5g;
+	uint8_t max_rx_chains_5g;
+};
+
 /* / Result codes Firmware return to Host SW */
 typedef enum eSirResultCodes {
 	eSIR_SME_SUCCESS,
@@ -1113,6 +1127,7 @@ typedef struct sSirSmeJoinRsp {
 	uint32_t assocReqLength;
 	uint32_t assocRspLength;
 	uint32_t parsedRicRspLen;
+	uint8_t uapsd_mask;
 #ifdef FEATURE_WLAN_ESE
 	uint32_t tspecIeLen;
 #endif
@@ -1227,6 +1242,8 @@ typedef struct sSirSmeAssocInd {
 	uint8_t ecsa_capable;
 	tDot11fIEHTCaps HTCaps;
 	tDot11fIEVHTCaps VHTCaps;
+	bool he_caps_present;
+	tSirMacCapabilityInfo capability_info;
 } tSirSmeAssocInd, *tpSirSmeAssocInd;
 
 /* / Definition for Association confirm */
@@ -2411,7 +2428,7 @@ typedef struct sSirUpdateAPWPARSNIEsReq {
 #define SIR_ROAM_SCAN_RESERVED_BYTES     61
 
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
-#define SIR_ROAM_SCAN_PSK_SIZE    32
+#define SIR_ROAM_SCAN_PSK_SIZE    48
 #define SIR_ROAM_R0KH_ID_MAX_LEN  48
 #endif
 /* SME -> HAL - This is the host offload request. */
@@ -2485,6 +2502,21 @@ struct sir_sme_mgmt_frame_cb_req {
 	uint16_t message_type;
 	uint16_t length;
 	sir_mgmt_frame_ind_callback callback;
+};
+
+typedef void (*sir_purge_pdev_cmd_cb)(hdd_handle_t hdd_ctx);
+/**
+ * struct sir_purge_pdev_cmd_req - Register a
+ * management frame callback req
+ *
+ * @message_type: message id
+ * @length: msg length
+ * @purge_complete_cb: callback for pdev purge cmd complete
+ */
+struct sir_purge_pdev_cmd_req {
+	uint16_t message_type;
+	uint16_t length;
+	sir_purge_pdev_cmd_cb purge_complete_cb;
 };
 
 #ifdef WLAN_FEATURE_11W
@@ -2775,6 +2807,8 @@ struct sir_score_config {
 	uint32_t bandwidth_weight_per_index;
 	uint32_t nss_weight_per_index;
 	uint32_t band_weight_per_index;
+	uint32_t roam_score_delta;
+	uint32_t roam_score_delta_bitmap;
 };
 
 /**
@@ -2895,11 +2929,17 @@ typedef struct sSirRoamOffloadScanReq {
 	uint32_t btm_solicited_timeout;
 	uint32_t btm_max_attempt_cnt;
 	uint32_t btm_sticky_time;
+	uint32_t rct_validity_timer;
+	uint32_t disassoc_timer_threshold;
 	struct wmi_11k_offload_params offload_11k_params;
 	uint32_t ho_delay_for_rx;
 	uint32_t min_delay_btw_roam_scans;
 	uint32_t roam_trigger_reason_bitmask;
 	bool roam_force_rssi_trigger;
+	/* bss load triggered roam related params */
+	bool bss_load_trig_enabled;
+	struct wmi_bss_load_config bss_load_config;
+	bool roaming_scan_policy;
 } tSirRoamOffloadScanReq, *tpSirRoamOffloadScanReq;
 
 typedef struct sSirRoamOffloadScanRsp {
@@ -3155,7 +3195,7 @@ typedef struct sSirTdlsAddStaReq {
 	uint8_t supported_rates_length;
 	uint8_t supported_rates[SIR_MAC_MAX_SUPP_RATES];
 	uint8_t htcap_present;
-	tSirHTCap htCap;
+	struct htcap_cmn_ie htCap;
 	uint8_t vhtcap_present;
 	tSirVHTCap vhtCap;
 	uint8_t uapsd_queues;
@@ -4468,6 +4508,26 @@ struct power_stats_response {
 };
 #endif
 
+#ifdef WLAN_FEATURE_BEACON_RECEPTION_STATS
+#define MAX_BCNMISS_BITMAP 8
+/**
+ * struct bcn_reception_stats_rsp - beacon stats response
+ * @total_bcn_cnt: total beacon count (tbtt instances)
+ * @total_bmiss_cnt: Total beacon miss count in last 255 beacons, max 255
+ * @bmiss_bitmap: This bitmap indicates the status of the last 255 beacons.
+ * If a bit is set, that means the corresponding beacon was missed.
+ * Bit 0 of bmiss_bitmap[0] represents the most recent beacon.
+ * The total_bcn_cnt field indicates how many bits within bmiss_bitmap
+ * are valid.
+ */
+struct bcn_reception_stats_rsp {
+	uint32_t vdev_id;
+	uint32_t total_bcn_cnt;
+	uint32_t total_bmiss_cnt;
+	uint32_t bmiss_bitmap[MAX_BCNMISS_BITMAP];
+};
+#endif
+
 /**
  * struct lfr_firmware_status - LFR status in firmware
  * @is_disabled: Is LFR disabled in FW
@@ -4880,9 +4940,9 @@ struct sir_wifi_peer_signal_stats {
 	/* Background noise */
 	int32_t nf[WIFI_MAX_CHAINS];
 
-	int32_t per_ant_rx_mpdus[WIFI_MAX_CHAINS];
-	int32_t per_ant_tx_mpdus[WIFI_MAX_CHAINS];
-	int32_t num_chain;
+	uint32_t per_ant_rx_mpdus[WIFI_MAX_CHAINS];
+	uint32_t per_ant_tx_mpdus[WIFI_MAX_CHAINS];
+	uint32_t num_chain;
 };
 
 #define WIFI_VDEV_NUM           4
@@ -5547,222 +5607,10 @@ struct sir_bcn_update_rsp {
 	QDF_STATUS status;
 };
 
-/**
- * OCB structures
- */
-
-#define NUM_AC			(4)
-#define OCB_CHANNEL_MAX	(5)
-
 struct sir_qos_params {
 	uint8_t aifsn;
 	uint8_t cwmin;
 	uint8_t cwmax;
-};
-
-/**
- * struct sir_ocb_set_config_response
- * @status: response status
- */
-struct sir_ocb_set_config_response {
-	uint8_t status;
-};
-
-/** Callback for the dcc_stats_event */
-typedef void (*dcc_stats_event_callback_t)(void *hdd_ctx, uint32_t vdev_id,
-	uint32_t num_channels, uint32_t stats_per_channel_array_len,
-	const void *stats_per_channel_array);
-
-/**
- * struct sir_ocb_config_channel
- * @chan_freq: frequency of the channel
- * @bandwidth: bandwidth of the channel, either 10 or 20 MHz
- * @mac_address: MAC address assigned to this channel
- * @qos_params: QoS parameters
- * @max_pwr: maximum transmit power of the channel (dBm)
- * @min_pwr: minimum transmit power of the channel (dBm)
- * @reg_pwr: maximum transmit power specified by the regulatory domain (dBm)
- * @antenna_max: maximum antenna gain specified by the regulatory domain (dB)
- */
-struct sir_ocb_config_channel {
-	uint32_t chan_freq;
-	uint32_t bandwidth;
-	struct qdf_mac_addr mac_address;
-	struct sir_qos_params qos_params[MAX_NUM_AC];
-	uint32_t max_pwr;
-	uint32_t min_pwr;
-	uint8_t reg_pwr;
-	uint8_t antenna_max;
-	uint16_t flags;
-};
-
-/**
- * OCB_CHANNEL_FLAG_NO_RX_HDR - Don't add the RX stats header to packets
- *      received on this channel.
- */
-#define OCB_CHANNEL_FLAG_DISABLE_RX_STATS_HDR	(1 << 0)
-
-/**
- * struct sir_ocb_config_sched
- * @chan_freq: frequency of the channel
- * @total_duration: duration of the schedule
- * @guard_interval: guard interval on the start of the schedule
- */
-struct sir_ocb_config_sched {
-	uint32_t chan_freq;
-	uint32_t total_duration;
-	uint32_t guard_interval;
-};
-
-/**
- * struct sir_ocb_config
- * @session_id: session id
- * @channel_count: number of channels
- * @schedule_size: size of the channel schedule
- * @flags: reserved
- * @channels: array of OCB channels
- * @schedule: array of OCB schedule elements
- * @dcc_ndl_chan_list_len: size of the ndl_chan array
- * @dcc_ndl_chan_list: array of dcc channel info
- * @dcc_ndl_active_state_list_len: size of the active state array
- * @dcc_ndl_active_state_list: array of active states
- * @adapter: the OCB adapter
- * @dcc_stats_callback: callback for the response event
- */
-struct sir_ocb_config {
-	uint8_t session_id;
-	uint32_t channel_count;
-	uint32_t schedule_size;
-	uint32_t flags;
-	struct sir_ocb_config_channel *channels;
-	struct sir_ocb_config_sched *schedule;
-	uint32_t dcc_ndl_chan_list_len;
-	void *dcc_ndl_chan_list;
-	uint32_t dcc_ndl_active_state_list_len;
-	void *dcc_ndl_active_state_list;
-};
-
-/* The size of the utc time in bytes. */
-#define SIZE_UTC_TIME (10)
-/* The size of the utc time error in bytes. */
-#define SIZE_UTC_TIME_ERROR (5)
-
-/**
- * struct sir_ocb_utc
- * @vdev_id: session id
- * @utc_time: number of nanoseconds from Jan 1st 1958
- * @time_error: the error in the UTC time. All 1's for unknown
- */
-struct sir_ocb_utc {
-	uint32_t vdev_id;
-	uint8_t utc_time[SIZE_UTC_TIME];
-	uint8_t time_error[SIZE_UTC_TIME_ERROR];
-};
-
-/**
- * struct sir_ocb_timing_advert
- * @vdev_id: session id
- * @chan_freq: frequency on which to advertise
- * @repeat_rate: the number of times it will send TA in 5 seconds
- * @timestamp_offset: offset of the timestamp field in the TA frame
- * @time_value_offset: offset of the time_value field in the TA frame
- * @template_length: size in bytes of the TA frame
- * @template_value: the TA frame
- */
-struct sir_ocb_timing_advert {
-	uint32_t vdev_id;
-	uint32_t chan_freq;
-	uint32_t repeat_rate;
-	uint32_t timestamp_offset;
-	uint32_t time_value_offset;
-	uint32_t template_length;
-	uint8_t *template_value;
-};
-
-/**
- * struct sir_ocb_get_tsf_timer_response
- * @vdev_id: session id
- * @timer_high: higher 32-bits of the timer
- * @timer_low: lower 32-bits of the timer
- */
-struct sir_ocb_get_tsf_timer_response {
-	uint32_t vdev_id;
-	uint32_t timer_high;
-	uint32_t timer_low;
-};
-
-/**
- * struct sir_ocb_get_tsf_timer
- * @vdev_id: session id
- */
-struct sir_ocb_get_tsf_timer {
-	uint32_t vdev_id;
-};
-
-/**
- * struct sir_dcc_get_stats_response
- * @vdev_id: session id
- * @num_channels: number of dcc channels
- * @channel_stats_array_len: size in bytes of the stats array
- * @channel_stats_array: the stats array
- */
-struct sir_dcc_get_stats_response {
-	uint32_t vdev_id;
-	uint32_t num_channels;
-	uint32_t channel_stats_array_len;
-	void *channel_stats_array;
-};
-
-/**
- * struct sir_dcc_get_stats
- * @vdev_id: session id
- * @channel_count: number of dcc channels
- * @request_array_len: size in bytes of the request array
- * @request_array: the request array
- */
-struct sir_dcc_get_stats {
-	uint32_t vdev_id;
-	uint32_t channel_count;
-	uint32_t request_array_len;
-	void *request_array;
-};
-
-/**
- * struct sir_dcc_clear_stats
- * @vdev_id: session id
- * @dcc_stats_bitmap: bitmap of clear option
- */
-struct sir_dcc_clear_stats {
-	uint32_t vdev_id;
-	uint32_t dcc_stats_bitmap;
-};
-
-/**
- * struct sir_dcc_update_ndl_response
- * @vdev_id: session id
- * @status: response status
- */
-struct sir_dcc_update_ndl_response {
-	uint32_t vdev_id;
-	uint32_t status;
-};
-
-/**
- * struct sir_dcc_update_ndl
- * @vdev_id: session id
- * @channel_count: number of channels to be updated
- * @dcc_ndl_chan_list_len: size in bytes of the ndl_chan array
- * @dcc_ndl_chan_list: the ndl_chan array
- * @dcc_ndl_active_state_list_len: size in bytes of the active_state array
- * @dcc_ndl_active_state_list: the active state array
- */
-struct sir_dcc_update_ndl {
-	uint32_t vdev_id;
-	uint32_t channel_count;
-	uint32_t dcc_ndl_chan_list_len;
-	void *dcc_ndl_chan_list;
-	uint32_t dcc_ndl_active_state_list_len;
-	void *dcc_ndl_active_state_list;
 };
 
 /**
@@ -7194,12 +7042,14 @@ struct sir_rssi_disallow_lst {
  * struct chain_rssi_result - chain rssi result
  * num_chains_valid: valid chain num
  * @chain_rssi: chain rssi result as dBm unit
+ * @chain_evm: error vector magnitude
  * @ant_id: antenna id
  */
 #define CHAIN_MAX_NUM 8
 struct chain_rssi_result {
 	uint32_t num_chains_valid;
 	uint32_t chain_rssi[CHAIN_MAX_NUM];
+	int32_t chain_evm[CHAIN_MAX_NUM];
 	uint32_t ant_id[CHAIN_MAX_NUM];
 };
 

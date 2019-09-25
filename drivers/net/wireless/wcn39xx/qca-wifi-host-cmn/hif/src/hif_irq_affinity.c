@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -192,6 +192,8 @@ int hif_exec_event(struct hif_opaque_softc *hif_ctx, enum qca_napi_event event,
 	}
 	case NAPI_EVT_USR_NORMAL: {
 		NAPI_DEBUG("%s: User forced DE-SERIALIZATION", __func__);
+		if (!napid->user_cpu_affin_mask)
+			blacklist_pending = BLACKLIST_OFF_PENDING;
 		/*
 		 * Deserialization timeout is handled at hdd layer;
 		 * just mark current mode to uninitialized to ensure
@@ -249,7 +251,7 @@ static int hncm_exec_migrate_to(struct qca_napi_data *napid, uint8_t ctx_id,
 	int rc = 0;
 	int status = 0;
 	int ind;
-	
+
 	NAPI_DEBUG("-->%s(napi_cd=%d, didx=%d)", __func__, napi_ce, didx);
 
 	exec_ctx = hif_exec_get_ctx(&napid->hif_softc->osc, ctx_id);

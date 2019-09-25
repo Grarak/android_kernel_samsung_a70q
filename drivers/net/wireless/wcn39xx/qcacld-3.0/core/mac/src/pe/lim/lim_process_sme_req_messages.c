@@ -58,9 +58,6 @@
 #include "lim_process_fils.h"
 #include "wlan_utility.h"
 
-#include <reg_services_public_struct.h>
-#include <wlan_reg_services_api.h>
-
 /*
  * This overhead is time for sending NOA start to host in case of GO/sending
  * NULL data & receiving ACK in case of P2P Client and starting actual scanning
@@ -1192,7 +1189,6 @@ __lim_process_sme_join_req(tpAniSirGlobal mac_ctx, uint32_t *msg_buf)
 	uint16_t ie_len;
 	const uint8_t *vendor_ie;
 	tSirBssDescription *bss_desc;
-	struct lim_max_tx_pwr_attr tx_pwr_attr = {0};
 
 	if (!mac_ctx || !msg_buf) {
 		QDF_TRACE(QDF_MODULE_ID_PE, QDF_TRACE_LEVEL_ERROR,
@@ -1582,14 +1578,9 @@ __lim_process_sme_join_req(tpAniSirGlobal mac_ctx, uint32_t *msg_buf)
 			&session->gLimCurrentBssUapsd,
 			&local_power_constraint, session);
 
-		tx_pwr_attr.reg_max = reg_max;
-		tx_pwr_attr.ap_tx_power = local_power_constraint;
-		tx_pwr_attr.ini_tx_power =
-				mac_ctx->roam.configParam.nTxPowerCap;
-		tx_pwr_attr.op_ch = session->currentOperChannel;
-
-		session->maxTxPower = lim_get_max_tx_power(mac_ctx,
-							   tx_pwr_attr);
+		session->maxTxPower = lim_get_max_tx_power(reg_max,
+					local_power_constraint,
+					mac_ctx->roam.configParam.nTxPowerCap);
 		session->def_max_tx_pwr = session->maxTxPower;
 
 		pe_debug("Reg max %d local power con %d max tx pwr %d",
@@ -1691,23 +1682,17 @@ end:
 		sme_transaction_id);
 }
 
-uint8_t lim_get_max_tx_power(tpAniSirGlobal mac,
-			     struct lim_max_tx_pwr_attr attr)
+uint8_t lim_get_max_tx_power(int8_t regMax, int8_t apTxPower,
+			     uint8_t iniTxPower)
 {
 	uint8_t maxTxPower = 0;
-	uint8_t min_tx_power = MIN_TX_PWR_CAP;
-	uint8_t txPower = QDF_MIN(attr.reg_max, attr.ap_tx_power);
-	bool fcc_constraint = wlan_reg_get_fcc_constraint(mac->pdev);
-	uint32_t freq = wlan_reg_chan_to_freq(mac->pdev, attr.op_ch);
+	uint8_t txPower = QDF_MIN(regMax, (apTxPower));
 
-	if (fcc_constraint && freq == REG_CHAN_13_CENT_FREQ)
-		min_tx_power = REG_MAX_PWR_FCC_CHAN_13;
-
-	txPower = QDF_MIN(txPower, attr.ini_tx_power);
-	if ((txPower >= min_tx_power) && (txPower <= MAX_TX_PWR_CAP))
+	txPower = QDF_MIN(txPower, iniTxPower);
+	if ((txPower >= MIN_TX_PWR_CAP) && (txPower <= MAX_TX_PWR_CAP))
 		maxTxPower = txPower;
-	else if (txPower < min_tx_power)
-		maxTxPower = min_tx_power;
+	else if (txPower < MIN_TX_PWR_CAP)
+		maxTxPower = MIN_TX_PWR_CAP;
 	else
 		maxTxPower = MAX_TX_PWR_CAP;
 
@@ -2628,6 +2613,7 @@ __lim_process_sme_set_context_req(tpAniSirGlobal mac_ctx, uint32_t *msg_buf)
 	}
 	qdf_mem_copy(set_context_req, msg_buf,
 			sizeof(struct sSirSmeSetContextReq));
+	qdf_mem_zero(msg_buf, sizeof(struct sSirSmeSetContextReq));
 	sme_session_id = set_context_req->sessionId;
 	sme_transaction_id = set_context_req->transactionId;
 
@@ -2735,6 +2721,7 @@ __lim_process_sme_set_context_req(tpAniSirGlobal mac_ctx, uint32_t *msg_buf)
 				sme_transaction_id);
 	}
 end:
+	qdf_mem_zero(set_context_req, sizeof(struct sSirSmeSetContextReq));
 	qdf_mem_free(set_context_req);
 	return;
 }
@@ -4639,8 +4626,10 @@ bool lim_process_sme_req_messages(tpAniSirGlobal pMac,
 		break;
 
 	case eWNI_SME_ASSOC_CNF:
+#ifdef WLAN_DEBUG
 		if (pMsg->type == eWNI_SME_ASSOC_CNF)
 			pe_debug("Received ASSOC_CNF message");
+#endif
 			__lim_process_sme_assoc_cnf_new(pMac, pMsg->type,
 							pMsgBuf);
 		break;
@@ -6138,3 +6127,103 @@ void lim_process_obss_color_collision_info(tpAniSirGlobal mac_ctx,
 	}
 }
 #endif
+
+void lim_remove_duplicate_bssid_node(struct sir_rssi_disallow_lst *entry,
+				     qdf_list_t *list)
+{
+	qdf_list_node_t *cur_list = NULL;
+	qdf_list_node_t *next_list = NULL;
+	struct sir_rssi_disallow_lst *cur_entry;
+	QDF_STATUS status;
+
+	qdf_list_peek_front(list, &cur_list);
+	while (cur_list) {
+		qdf_list_peek_next(list, cur_list, &next_list);
+		cur_entry = qdf_container_of(cur_list,
+					     struct sir_rssi_disallow_lst,
+					     node);
+
+		/*
+		 * Remove the node from blacklisting if the timeout is 0 and
+		 * rssi is 0 dbm i.e btm blacklisted entry
+		 */
+		if ((lim_assoc_rej_get_remaining_delta(cur_entry) == 0) &&
+		    cur_entry->expected_rssi == LIM_MIN_RSSI) {
+			status = qdf_list_remove_node(list, cur_list);
+			if (QDF_IS_STATUS_SUCCESS(status))
+				qdf_mem_free(cur_entry);
+		} else if (qdf_is_macaddr_equal(&entry->bssid,
+						&cur_entry->bssid)) {
+			/*
+			 * Remove the node if we try to add the same bssid again
+			 * Copy the old rssi value alone
+			 */
+			entry->expected_rssi = cur_entry->expected_rssi;
+			status = qdf_list_remove_node(list, cur_list);
+			if (QDF_IS_STATUS_SUCCESS(status)) {
+				qdf_mem_free(cur_entry);
+				break;
+			}
+		}
+		cur_list = next_list;
+		next_list = NULL;
+	}
+}
+
+void lim_add_roam_blacklist_ap(tpAniSirGlobal mac_ctx,
+			       struct roam_blacklist_event *src_lst)
+{
+	uint32_t i;
+	struct sir_rssi_disallow_lst *entry;
+	struct roam_blacklist_timeout *blacklist;
+	QDF_STATUS status = QDF_STATUS_SUCCESS;
+
+	blacklist = &src_lst->roam_blacklist[0];
+	for (i = 0; i < src_lst->num_entries; i++) {
+		entry = qdf_mem_malloc(sizeof(struct sir_rssi_disallow_lst));
+		if (!entry)
+			return;
+
+		qdf_copy_macaddr(&entry->bssid, &blacklist->bssid);
+		entry->retry_delay = blacklist->timeout;
+		entry->time_during_rejection = blacklist->received_time;
+		/* set 0dbm as expected rssi for btm blaclisted entries */
+		entry->expected_rssi = LIM_MIN_RSSI;
+
+		qdf_mutex_acquire(&mac_ctx->roam.rssi_disallow_bssid_lock);
+		lim_remove_duplicate_bssid_node(
+					entry,
+					&mac_ctx->roam.rssi_disallow_bssid);
+
+		if (qdf_list_size(&mac_ctx->roam.rssi_disallow_bssid) >=
+		    MAX_RSSI_AVOID_BSSID_LIST) {
+			status = lim_rem_blacklist_entry_with_lowest_delta(
+					&mac_ctx->roam.rssi_disallow_bssid);
+			if (QDF_IS_STATUS_ERROR(status)) {
+				qdf_mutex_release(&mac_ctx->roam.
+					rssi_disallow_bssid_lock);
+				pe_err("Failed to remove entry with lowest delta");
+				qdf_mem_free(entry);
+				return;
+			}
+		}
+
+		if (QDF_IS_STATUS_SUCCESS(status)) {
+			status = qdf_list_insert_back(
+					&mac_ctx->roam.rssi_disallow_bssid,
+					&entry->node);
+			if (QDF_IS_STATUS_ERROR(status)) {
+				qdf_mutex_release(&mac_ctx->roam.
+					rssi_disallow_bssid_lock);
+				pe_err("Failed to enqueue bssid: %pM",
+				       entry->bssid.bytes);
+				qdf_mem_free(entry);
+				return;
+			}
+			pe_debug("Added BTM blacklisted bssid: %pM",
+				 entry->bssid.bytes);
+		}
+		qdf_mutex_release(&mac_ctx->roam.rssi_disallow_bssid_lock);
+		blacklist++;
+	}
+}
