@@ -7604,8 +7604,13 @@ static const struct hdd_drv_cmd hdd_drv_cmds[] = {
 	{"CHANNEL_SWITCH",            drv_cmd_set_channel_switch, true},
 	{"SETANTENNAMODE",            drv_cmd_set_antenna_mode, true},
 	{"GETANTENNAMODE",            drv_cmd_get_antenna_mode, false},
+//#ifdef CONFIG_SEC
+	{"SET_INDOOR_CHANNELS",       drv_cmd_set_disable_chan_list, true},
+	{"GET_INDOOR_CHANNELS",       drv_cmd_get_disable_chan_list, false},
+//#else
 	{"SET_DISABLE_CHANNEL_LIST",  drv_cmd_set_disable_chan_list, true},
 	{"GET_DISABLE_CHANNEL_LIST",  drv_cmd_get_disable_chan_list, false},
+//#endif
 	{"STOP",                      drv_cmd_dummy, false},
 	/* Deprecated commands */
 	{"RXFILTER-START",            drv_cmd_dummy, false},
