@@ -3418,6 +3418,14 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 					   timeout_reason);
 		}
 
+		/* Check to change TDLS state in FW
+		 * as connection failed.
+		 */
+		if (roamStatus == eCSR_ROAM_ASSOCIATION_FAILURE ||
+		    roamStatus == eCSR_ROAM_CANCELLED) {
+			ucfg_tdls_notify_connect_failure(hdd_ctx->psoc);
+		}
+
 		/*
 		 * Set connection state to eConnectionState_NotConnected only
 		 * when CSR has completed operation - with a
@@ -5458,9 +5466,9 @@ int hdd_set_csr_auth_type(struct hdd_adapter *adapter,
 
 	roam_profile = hdd_roam_profile(adapter);
 	roam_profile->AuthType.numEntries = 1;
-	hdd_debug("authType = %d RSNAuthType %d wpa_versions %d",
+	hdd_debug("authType = %d RSNAuthType %d wpa_versions %d key_mgmt: 0x%x",
 		  sta_ctx->conn_info.authType, RSNAuthType,
-		  sta_ctx->wpa_versions);
+		  sta_ctx->wpa_versions, key_mgmt);
 
 	switch (sta_ctx->conn_info.authType) {
 	case eCSR_AUTH_TYPE_OPEN_SYSTEM:
@@ -5555,6 +5563,10 @@ int hdd_set_csr_auth_type(struct hdd_adapter *adapter,
 				/* OWE case */
 				roam_profile->AuthType.authType[0] =
 					eCSR_AUTH_TYPE_OWE;
+			} else if (RSNAuthType == eCSR_AUTH_TYPE_SAE) {
+				/* SAE with open authentication case */
+				roam_profile->AuthType.authType[0] =
+					eCSR_AUTH_TYPE_SAE;
 			} else if ((RSNAuthType ==
 				  eCSR_AUTH_TYPE_SUITEB_EAP_SHA256) &&
 				  ((key_mgmt & HDD_AUTH_KEY_MGMT_802_1X)

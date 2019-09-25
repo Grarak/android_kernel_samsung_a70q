@@ -61,7 +61,7 @@
 
 #include "wlan_hdd_nud_tracking.h"
 
-#ifdef QCA_LL_TX_FLOW_CONTROL_V2
+#if defined(QCA_LL_TX_FLOW_CONTROL_V2) || defined(QCA_LL_PDEV_TX_FLOW_CONTROL)
 /*
  * Mapping Linux AC interpretation to SME AC.
  * Host has 5 tx queues, 4 flow-controlled queues for regular traffic and
@@ -1154,6 +1154,13 @@ static void __hdd_tx_timeout(struct net_device *dev)
 	u64 diff_jiffies;
 	int i = 0;
 
+	hdd_ctx = WLAN_HDD_GET_CTX(adapter);
+
+	if (hdd_ctx->hdd_wlan_suspended) {
+		hdd_debug("Device is suspended, ignore WD timeout");
+		return;
+	}
+
 	TX_TIMEOUT_TRACE(dev, QDF_MODULE_ID_HDD_DATA);
 	DPTRACE(qdf_dp_trace(NULL, QDF_DP_TRACE_HDD_TX_TIMEOUT,
 				QDF_TRACE_DEFAULT_PDEV_ID,
@@ -1174,7 +1181,6 @@ static void __hdd_tx_timeout(struct net_device *dev)
 
 	hdd_info("carrier state: %d", netif_carrier_ok(dev));
 
-	hdd_ctx = WLAN_HDD_GET_CTX(adapter);
 	wlan_hdd_display_netif_queue_history(hdd_ctx,
 					     QDF_STATS_VERBOSITY_LEVEL_HIGH);
 	cdp_dump_flow_pool_info(cds_get_context(QDF_MODULE_ID_SOC));
@@ -1694,7 +1700,37 @@ void hdd_disable_rx_ol_for_low_tput(struct hdd_context *hdd_ctx, bool disable)
 	else
 		qdf_atomic_set(&hdd_ctx->disable_lro_in_low_tput, 0);
 }
+
+/**
+ * hdd_can_handle_receive_offload() - Check for dynamic disablement
+ * @hdd_ctx: hdd context
+ * @skb: pointer to sk_buff which will be processed by Rx OL
+ *
+ * Check for dynamic disablement of Rx offload
+ *
+ * Return: false if we cannot process otherwise true
+ */
+static bool hdd_can_handle_receive_offload(struct hdd_context *hdd_ctx,
+					   struct sk_buff *skb)
+{
+	if (!hdd_ctx->receive_offload_cb)
+		return false;
+
+	if (!QDF_NBUF_CB_RX_TCP_PROTO(skb) ||
+	    qdf_atomic_read(&hdd_ctx->disable_lro_in_concurrency) ||
+	    QDF_NBUF_CB_RX_PEER_CACHED_FRM(skb) ||
+	    qdf_atomic_read(&hdd_ctx->disable_lro_in_low_tput))
+		return false;
+	else
+		return true;
+}
 #else /* RECEIVE_OFFLOAD */
+static bool hdd_can_handle_receive_offload(struct hdd_context *hdd_ctx,
+					   struct sk_buff *skb)
+{
+	return false;
+}
+
 int hdd_rx_ol_init(struct hdd_context *hdd_ctx)
 {
 	hdd_err("Rx_OL, LRO/GRO not supported");
@@ -1728,53 +1764,17 @@ static inline void hdd_tsf_timestamp_rx(struct hdd_context *hdd_ctx,
 }
 #endif
 
-QDF_STATUS hdd_rx_deliver_to_stack(struct hdd_adapter *adapter,
-				   struct sk_buff *skb)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 6, 0))
+static bool hdd_is_gratuitous_arp_unsolicited_na(struct sk_buff *skb)
 {
-	struct hdd_context *hdd_ctx = adapter->hdd_ctx;
-	int status = QDF_STATUS_E_FAILURE;
-	int netif_status;
-	bool skb_receive_offload_ok = false;
-
-	if (QDF_NBUF_CB_RX_TCP_PROTO(skb) &&
-	    !QDF_NBUF_CB_RX_PEER_CACHED_FRM(skb))
-		skb_receive_offload_ok = true;
-
-	if (skb_receive_offload_ok && hdd_ctx->receive_offload_cb)
-		status = hdd_ctx->receive_offload_cb(adapter, skb);
-
-	if (QDF_IS_STATUS_SUCCESS(status)) {
-		adapter->hdd_stats.tx_rx_stats.rx_aggregated++;
-		return status;
-	}
-
-	adapter->hdd_stats.tx_rx_stats.rx_non_aggregated++;
-
-	/* Account for GRO/LRO ineligible packets, mostly UDP */
-	hdd_ctx->no_rx_offload_pkt_cnt++;
-
-	if (qdf_likely(hdd_ctx->enable_rxthread)) {
-		local_bh_disable();
-		netif_status = netif_receive_skb(skb);
-		local_bh_enable();
-	} else if (qdf_unlikely(QDF_NBUF_CB_RX_PEER_CACHED_FRM(skb))) {
-		/*
-		 * Frames before peer is registered to avoid contention with
-		 * NAPI softirq.
-		 * Refer fix:
-		 * qcacld-3.0: Do netif_rx_ni() for frames received before
-		 * peer assoc
-		 */
-		netif_status = netif_rx_ni(skb);
-	} else { /* NAPI Context */
-		netif_status = netif_receive_skb(skb);
-	}
-
-	if (netif_status == NET_RX_SUCCESS)
-		status = QDF_STATUS_SUCCESS;
-
-	return status;
+	return false;
 }
+#else
+static bool hdd_is_gratuitous_arp_unsolicited_na(struct sk_buff *skb)
+{
+	return cfg80211_is_gratuitous_arp_unsolicited_na(skb);
+}
+#endif
 
 /**
  * hdd_rx_packet_cbk() - Receive packet handler
@@ -1792,7 +1792,8 @@ QDF_STATUS hdd_rx_packet_cbk(void *context, qdf_nbuf_t rxBuf)
 {
 	struct hdd_adapter *adapter = NULL;
 	struct hdd_context *hdd_ctx = NULL;
-	QDF_STATUS qdf_status = QDF_STATUS_E_FAILURE;
+	int rxstat = 0;
+	QDF_STATUS rx_ol_status = QDF_STATUS_E_FAILURE;
 	struct sk_buff *skb = NULL;
 	struct sk_buff *next = NULL;
 	struct hdd_station_ctx *sta_ctx = NULL;
@@ -1859,7 +1860,7 @@ QDF_STATUS hdd_rx_packet_cbk(void *context, qdf_nbuf_t rxBuf)
 
 		sta_ctx = WLAN_HDD_GET_STATION_CTX_PTR(adapter);
 		if ((sta_ctx->conn_info.proxyARPService) &&
-		    cfg80211_is_gratuitous_arp_unsolicited_na(skb)) {
+		    hdd_is_gratuitous_arp_unsolicited_na(skb)) {
 			qdf_atomic_inc(&adapter->hdd_stats.tx_rx_stats.
 						rx_usolict_arp_n_mcast_drp);
 			/* Remove SKB from internal tracking table before
@@ -1936,9 +1937,26 @@ QDF_STATUS hdd_rx_packet_cbk(void *context, qdf_nbuf_t rxBuf)
 
 		hdd_tsf_timestamp_rx(hdd_ctx, skb, ktime_to_us(skb->tstamp));
 
-		qdf_status = hdd_rx_deliver_to_stack(adapter, skb);
+		if (hdd_can_handle_receive_offload(hdd_ctx, skb))
+			rx_ol_status = hdd_ctx->receive_offload_cb(adapter,
+								   skb);
 
-		if (QDF_IS_STATUS_SUCCESS(qdf_status)) {
+		if (rx_ol_status != QDF_STATUS_SUCCESS) {
+			/* we should optimize this per packet check, unlikely */
+			/* Account for GRO/LRO ineligible packets, mostly UDP */
+			hdd_ctx->no_rx_offload_pkt_cnt++;
+			if (hdd_napi_enabled(HDD_NAPI_ANY) &&
+			    !hdd_ctx->enable_rxthread &&
+			    !QDF_NBUF_CB_RX_PEER_CACHED_FRM(skb)) {
+				rxstat = netif_receive_skb(skb);
+			} else {
+				local_bh_disable();
+				rxstat = netif_receive_skb(skb);
+				local_bh_enable();
+			}
+		}
+
+		if (!rxstat) {
 			++adapter->hdd_stats.tx_rx_stats.
 						rx_delivered[cpu_index];
 			if (track_arp)

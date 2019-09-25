@@ -41,6 +41,13 @@ enum wlan_frm_fmt {
 	wlan_frm_fmt_802_3,
 };
 
+/* Max throughput */
+#ifdef QCS403_MEM_OPTIMIZE
+#define MAX_THROUGHPUT 400
+#else
+#define MAX_THROUGHPUT 800
+#endif
+
 /* Throttle period Different level Duty Cycle values*/
 #define THROTTLE_DUTY_CYCLE_LEVEL0 (0)
 #define THROTTLE_DUTY_CYCLE_LEVEL1 (50)
@@ -84,7 +91,7 @@ struct txrx_pdev_cfg_t {
 	bool ip_tcp_udp_checksum_offload;
 	bool enable_rxthread;
 	bool ce_classify_enabled;
-#ifdef QCA_LL_TX_FLOW_CONTROL_V2
+#if defined(QCA_LL_TX_FLOW_CONTROL_V2) || defined(QCA_LL_PDEV_TX_FLOW_CONTROL)
 	uint32_t tx_flow_stop_queue_th;
 	uint32_t tx_flow_start_queue_offset;
 #endif
@@ -96,6 +103,7 @@ struct txrx_pdev_cfg_t {
 	bool new_htt_format_enabled;
 };
 
+#if defined(QCA_LL_TX_FLOW_CONTROL_V2) || defined(QCA_LL_PDEV_TX_FLOW_CONTROL)
 /**
  * ol_tx_set_flow_control_parameters() - set flow control parameters
  * @cfg_ctx: cfg context
@@ -103,7 +111,6 @@ struct txrx_pdev_cfg_t {
  *
  * Return: none
  */
-#ifdef QCA_LL_TX_FLOW_CONTROL_V2
 void ol_tx_set_flow_control_parameters(struct cdp_cfg *cfg_ctx,
 				       struct txrx_pdev_cfg_param_t *cfg_param);
 #else
@@ -454,7 +461,7 @@ int ol_cfg_is_ip_tcp_udp_checksum_offload_enabled(struct cdp_cfg *cfg_pdev)
 }
 
 
-#ifdef QCA_LL_TX_FLOW_CONTROL_V2
+#if defined(QCA_LL_TX_FLOW_CONTROL_V2) || defined(QCA_LL_PDEV_TX_FLOW_CONTROL)
 int ol_cfg_get_tx_flow_stop_queue_th(struct cdp_cfg *cfg_pdev);
 
 int ol_cfg_get_tx_flow_start_queue_offset(struct cdp_cfg *cfg_pdev);

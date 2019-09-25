@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -834,6 +834,7 @@ struct roam_synch_frame_ind {
  * @vdev_stop_wakelock: wakelock to protect vdev stop op with firmware
  * @vdev_set_key_wakelock: wakelock to protect vdev set key op with firmware
  * @channel: channel
+ * @roam_offload_enabled: is roam offload enable/disable
  * @roam_scan_stats_req: cached roam scan stats request
  *
  * It stores parameters per vdev in wma.
@@ -870,7 +871,6 @@ struct wma_txrx_node {
 	uint8_t rmfEnabled;
 #ifdef WLAN_FEATURE_11W
 	wma_igtk_key_t key;
-	uint32_t ucast_key_cipher;
 #endif /* WLAN_FEATURE_11W */
 	uint32_t uapsd_cached_val;
 	tAniGetPEStatsRsp *stats_rsp;
@@ -922,6 +922,7 @@ struct wma_txrx_node {
 	qdf_wake_lock_t vdev_set_key_wakelock;
 	struct roam_synch_frame_ind roam_synch_frame_ind;
 	bool is_waiting_for_key;
+	bool roam_offload_enabled;
 	uint8_t channel;
 	struct sir_roam_scan_stats *roam_scan_stats_req;
 };
@@ -1035,7 +1036,6 @@ struct wma_valid_channels {
  * @get_sta_peer_info: Is a "get peer info" request active?
  * @peer_macaddr: When @get_one_peer_info is true, the peer's mac address
  * @thermal_mgmt_info: Thermal mitigation related info
- * @roam_offload_enabled: is roam offload enable/disable
  * @ssdp: ssdp flag
  * @enable_mc_list: To Check if Multicast list filtering is enabled in FW
  * @ibss_started: is IBSS started or not
@@ -1184,7 +1184,6 @@ typedef struct {
 	bool get_sta_peer_info;
 	struct qdf_mac_addr peer_macaddr;
 	t_thermal_mgmt thermal_mgmt_info;
-	bool roam_offload_enabled;
 	bool ssdp;
 	bool enable_mc_list;
 	uint8_t ibss_started;
@@ -1276,6 +1275,7 @@ typedef struct {
 	bool enable_peer_unmap_conf_support;
 	qdf_mc_timer_t wma_fw_time_sync_timer;
 	qdf_atomic_t critical_events_in_flight;
+	bool enable_tx_compl_tsf64;
 } t_wma_handle, *tp_wma_handle;
 
 extern void cds_wma_complete_cback(void);

@@ -23,7 +23,7 @@
 
 unsigned int vow_config;
 
-#ifdef QCA_LL_TX_FLOW_CONTROL_V2
+#if defined(QCA_LL_TX_FLOW_CONTROL_V2) || defined(QCA_LL_PDEV_TX_FLOW_CONTROL)
 /**
  * ol_tx_set_flow_control_parameters() - set flow control parameters
  * @cfg_ctx: cfg context
@@ -113,7 +113,7 @@ struct cdp_cfg *ol_pdev_cfg_attach(qdf_device_t osdev, void *pcfg_param)
 	cfg_ctx->max_vdev = CFG_TGT_NUM_VDEV;
 	cfg_ctx->pn_rx_fwd_check = 1;
 	cfg_ctx->frame_type = wlan_frm_fmt_802_3;
-	cfg_ctx->max_thruput_mbps = 800;
+	cfg_ctx->max_thruput_mbps = MAX_THROUGHPUT;
 	cfg_ctx->max_nbuf_frags = 1;
 	cfg_ctx->vow_config = vow_config;
 	cfg_ctx->target_tx_credit = CFG_TGT_NUM_MSDU_DESC;
@@ -366,7 +366,7 @@ int ol_cfg_is_rx_thread_enabled(struct cdp_cfg *cfg_pdev)
 	return cfg->enable_rxthread;
 }
 
-#ifdef QCA_LL_TX_FLOW_CONTROL_V2
+#if defined(QCA_LL_TX_FLOW_CONTROL_V2) || defined(QCA_LL_PDEV_TX_FLOW_CONTROL)
 /**
  * ol_cfg_get_tx_flow_stop_queue_th() - return stop queue threshold
  * @pdev : handle to the physical device
@@ -392,8 +392,8 @@ int ol_cfg_get_tx_flow_start_queue_offset(struct cdp_cfg *cfg_pdev)
 
 	return cfg->tx_flow_start_queue_offset;
 }
-
 #endif
+
 
 #ifdef IPA_OFFLOAD
 unsigned int ol_cfg_ipa_uc_offload_enabled(struct cdp_cfg *cfg_pdev)

@@ -42,6 +42,7 @@
 #include <wlan_hdd_regulatory.h>
 #include "wlan_ipa_ucfg_api.h"
 #include <wma_types.h>
+#include "wlan_mlme_ucfg_api.h"
 
 /* Preprocessor definitions and constants */
 #undef QCA_HDD_SAP_DUMP_SK_BUFF
@@ -661,6 +662,16 @@ netdev_tx_t hdd_softap_hard_start_xmit(struct sk_buff *skb,
 	return ret;
 }
 
+QDF_STATUS hdd_softap_ipa_start_xmit(qdf_nbuf_t nbuf, qdf_netdev_t dev)
+{
+	if (NETDEV_TX_OK == hdd_softap_hard_start_xmit(
+					(struct sk_buff *)nbuf,
+					(struct net_device *)dev))
+		return QDF_STATUS_SUCCESS;
+	else
+		return QDF_STATUS_E_FAILURE;
+}
+
 static void __hdd_softap_tx_timeout(struct net_device *dev)
 {
 	struct hdd_adapter *adapter = WLAN_HDD_GET_PRIV_PTR(dev);
@@ -826,7 +837,7 @@ static void hdd_softap_notify_tx_compl_cbk(struct sk_buff *skb,
 QDF_STATUS hdd_softap_rx_packet_cbk(void *context, qdf_nbuf_t rx_buf)
 {
 	struct hdd_adapter *adapter = NULL;
-	QDF_STATUS qdf_status;
+	int rxstat;
 	unsigned int cpu_index;
 	struct sk_buff *skb = NULL;
 	struct sk_buff *next = NULL;
@@ -930,9 +941,17 @@ QDF_STATUS hdd_softap_rx_packet_cbk(void *context, qdf_nbuf_t rx_buf)
 		 */
 		qdf_net_buf_debug_release_skb(skb);
 
-		qdf_status = hdd_rx_deliver_to_stack(adapter, skb);
+		if (qdf_likely(hdd_ctx->enable_rxthread)) {
+			local_bh_disable();
+			rxstat = netif_receive_skb(skb);
+			local_bh_enable();
+		} else {
+			rxstat = netif_receive_skb(skb);
+		}
 
-		if (QDF_IS_STATUS_SUCCESS(qdf_status))
+		hdd_ctx->no_rx_offload_pkt_cnt++;
+
+		if (NET_RX_SUCCESS == rxstat)
 			++adapter->hdd_stats.tx_rx_stats.rx_delivered[cpu_index];
 		else
 			++adapter->hdd_stats.tx_rx_stats.rx_refused[cpu_index];
@@ -946,6 +965,7 @@ QDF_STATUS hdd_softap_deregister_sta(struct hdd_adapter *adapter,
 {
 	QDF_STATUS qdf_status = QDF_STATUS_SUCCESS;
 	struct hdd_context *hdd_ctx;
+	tSmeConfigParams *sme_config;
 
 	if (NULL == adapter) {
 		hdd_err("NULL adapter");
@@ -958,6 +978,12 @@ QDF_STATUS hdd_softap_deregister_sta(struct hdd_adapter *adapter,
 	}
 
 	hdd_ctx = WLAN_HDD_GET_CTX(adapter);
+
+	if (sta_id >= WLAN_MAX_STA_COUNT) {
+		hdd_err("Error: Invalid sta_id: %u", sta_id);
+		return QDF_STATUS_E_INVAL;
+	}
+
 	/* Clear station in TL and then update HDD data
 	 * structures. This helps to block RX frames from other
 	 * station to this station.
@@ -988,6 +1014,16 @@ QDF_STATUS hdd_softap_deregister_sta(struct hdd_adapter *adapter,
 	}
 
 	hdd_ctx->sta_to_adapter[sta_id] = NULL;
+	sme_config = qdf_mem_malloc(sizeof(*sme_config));
+
+	if (!sme_config) {
+		hdd_err("Unable to allocate memory for smeconfig!");
+		return 0;
+	}
+	sme_get_config_param(hdd_ctx->mac_handle, sme_config);
+	ucfg_mlme_update_oce_flags(hdd_ctx->pdev,
+				   sme_config->csrConfig.oce_feature_bitmap);
+	qdf_mem_free(sme_config);
 
 	return qdf_status;
 }
@@ -1005,9 +1041,15 @@ QDF_STATUS hdd_softap_register_sta(struct hdd_adapter *adapter,
 	struct ol_txrx_ops txrx_ops;
 	void *soc = cds_get_context(QDF_MODULE_ID_SOC);
 	void *pdev = cds_get_context(QDF_MODULE_ID_TXRX);
+	tSmeConfigParams *sme_config;
 
 	hdd_info("STA:%u, Auth:%u, Priv:%u, WMM:%u",
 		 sta_id, auth_required, privacy_required, wmm_enabled);
+
+	if (sta_id >= WLAN_MAX_STA_COUNT) {
+		hdd_err("Error: Invalid sta_id: %u", sta_id);
+		return qdf_status;
+	}
 
 	/*
 	 * Clean up old entry if it is not cleaned up properly
@@ -1082,7 +1124,16 @@ QDF_STATUS hdd_softap_register_sta(struct hdd_adapter *adapter,
 	wlan_hdd_netif_queue_control(adapter,
 				   WLAN_START_ALL_NETIF_QUEUE_N_CARRIER,
 				   WLAN_CONTROL_PATH);
+	sme_config = qdf_mem_malloc(sizeof(*sme_config));
 
+	if (!sme_config) {
+		hdd_err("Unable to allocate memory for smeconfig!");
+		return 0;
+	}
+	sme_get_config_param(hdd_ctx->mac_handle, sme_config);
+	ucfg_mlme_update_oce_flags(hdd_ctx->pdev,
+				   sme_config->csrConfig.oce_feature_bitmap);
+	qdf_mem_free(sme_config);
 	return qdf_status;
 }
 
@@ -1100,15 +1151,20 @@ QDF_STATUS hdd_softap_register_bc_sta(struct hdd_adapter *adapter,
 	struct hdd_context *hdd_ctx = WLAN_HDD_GET_CTX(adapter);
 	struct qdf_mac_addr broadcastMacAddr = QDF_MAC_ADDR_BCAST_INIT;
 	struct hdd_ap_ctx *ap_ctx;
+	uint8_t sta_id;
 
 	ap_ctx = WLAN_HDD_GET_AP_CTX_PTR(adapter);
+	sta_id = ap_ctx->broadcast_sta_id;
 
-	hdd_ctx->sta_to_adapter[WLAN_RX_BCMC_STA_ID] = adapter;
-	hdd_ctx->sta_to_adapter[ap_ctx->broadcast_sta_id] = adapter;
-	qdf_status =
-		hdd_softap_register_sta(adapter, false, privacy_required,
-					ap_ctx->broadcast_sta_id,
-					&broadcastMacAddr, 0);
+	if (sta_id >= WLAN_MAX_STA_COUNT) {
+		hdd_err("Error: Invalid sta_id: %u", sta_id);
+		return qdf_status;
+	}
+
+	hdd_ctx->sta_to_adapter[sta_id] = adapter;
+	qdf_status = hdd_softap_register_sta(adapter, false,
+					     privacy_required, sta_id,
+					     &broadcastMacAddr, 0);
 
 	return qdf_status;
 }

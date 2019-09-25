@@ -36,17 +36,6 @@
 #define TDLS_PREFERRED_OFF_CHANNEL_NUM_DEFAULT  36
 
 /**
- * tdls_is_vdev_connected() - check the vdev is connected to ap
- * @vdev: vdev object manager
- *
- * This function will check the vdev connection status and return
- * true or false
- *
- * Return: true - Connected, false - Not connected
- */
-bool tdls_is_vdev_connected(struct wlan_objmgr_vdev *vdev);
-
-/**
  * tdls_implicit_enable() - enable implicit tdls triggering
  * @tdls_vdev: TDLS vdev
  *
@@ -163,14 +152,6 @@ void tdls_discovery_timeout_peer_cb(void *user_data);
 void tdls_implicit_disable(struct tdls_vdev_priv_obj *tdls_vdev);
 
 /**
- * tdls_is_vdev_connected() -check the vdev connection
- * @vdev: vdev oobject
- *
- * Return: true or false
- */
-bool tdls_is_vdev_connected(struct wlan_objmgr_vdev *vdev);
-
-/**
  * tdls_is_vdev_authenticated() -check the vdev authentication state
  * @vdev: vdev oobject
  *
@@ -180,11 +161,11 @@ bool tdls_is_vdev_authenticated(struct wlan_objmgr_vdev *vdev);
 
 /**
  * tdls_teardown_connections() -teardown and delete all the tdls peers
- * @vdev: vdev oobject
+ * @psoc: psoc oobject
  *
  * Return: true or false
  */
-void tdls_teardown_connections(struct wlan_objmgr_vdev *vdev);
+void tdls_teardown_connections(struct wlan_objmgr_psoc *psoc);
 
 /**
  * tdls_disable_offchan_and_teardown_links - Disable offchannel

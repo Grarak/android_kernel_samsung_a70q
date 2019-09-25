@@ -311,6 +311,7 @@ QDF_STATUS sap_init_ctx(struct sap_context *sap_ctx,
 		sap_ctx->SSIDList[0].ssidHidden;
 
 	sap_ctx->csr_roamProfile.BSSIDs.numOfBSSIDs = 1; /* This is true for now. */
+	sap_ctx->csa_reason = CSA_REASON_UNKNOWN;
 	sap_ctx->csr_roamProfile.BSSIDs.bssid = &sap_ctx->bssid;
 	sap_ctx->csr_roamProfile.csrPersona = mode;
 	qdf_mem_copy(sap_ctx->self_mac_addr, addr, QDF_MAC_ADDR_SIZE);
@@ -1251,6 +1252,40 @@ wlansap_update_csa_channel_params(struct sap_context *sap_context,
 }
 
 /**
+ * sap_get_csa_reason_str() - Get csa reason in string
+ * @reason: sap reason enum value
+ *
+ * Return: string reason
+ */
+#ifdef WLAN_DEBUG
+static char *sap_get_csa_reason_str(enum sap_csa_reason_code reason)
+{
+	switch (reason) {
+	case CSA_REASON_UNKNOWN:
+		return "UNKNOWN";
+	case CSA_REASON_STA_CONNECT_DFS_TO_NON_DFS:
+		return "STA_CONNECT_DFS_TO_NON_DFS";
+	case CSA_REASON_USER_INITIATED:
+		return "USER_INITIATED";
+	case CSA_REASON_PEER_ACTION_FRAME:
+		return "PEER_ACTION_FRAME";
+	case CSA_REASON_PRE_CAC_SUCCESS:
+		return "PRE_CAC_SUCCESS";
+	case CSA_REASON_CONCURRENT_STA_CHANGED_CHANNEL:
+		return "CONCURRENT_STA_CHANGED_CHANNEL";
+	case CSA_REASON_UNSAFE_CHANNEL:
+		return "UNSAFE_CHANNEL";
+	case CSA_REASON_LTE_COEX:
+		return "LTE_COEX";
+	case CSA_REASON_CONCURRENT_NAN_EVENT:
+		return "CONCURRENT_NAN_EVENT";
+	default:
+		return "UNKNOWN";
+	}
+}
+#endif
+
+/**
  * wlansap_set_channel_change_with_csa() - Set channel change with CSA
  * @sapContext: Pointer to SAP context
  * @targetChannel: Target channel
@@ -1298,10 +1333,12 @@ QDF_STATUS wlansap_set_channel_change_with_csa(struct sap_context *sapContext,
 		return QDF_STATUS_E_FAULT;
 	}
 	QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO,
-		"%s: sap chan:%d target:%d conn on 5GHz:%d",
+		"%s: sap chan:%d target:%d conn on 5GHz:%d, csa_reason:%s(%d)",
 		__func__, sapContext->channel, targetChannel,
 		policy_mgr_is_any_mode_active_on_band_along_with_session(
-			pMac->psoc, sapContext->sessionId, POLICY_MGR_BAND_5));
+			pMac->psoc, sapContext->sessionId, POLICY_MGR_BAND_5),
+			sap_get_csa_reason_str(sapContext->csa_reason),
+			sapContext->csa_reason);
 
 	sta_sap_scc_on_dfs_chan =
 		policy_mgr_is_sta_sap_scc_allowed_on_dfs_chan(pMac->psoc);
@@ -2661,4 +2698,207 @@ void wlansap_cleanup_cac_timer(struct sap_context *sap_ctx)
 		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_ERROR,
 			FL("sapdfs, force cleanup running dfs cac timer"));
 	}
+}
+
+static bool
+wlansap_is_channel_present_in_acs_list(uint8_t ch,
+				       uint8_t *ch_list,
+				       uint8_t ch_count)
+{
+	uint8_t i;
+
+	for (i = 0; i < ch_count; i++) {
+		if (ch_list[i] == ch) {
+			/*
+			 * channel was given by hostpad for ACS, and is present
+			 * in PCL.
+			 */
+			QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_DEBUG,
+				  FL("channel present in acs cfg channel list %d"), ch);
+			return true;
+		}
+	}
+
+	return false;
+}
+
+QDF_STATUS wlansap_filter_ch_based_acs(struct sap_context *sap_ctx,
+				       uint8_t *ch_list,
+				       uint32_t *ch_cnt)
+{
+	size_t ch_index;
+	size_t target_ch_cnt = 0;
+
+	if (!sap_ctx || !ch_list || !ch_cnt || !sap_ctx->acs_cfg->ch_list) {
+		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_ERROR,
+			  FL("NULL parameters"));
+		return QDF_STATUS_E_FAULT;
+	}
+
+	for (ch_index = 0; ch_index < *ch_cnt; ch_index++) {
+		if (wlansap_is_channel_present_in_acs_list(ch_list[ch_index],
+					     sap_ctx->acs_cfg->ch_list,
+					     sap_ctx->acs_cfg->ch_list_count))
+			ch_list[target_ch_cnt++] = ch_list[ch_index];
+	}
+
+	*ch_cnt = target_ch_cnt;
+
+	return QDF_STATUS_SUCCESS;
+}
+
+#if defined(FEATURE_WLAN_CH_AVOID)
+/**
+ * wlansap_get_safe_channel() - Get safe channel from current regulatory
+ * @sap_ctx: Pointer to SAP context
+ *
+ * This function is used to get safe channel from current regulatory valid
+ * channels to restart SAP if failed to get safe channel from PCL.
+ *
+ * Return: Channel number to restart SAP in case of success. In case of any
+ * failure, the channel number returned is zero.
+ */
+static uint8_t
+wlansap_get_safe_channel(struct sap_context *sap_ctx)
+{
+	tHalHandle hal;
+	tpAniSirGlobal mac;
+	struct sir_pcl_list pcl = {0};
+	QDF_STATUS status;
+
+	if (!sap_ctx) {
+		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_ERROR,
+			  FL("NULL parameters"));
+		return INVALID_CHANNEL_ID;
+	}
+
+	hal = CDS_GET_HAL_CB();
+	if (!hal) {
+		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_ERROR,
+			  "%s: Invalid HAL pointer", __func__);
+		return QDF_STATUS_E_FAULT;
+	}
+
+	mac = PMAC_STRUCT(hal);
+
+	/* get the channel list for current domain */
+	status = policy_mgr_get_valid_chans(mac->psoc,
+					    pcl.pcl_list,
+					    &pcl.pcl_len);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_ERROR,
+			  FL("Error in getting valid channels"));
+		return INVALID_CHANNEL_ID;
+	}
+
+	status = wlansap_filter_ch_based_acs(sap_ctx,
+					     pcl.pcl_list,
+					     &pcl.pcl_len);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_ERROR,
+			  FL("failed to filter ch from acs %d"), status);
+		return INVALID_CHANNEL_ID;
+	}
+
+	if (pcl.pcl_len) {
+		status = policy_mgr_get_valid_chans_from_range(mac->psoc,
+							       pcl.pcl_list,
+							       &pcl.pcl_len,
+							       PM_SAP_MODE);
+		if (QDF_IS_STATUS_ERROR(status)) {
+			QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_ERROR,
+				  FL("get valid channel: %d failed"), status);
+			return INVALID_CHANNEL_ID;
+		}
+
+		if (pcl.pcl_len) {
+			QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_DEBUG,
+				  FL("select %d from valid channel list"),
+				  pcl.pcl_list[0]);
+			return pcl.pcl_list[0];
+		}
+	}
+
+	return INVALID_CHANNEL_ID;
+}
+#else
+/**
+ * wlansap_get_safe_channel() - Get safe channel from current regulatory
+ * @sap_ctx: Pointer to SAP context
+ *
+ * This function is used to get safe channel from current regulatory valid
+ * channels to restart SAP if failed to get safe channel from PCL.
+ *
+ * Return: Channel number to restart SAP in case of success. In case of any
+ * failure, the channel number returned is zero.
+ */
+static uint8_t
+wlansap_get_safe_channel(struct sap_context *sap_ctx)
+{
+	return 0;
+}
+#endif
+
+uint8_t
+wlansap_get_safe_channel_from_pcl_and_acs_range(struct sap_context *sap_ctx)
+{
+	tHalHandle hal;
+	tpAniSirGlobal mac;
+	struct sir_pcl_list pcl = {0};
+	QDF_STATUS status;
+
+	if (!sap_ctx) {
+		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_ERROR,
+			  FL("NULL parameter"));
+		return INVALID_CHANNEL_ID;
+	}
+
+	hal = CDS_GET_HAL_CB();
+	if (!hal) {
+		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_ERROR,
+			  "%s: Invalid HAL pointer", __func__);
+		return QDF_STATUS_E_FAULT;
+	}
+
+	mac = PMAC_STRUCT(hal);
+
+	status = policy_mgr_get_pcl_for_existing_conn(
+			mac->psoc, PM_SAP_MODE, pcl.pcl_list, &pcl.pcl_len,
+			pcl.weight_list, QDF_ARRAY_SIZE(pcl.weight_list),
+			false);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_ERROR,
+			  FL("Get PCL failed"));
+		return INVALID_CHANNEL_ID;
+	}
+
+	if (pcl.pcl_len) {
+		status = wlansap_filter_ch_based_acs(sap_ctx,
+						     pcl.pcl_list,
+						     &pcl.pcl_len);
+		if (QDF_IS_STATUS_ERROR(status)) {
+			QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_ERROR,
+				  FL("failed filter ch from acs %d"), status);
+			return INVALID_CHANNEL_ID;
+		}
+
+		if (pcl.pcl_len) {
+			QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_DEBUG,
+				  FL("select %d from valid channel list"),
+				  pcl.pcl_list[0]);
+			return pcl.pcl_list[0];
+		}
+		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_DEBUG,
+			  FL("no safe channel from PCL found in ACS range"));
+	} else {
+		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_DEBUG,
+			  FL("pcl length is zero!"));
+	}
+
+	/*
+	 * In some scenarios, like hw dbs disabled, sap+sap case, if operating
+	 * channel is unsafe channel, the pcl may be empty, instead of return,
+	 * try to choose a safe channel from acs range.
+	 */
+	return wlansap_get_safe_channel(sap_ctx);
 }

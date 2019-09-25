@@ -1271,10 +1271,12 @@ typedef struct tagCsrConfigParam {
 	uint32_t tx_aggr_sw_retry_threshold_bk;
 	uint32_t tx_aggr_sw_retry_threshold_vi;
 	uint32_t tx_aggr_sw_retry_threshold_vo;
+	uint32_t tx_aggr_sw_retry_threshold;
 	uint32_t tx_non_aggr_sw_retry_threshold_be;
 	uint32_t tx_non_aggr_sw_retry_threshold_bk;
 	uint32_t tx_non_aggr_sw_retry_threshold_vi;
 	uint32_t tx_non_aggr_sw_retry_threshold_vo;
+	uint32_t tx_non_aggr_sw_retry_threshold;
 	struct wmi_per_roam_config per_roam_config;
 	bool enable_bcast_probe_rsp;
 	bool is_fils_enabled;
@@ -1462,6 +1464,7 @@ struct csr_roam_info {
 #ifdef WLAN_FEATURE_SAE
 	struct sir_sae_info *sae_info;
 #endif
+	uint16_t roam_reason;
 };
 
 typedef struct tagCsrFreqScanInfo {

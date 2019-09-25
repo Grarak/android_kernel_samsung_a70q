@@ -55,6 +55,7 @@
 #include <wlan_action_oui_public_struct.h>
 #include <wlan_action_oui_ucfg_api.h>
 #include <wlan_utility.h>
+#include "wlan_mlme_main.h"
 
 #define MAX_PWR_FCC_CHAN_12 8
 #define MAX_PWR_FCC_CHAN_13 2
@@ -117,6 +118,11 @@
 /* Static Type declarations */
 static struct csr_roam_session csr_roam_roam_session[CSR_ROAM_SESSION_MAX];
 
+/*
+ * To get roam reason from 0 to 3rd bit of roam_synch_data
+ * received from firmware
+ */
+#define ROAM_REASON_MASK 0x0F
 /**
  * csr_get_ielen_from_bss_description() - to get IE length
  *             from tSirBssDescription structure
@@ -3302,6 +3308,8 @@ QDF_STATUS csr_change_default_config_param(tpAniSirGlobal pMac,
 			pParam->tx_aggr_sw_retry_threshold_vi;
 		pMac->roam.configParam.tx_aggr_sw_retry_threshold_vo =
 			pParam->tx_aggr_sw_retry_threshold_vo;
+		pMac->roam.configParam.tx_aggr_sw_retry_threshold =
+			pParam->tx_aggr_sw_retry_threshold;
 		pMac->roam.configParam.tx_non_aggr_sw_retry_threshold_be =
 			pParam->tx_non_aggr_sw_retry_threshold_be;
 		pMac->roam.configParam.tx_non_aggr_sw_retry_threshold_bk =
@@ -3310,6 +3318,8 @@ QDF_STATUS csr_change_default_config_param(tpAniSirGlobal pMac,
 			pParam->tx_non_aggr_sw_retry_threshold_vi;
 		pMac->roam.configParam.tx_non_aggr_sw_retry_threshold_vo =
 			pParam->tx_non_aggr_sw_retry_threshold_vo;
+		pMac->roam.configParam.tx_non_aggr_sw_retry_threshold =
+			pParam->tx_non_aggr_sw_retry_threshold;
 		pMac->roam.configParam.enable_bcast_probe_rsp =
 			pParam->enable_bcast_probe_rsp;
 		pMac->roam.configParam.is_fils_enabled =
@@ -6629,6 +6639,44 @@ tpAniSirGlobal mac_ctx, tSmeCmd *cmd, struct csr_roam_info *roam_info,
 	return status;
 }
 
+/**
+ * csr_allow_concurrent_sta_connections() - Wrapper for policy_mgr api
+ * @mac: mac context
+ * @vdev_id: vdev id
+ *
+ * This function invokes policy mgr api to check for support of
+ * simultaneous connections on concurrent STA interfaces.
+ *
+ *  Return: If supports return true else false.
+ */
+static
+bool csr_allow_concurrent_sta_connections(tpAniSirGlobal mac,
+					  uint32_t vdev_id)
+{
+	struct wlan_objmgr_vdev *vdev;
+	enum QDF_OPMODE vdev_mode;
+
+	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(mac->psoc, vdev_id,
+						    WLAN_LEGACY_MAC_ID);
+	if (!vdev) {
+		sme_err("vdev object not found for vdev_id %u", vdev_id);
+		return false;
+	}
+	vdev_mode = wlan_vdev_mlme_get_opmode(vdev);
+	wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_MAC_ID);
+
+	/* If vdev mode is STA then proceed further */
+	if (vdev_mode != QDF_STA_MODE)
+		return true;
+
+	if (policy_mgr_allow_concurrency(mac->psoc, PM_STA_MODE, 0,
+					 HW_MODE_20_MHZ))
+		return true;
+
+	return false;
+}
+
+
 QDF_STATUS csr_roam_process_command(tpAniSirGlobal pMac, tSmeCmd *pCommand)
 {
 	struct csr_roam_info roamInfo;
@@ -6742,6 +6790,21 @@ QDF_STATUS csr_roam_process_command(tpAniSirGlobal pMac, tSmeCmd *pCommand)
 		status = csr_roam_issue_ft_preauth_req(pMac, sessionId,
 				pCommand->u.roamCmd.pLastRoamBss);
 		break;
+
+	case eCsrHddIssued:
+		/*
+		 * Check for simultaneous connection support on
+		 * multiple STA interfaces.
+		 */
+		if (!csr_allow_concurrent_sta_connections(pMac, sessionId)) {
+			sme_err("No support of conc STA con");
+			csr_roam_complete(pMac, eCsrNothingToJoin, NULL,
+					  sessionId);
+			status = QDF_STATUS_E_FAILURE;
+			break;
+		}
+		/* Fall through for success case */
+
 	default:
 		csr_roam_state_change(pMac, eCSR_ROAMING_STATE_JOINING,
 				sessionId);
@@ -10936,7 +10999,9 @@ void csr_roaming_state_msg_processor(tpAniSirGlobal pMac, void *pMsgBuf)
 	case eWNI_SME_DISCONNECT_DONE_IND:
 		csr_roam_send_disconnect_done_indication(pMac, pSmeRsp);
 		break;
-
+	case eWNI_SME_UPPER_LAYER_ASSOC_CNF:
+		csr_roam_joined_state_msg_processor(pMac, pSmeRsp);
+		break;
 	default:
 		sme_debug("Unexpected message type: %d[0x%X] received in substate %s",
 			pSmeRsp->messageType, pSmeRsp->messageType,
@@ -11017,7 +11082,7 @@ void csr_roam_joined_state_msg_processor(tpAniSirGlobal pMac, void *pMsgBuf)
 		roam_info->ampdu = pUpperLayerAssocCnf->ampdu;
 		roam_info->sgi_enable = pUpperLayerAssocCnf->sgi_enable;
 		roam_info->tx_stbc = pUpperLayerAssocCnf->tx_stbc;
-		roam_info->tx_stbc = pUpperLayerAssocCnf->rx_stbc;
+		roam_info->rx_stbc = pUpperLayerAssocCnf->rx_stbc;
 		roam_info->ch_width = pUpperLayerAssocCnf->ch_width;
 		roam_info->mode = pUpperLayerAssocCnf->mode;
 		roam_info->max_supp_idx = pUpperLayerAssocCnf->max_supp_idx;
@@ -17163,8 +17228,10 @@ QDF_STATUS csr_send_mb_set_context_req_msg(tpAniSirGlobal pMac,
 		status = scheduler_post_message(QDF_MODULE_ID_SME,
 						QDF_MODULE_ID_PE,
 						QDF_MODULE_ID_PE, &msg);
-		if (QDF_IS_STATUS_ERROR(status))
+		if (QDF_IS_STATUS_ERROR(status)) {
+			qdf_mem_zero(pMsg, msgLen);
 			qdf_mem_free(pMsg);
+		}
 	} while (0);
 	return status;
 }
@@ -17265,11 +17332,8 @@ QDF_STATUS csr_send_mb_start_bss_req_msg(tpAniSirGlobal pMac, uint32_t
 	pMsg->vht_config.su_beam_formee =
 		(uint8_t)value &&
 		(uint8_t)pMac->roam.configParam.enable_txbf_sap_mode;
-	if (wlan_cfg_get_int(pMac,
-			WNI_CFG_VHT_CSN_BEAMFORMEE_ANT_SUPPORTED,
-			&value) != QDF_STATUS_SUCCESS)
-		QDF_TRACE(QDF_MODULE_ID_QDF, QDF_TRACE_LEVEL_ERROR,
-				("Failed to get CSN beamformee capability"));
+
+	value = WNI_CFG_VHT_CSN_BEAMFORMEE_ANT_SUPPORTED_FW_DEF;
 	pMsg->vht_config.csnof_beamformer_antSup = (uint8_t)value;
 	pMsg->vht_config.mu_beam_formee = 0;
 
@@ -17383,6 +17447,41 @@ static QDF_STATUS csr_roam_session_opened(tpAniSirGlobal pMac,
 	return status;
 }
 
+/**
+ * csr_store_oce_cfg_flags_in_vdev() - fill OCE flags from ini
+ * @mac: mac_context.
+ * @vdev: Pointer to pdev obj
+ * @vdev_id: vdev_id
+ *
+ * This API will store the oce flags in vdev mlme priv object
+ *
+ * Return: none
+ */
+static void csr_store_oce_cfg_flags_in_vdev(tpAniSirGlobal pMac,
+					    struct wlan_objmgr_pdev *pdev,
+					    uint8_t vdev_id)
+{
+	struct wlan_objmgr_vdev *vdev =
+	wlan_objmgr_get_vdev_by_id_from_pdev(pdev, vdev_id, WLAN_LEGACY_MAC_ID);
+	struct vdev_mlme_priv_obj *vdev_mlme;
+
+	if (!vdev) {
+		sme_err("vdev is NULL");
+		return;
+	}
+
+	vdev_mlme = wlan_vdev_mlme_get_priv_obj(vdev);
+	if (!vdev_mlme) {
+		sme_err("vdev_mlme is NULL");
+		wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_MAC_ID);
+		return;
+	}
+
+	vdev_mlme->sta_dynamic_oce_value =
+	pMac->roam.configParam.oce_feature_bitmap;
+	wlan_objmgr_vdev_release_ref(vdev, WLAN_LEGACY_MAC_ID);
+}
+
 QDF_STATUS csr_process_add_sta_session_rsp(tpAniSirGlobal pMac, uint8_t *pMsg)
 {
 	struct add_sta_self_params *rsp;
@@ -17418,6 +17517,14 @@ QDF_STATUS csr_process_add_sta_session_rsp(tpAniSirGlobal pMac, uint8_t *pMsg)
 
 	csr_roam_session_opened(pMac, rsp->status, rsp->session_id);
 
+	if (QDF_IS_STATUS_SUCCESS(rsp->status) &&
+	    rsp->type == WMI_VDEV_TYPE_STA) {
+		csr_store_oce_cfg_flags_in_vdev(pMac, pMac->pdev,
+						rsp->session_id);
+
+		wlan_mlme_update_oce_flags(pMac->pdev,
+					   pMac->roam.configParam.oce_feature_bitmap);
+	}
 	if (QDF_IS_STATUS_ERROR(rsp->status))
 		csr_cleanup_session(pMac, rsp->session_id);
 
@@ -17534,6 +17641,8 @@ QDF_STATUS csr_issue_add_sta_for_session_req(tpAniSirGlobal pMac,
 		pMac->roam.configParam.tx_aggr_sw_retry_threshold_vi;
 	add_sta_self_req->tx_aggr_sw_retry_threshold_vo =
 		pMac->roam.configParam.tx_aggr_sw_retry_threshold_vo;
+	add_sta_self_req->tx_aggr_sw_retry_threshold =
+		pMac->roam.configParam.tx_aggr_sw_retry_threshold;
 	add_sta_self_req->tx_non_aggr_sw_retry_threshold_be =
 		pMac->roam.configParam.tx_non_aggr_sw_retry_threshold_be;
 	add_sta_self_req->tx_non_aggr_sw_retry_threshold_bk =
@@ -17542,6 +17651,8 @@ QDF_STATUS csr_issue_add_sta_for_session_req(tpAniSirGlobal pMac,
 		pMac->roam.configParam.tx_non_aggr_sw_retry_threshold_vi;
 	add_sta_self_req->tx_non_aggr_sw_retry_threshold_vo =
 		pMac->roam.configParam.tx_non_aggr_sw_retry_threshold_vo;
+	add_sta_self_req->tx_non_aggr_sw_retry_threshold =
+		pMac->roam.configParam.tx_non_aggr_sw_retry_threshold;
 
 	msg.type = WMA_ADD_STA_SELF_REQ;
 	msg.reserved = 0;
@@ -20431,11 +20542,9 @@ csr_roam_offload_scan(tpAniSirGlobal mac_ctx, uint8_t session_id,
 	 * 11k offload is enabled during RSO Start after connect indication and
 	 * 11k offload is disabled during RSO Stop after disconnect indication
 	 */
-	if (command == ROAM_SCAN_OFFLOAD_START &&
-	    reason == REASON_CTX_INIT)
+	if (command == ROAM_SCAN_OFFLOAD_START)
 		csr_update_11k_offload_params(mac_ctx, session, req_buf, TRUE);
-	else if (command == ROAM_SCAN_OFFLOAD_STOP &&
-		 reason == REASON_DISCONNECTED)
+	else if (command == ROAM_SCAN_OFFLOAD_STOP)
 		csr_update_11k_offload_params(mac_ctx, session, req_buf, FALSE);
 
 	QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_DEBUG,
@@ -22344,9 +22453,11 @@ static QDF_STATUS csr_process_roam_sync_callback(tpAniSirGlobal mac_ctx,
 		}
 
 		policy_mgr_check_concurrent_intf_and_restart_sap(mac_ctx->psoc);
-		csr_roam_offload_scan(mac_ctx, session_id,
-				      ROAM_SCAN_OFFLOAD_UPDATE_CFG,
-				      REASON_CONNECT);
+		if (roam_synch_data->authStatus ==
+		    CSR_ROAM_AUTH_STATUS_AUTHENTICATED)
+			csr_roam_offload_scan(mac_ctx, session_id,
+					      ROAM_SCAN_OFFLOAD_UPDATE_CFG,
+					      REASON_CONNECT);
 		csr_roam_call_callback(mac_ctx, session_id, NULL, 0,
 				       eCSR_ROAM_SYNCH_COMPLETE,
 				       eCSR_ROAM_RESULT_SUCCESS);
@@ -22612,9 +22723,14 @@ static QDF_STATUS csr_process_roam_sync_callback(tpAniSirGlobal mac_ctx,
 	QDF_TRACE(QDF_MODULE_ID_SME, QDF_TRACE_LEVEL_DEBUG,
 		FL("LFR3: Copy KCK, KEK(len %d) and Replay Ctr"),
 		roam_info->kek_len);
+	/* bit-4 and bit-5 indicate the subnet status */
 	roam_info->subnet_change_status =
 		CSR_GET_SUBNET_STATUS(roam_synch_data->roamReason);
 
+	/* fetch 4 LSB to get roam reason */
+	roam_info->roam_reason = roam_synch_data->roamReason &
+				 ROAM_REASON_MASK;
+	sme_info("Update roam reason : %d", roam_info->roam_reason);
 	csr_copy_fils_join_rsp_roam_info(roam_info, roam_synch_data);
 
 	csr_roam_call_callback(mac_ctx, session_id, roam_info, 0,

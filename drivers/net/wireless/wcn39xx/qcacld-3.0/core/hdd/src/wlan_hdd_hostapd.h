@@ -94,6 +94,20 @@ QDF_STATUS wlan_hdd_get_channel_for_sap_restart(
 				uint8_t *sec_ch);
 #endif
 
+/**
+ * wlan_hdd_set_sap_csa_reason() - Function to set
+ * sap csa reason
+ * @psoc: PSOC object information
+ * @vdev_id: vdev id
+ * @reason: reason to be updated
+ *
+ * This function sets the reason for SAP channel switch
+ *
+ * Return: None
+ *
+ */
+void wlan_hdd_set_sap_csa_reason(struct wlan_objmgr_psoc *psoc, uint8_t vdev_id,
+				 uint8_t reason);
 eCsrEncryptionType
 hdd_translate_rsn_to_csr_encryption_type(uint8_t cipher_suite[4]);
 
@@ -207,4 +221,29 @@ QDF_STATUS wlan_hdd_config_acs(struct hdd_context *hdd_ctx,
 			       struct hdd_adapter *adapter);
 
 void hdd_sap_indicate_disconnect_for_sta(struct hdd_adapter *adapter);
+
+/**
+ * wlan_hdd_disable_channels() - Cache the channels
+ * and current state of the channels from the channel list
+ * received in the command and disable the channels on the
+ * wiphy and reg table.
+ * @hdd_ctx: Pointer to hdd context
+ *
+ * Return: 0 on success, Error code on failure
+ */
+int wlan_hdd_disable_channels(struct hdd_context *hdd_ctx);
+
+/*
+ * hdd_check_and_disconnect_sta_on_invalid_channel() - Disconnect STA if it is
+ * on invalid channel
+ * @hdd_ctx: pointer to hdd context
+ *
+ * STA should be disconnected before starting the SAP if it is on indoor
+ * channel.
+ *
+ * Return: void
+ */
+void hdd_check_and_disconnect_sta_on_invalid_channel(
+						struct hdd_context *hdd_ctx);
+
 #endif /* end #if !defined(WLAN_HDD_HOSTAPD_H) */

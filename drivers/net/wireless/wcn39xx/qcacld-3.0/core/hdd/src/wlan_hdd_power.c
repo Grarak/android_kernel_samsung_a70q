@@ -1397,6 +1397,27 @@ static void hdd_is_interface_down_during_ssr(struct hdd_context *hdd_ctx)
 	hdd_exit();
 }
 
+/**
+ * hdd_restore_sar_config - Restore the saved SAR config after SSR
+ * @hdd_ctx: HDD context
+ *
+ * Restore the SAR config that was lost during SSR.
+ *
+ * Return: None
+ */
+static void hdd_restore_sar_config(struct hdd_context *hdd_ctx)
+{
+	QDF_STATUS status;
+
+	if (!hdd_ctx->sar_cmd_params)
+		return;
+
+	status = sme_set_sar_power_limits(hdd_ctx->mac_handle,
+					  hdd_ctx->sar_cmd_params);
+	if (QDF_IS_STATUS_ERROR(status))
+		hdd_err("Unable to configured SAR after SSR");
+}
+
 QDF_STATUS hdd_wlan_re_init(void)
 {
 	struct hdd_context *hdd_ctx = NULL;
@@ -1446,6 +1467,8 @@ QDF_STATUS hdd_wlan_re_init(void)
 	/* set chip power save failure detected callback */
 	sme_set_chip_pwr_save_fail_cb(hdd_ctx->mac_handle,
 				      hdd_chip_pwr_save_fail_detected_cb);
+
+	hdd_restore_sar_config(hdd_ctx);
 
 	hdd_send_default_scan_ies(hdd_ctx);
 	hdd_info("WLAN host driver reinitiation completed!");
@@ -2014,23 +2037,32 @@ int wlan_hdd_cfg80211_set_power_mgmt(struct wiphy *wiphy,
  * @wiphy: Pointer to wiphy
  * @wdev: Pointer to network device
  * @type: TX power setting type
- * @dbm: TX power in dbm
+ * @mbm: TX power in mBm
  *
  * Return: 0 for success, non-zero for failure
  */
 static int __wlan_hdd_cfg80211_set_txpower(struct wiphy *wiphy,
 					   struct wireless_dev *wdev,
 					   enum nl80211_tx_power_setting type,
-					   int dbm)
+					   int mbm)
 {
 	struct hdd_context *hdd_ctx = (struct hdd_context *) wiphy_priv(wiphy);
 	mac_handle_t mac_handle;
+	struct hdd_adapter *adapter;
 	struct qdf_mac_addr bssid = QDF_MAC_ADDR_BCAST_INIT;
-	struct qdf_mac_addr selfMac = QDF_MAC_ADDR_BCAST_INIT;
+	struct qdf_mac_addr selfmac;
 	QDF_STATUS status;
 	int errno;
+	int dbm;
 
 	hdd_enter();
+
+	if (!wdev) {
+		hdd_err("wdev is null, set tx power failed");
+		return -EIO;
+	}
+
+	adapter = WLAN_HDD_GET_PRIV_PTR(wdev->netdev);
 
 	if (QDF_GLOBAL_FTM_MODE == hdd_get_conparam()) {
 		hdd_err("Command not allowed in FTM mode");
@@ -2045,7 +2077,31 @@ static int __wlan_hdd_cfg80211_set_txpower(struct wiphy *wiphy,
 	if (errno)
 		return errno;
 
+	if (adapter->device_mode == QDF_SAP_MODE ||
+	    adapter->device_mode == QDF_P2P_GO_MODE) {
+		qdf_copy_macaddr(&bssid, &adapter->mac_addr);
+	} else {
+		struct hdd_station_ctx *sta_ctx =
+			WLAN_HDD_GET_STATION_CTX_PTR(adapter);
+
+		if (eConnectionState_Associated ==
+		    sta_ctx->conn_info.connState)
+			qdf_copy_macaddr(&bssid, &sta_ctx->conn_info.bssId);
+	}
+
+	qdf_copy_macaddr(&selfmac, &adapter->mac_addr);
+
 	mac_handle = hdd_ctx->mac_handle;
+
+	dbm = MBM_TO_DBM(mbm);
+
+	/*
+	 * the original implementation of this function expected power
+	 * values in dBm instead of mBm. If the conversion from mBm to
+	 * dBm is zero, then assume dBm was passed.
+	 */
+	if (!dbm)
+		dbm = mbm;
 
 	status = sme_cfg_set_int(mac_handle, WNI_CFG_CURRENT_TX_POWER_LEVEL,
 				 dbm);
@@ -2063,7 +2119,7 @@ static int __wlan_hdd_cfg80211_set_txpower(struct wiphy *wiphy,
 	/* Fall through */
 	case NL80211_TX_POWER_LIMITED:
 	/* Limit TX power by the mBm parameter */
-		status = sme_set_max_tx_power(mac_handle, bssid, selfMac, dbm);
+		status = sme_set_max_tx_power(mac_handle, bssid, selfmac, dbm);
 		if (QDF_IS_STATUS_ERROR(status)) {
 			hdd_err("Setting maximum tx power failed, %d", status);
 			return -EIO;
@@ -2086,14 +2142,14 @@ static int __wlan_hdd_cfg80211_set_txpower(struct wiphy *wiphy,
 int wlan_hdd_cfg80211_set_txpower(struct wiphy *wiphy,
 				  struct wireless_dev *wdev,
 				  enum nl80211_tx_power_setting type,
-				  int dbm)
+				  int mbm)
 {
 	int ret;
 
 	cds_ssr_protect(__func__);
 	ret = __wlan_hdd_cfg80211_set_txpower(wiphy,
 					      wdev,
-					      type, dbm);
+					      type, mbm);
 	cds_ssr_unprotect(__func__);
 
 	return ret;

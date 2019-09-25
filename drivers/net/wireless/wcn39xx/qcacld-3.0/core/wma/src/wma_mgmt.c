@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -72,6 +72,8 @@
 #include "wma_he.h"
 #include <qdf_crypto.h>
 #include "wma_twt.h"
+#include <wlan_mlme_main.h>
+#include <wlan_logging_sock_svc.h>
 
 /**
  * wma_send_bcn_buf_ll() - prepare and send beacon buffer to fw for LL
@@ -1758,6 +1760,23 @@ static void wma_read_cfg_wepkey(tp_wma_handle wma_handle,
 	*num_keys = j;
 }
 
+static void wma_set_peer_unicast_cipher(tp_wma_handle wma,
+					struct set_key_params *params)
+{
+	struct wlan_objmgr_peer *peer;
+
+	peer = wlan_objmgr_get_peer(wma->psoc,
+				    wlan_objmgr_pdev_get_pdev_id(wma->pdev),
+				    params->peer_mac, WLAN_LEGACY_WMA_ID);
+	if (!peer) {
+		WMA_LOGE("Peer of peer_mac %pM not found", params->peer_mac);
+		return;
+	}
+
+	wlan_peer_set_unicast_cipher(peer, params->key_cipher);
+	wlan_objmgr_peer_release_ref(peer, WLAN_LEGACY_WMA_ID);
+}
+
 /**
  * wma_setup_install_key_cmd() - set key parameters
  * @wma_handle: wma handle
@@ -1965,10 +1984,10 @@ static QDF_STATUS wma_setup_install_key_cmd(tp_wma_handle wma_handle,
 					     CMAC_IPN_LEN);
 		}
 	}
-
-	if (key_params->unicast && iface)
-		iface->ucast_key_cipher = params.key_cipher;
 #endif /* WLAN_FEATURE_11W */
+
+	if (key_params->unicast)
+		wma_set_peer_unicast_cipher(wma_handle, &params);
 
 	WMA_LOGD("Key setup : vdev_id %d key_idx %d key_type %d key_len %d",
 		 key_params->vdev_id, key_params->key_idx,
@@ -1995,6 +2014,7 @@ static QDF_STATUS wma_setup_install_key_cmd(tp_wma_handle wma_handle,
 
 end:
 	qdf_mem_free(params.key_rsc_counter);
+	qdf_mem_zero(&params, sizeof(struct set_key_params));
 	return status;
 }
 
@@ -2122,6 +2142,8 @@ void wma_set_bsskey(tp_wma_handle wma_handle, tpSetBssKeyParams key_info)
 	wma_handle->ibss_started++;
 	/* TODO: Should we wait till we get HTT_T2H_MSG_TYPE_SEC_IND? */
 	key_info->status = QDF_STATUS_SUCCESS;
+
+	qdf_mem_zero(&key_params, sizeof(struct wma_set_key_params));
 
 out:
 	wma_send_msg_high_priority(wma_handle, WMA_SET_BSSKEY_RSP,
@@ -2446,6 +2468,7 @@ void wma_set_stakey(tp_wma_handle wma_handle, tpSetStaKeyParams key_info)
 	/* TODO: Should we wait till we get HTT_T2H_MSG_TYPE_SEC_IND? */
 	key_info->status = QDF_STATUS_SUCCESS;
 out:
+	qdf_mem_zero(&key_params, sizeof(struct wma_set_key_params));
 	if (key_info->sendRsp)
 		wma_send_msg_high_priority(wma_handle, WMA_SET_STAKEY_RSP,
 					   (void *)key_info, 0);
@@ -3012,6 +3035,35 @@ static const char *wma_get_status_str(uint32_t status)
 #endif
 
 /**
+ * wma_mgmt_pktdump_status_map() - map MGMT Tx completion status with
+ * packet dump Tx status
+ * @status: MGMT Tx completion status
+ *
+ * Return: packet dump tx_status enum
+ */
+static inline enum tx_status
+wma_mgmt_pktdump_status_map(WMI_MGMT_TX_COMP_STATUS_TYPE status)
+{
+	enum tx_status pktdump_status;
+
+	switch (status) {
+	case WMI_MGMT_TX_COMP_TYPE_COMPLETE_OK:
+		pktdump_status = tx_status_ok;
+		break;
+	case WMI_MGMT_TX_COMP_TYPE_DISCARD:
+		pktdump_status = tx_status_discard;
+		break;
+	case WMI_MGMT_TX_COMP_TYPE_COMPLETE_NO_ACK:
+		pktdump_status = tx_status_no_ack;
+		break;
+	default:
+		pktdump_status = tx_status_discard;
+		break;
+	}
+	return pktdump_status;
+}
+
+/**
  * wma_process_mgmt_tx_completion() - process mgmt completion
  * @wma_handle: wma handle
  * @desc_id: descriptor id
@@ -3027,6 +3079,7 @@ static int wma_process_mgmt_tx_completion(tp_wma_handle wma_handle,
 	uint8_t vdev_id = 0;
 	QDF_STATUS ret;
 	tp_wma_packetdump_cb packetdump_cb;
+	enum tx_status pktdump_status;
 
 	if (wma_handle == NULL) {
 		WMA_LOGE("%s: wma handle is NULL", __func__);
@@ -3050,9 +3103,11 @@ static int wma_process_mgmt_tx_completion(tp_wma_handle wma_handle,
 					  QDF_DMA_TO_DEVICE);
 
 	packetdump_cb = wma_handle->wma_mgmt_tx_packetdump_cb;
-	if (packetdump_cb)
-		packetdump_cb(buf, QDF_STATUS_SUCCESS,
+	if (packetdump_cb) {
+		pktdump_status = wma_mgmt_pktdump_status_map(status);
+		packetdump_cb(buf, pktdump_status,
 			vdev_id, TX_MGMT_PKT);
+	}
 
 	ret = mgmt_txrx_tx_completion_handler(pdev, desc_id, status, NULL);
 
@@ -3660,7 +3715,8 @@ int wma_process_rmf_frame(tp_wma_handle wma_handle,
 {
 	uint8_t *orig_hdr;
 	uint8_t *ccmp;
-	uint8_t mic_len, hdr_len;
+	uint8_t mic_len, hdr_len, pdev_id;
+	QDF_STATUS status;
 
 	if ((wh)->i_fc[1] & IEEE80211_FC1_WEP) {
 		if (IEEE80211_IS_BROADCAST(wh->i_addr1) ||
@@ -3669,19 +3725,23 @@ int wma_process_rmf_frame(tp_wma_handle wma_handle,
 			cds_pkt_return_packet(rx_pkt);
 			return -EINVAL;
 		}
-	if (iface->ucast_key_cipher == WMI_CIPHER_AES_GCM) {
-		hdr_len = WLAN_IEEE80211_GCMP_HEADERLEN;
-		mic_len = WLAN_IEEE80211_GCMP_MICLEN;
-	} else {
-		hdr_len = IEEE80211_CCMP_HEADERLEN;
-		mic_len = IEEE80211_CCMP_MICLEN;
-	}
-	if (qdf_nbuf_len(wbuf) < (sizeof(*wh) + hdr_len + mic_len)) {
-		WMA_LOGE("Buffer length less than expected %d",
-					(int)qdf_nbuf_len(wbuf));
-		cds_pkt_return_packet(rx_pkt);
-		return -EINVAL;
-	}
+
+		pdev_id = wlan_objmgr_pdev_get_pdev_id(wma_handle->pdev);
+		status = mlme_get_peer_mic_len(wma_handle->psoc, pdev_id,
+					       wh->i_addr2, &mic_len,
+					       &hdr_len);
+		if (QDF_IS_STATUS_ERROR(status)) {
+			WMA_LOGE("Failed to get mic hdr and length");
+			cds_pkt_return_packet(rx_pkt);
+			return -EINVAL;
+		}
+
+		if (qdf_nbuf_len(wbuf) < (sizeof(*wh) + hdr_len + mic_len)) {
+			WMA_LOGE("Buffer length less than expected %d",
+				 (int)qdf_nbuf_len(wbuf));
+			cds_pkt_return_packet(rx_pkt);
+			return -EINVAL;
+		}
 
 		orig_hdr = (uint8_t *) qdf_nbuf_data(wbuf);
 		/* Pointer to head of CCMP header */

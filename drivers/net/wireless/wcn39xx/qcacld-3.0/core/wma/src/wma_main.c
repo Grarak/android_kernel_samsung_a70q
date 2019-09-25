@@ -90,6 +90,7 @@
 #include "service_ready_param.h"
 #include "wlan_cp_stats_mc_ucfg_api.h"
 #include "init_cmd_api.h"
+#include "wma_coex.h"
 
 #define WMA_LOG_COMPLETION_TIMER 3000 /* 3 seconds */
 #define WMI_TLV_HEADROOM 128
@@ -1853,6 +1854,69 @@ static void wma_set_nan_enable(tp_wma_handle wma_handle,
 #endif
 
 /**
+ * wma_antenna_isolation_event_handler() - antenna isolation event handler
+ * @handle: wma handle
+ * @param: event data
+ * @len: length
+ *
+ * Return: 0 for success or error code
+ */
+static int wma_antenna_isolation_event_handler(void *handle,
+					       u8 *param,
+					       u32 len)
+{
+	struct scheduler_msg cds_msg = {0};
+	wmi_coex_report_isolation_event_fixed_param *event;
+	WMI_COEX_REPORT_ANTENNA_ISOLATION_EVENTID_param_tlvs *param_buf;
+	struct sir_isolation_resp *pisolation;
+	struct mac_context *mac = NULL;
+
+	WMA_LOGD("%s: handle %pK param %pK len %d", __func__,
+		 handle, param, len);
+
+	mac = (struct mac_context *)cds_get_context(QDF_MODULE_ID_PE);
+	if (!mac) {
+		WMA_LOGE("%s: Invalid mac context", __func__);
+		return -EINVAL;
+	}
+
+	pisolation = qdf_mem_malloc(sizeof(*pisolation));
+	if (!pisolation)
+		return 0;
+
+	param_buf =
+		(WMI_COEX_REPORT_ANTENNA_ISOLATION_EVENTID_param_tlvs *)param;
+	if (!param_buf) {
+		WMA_LOGE("%s: Invalid isolation event", __func__);
+		return -EINVAL;
+	}
+	event = param_buf->fixed_param;
+	pisolation->isolation_chain0 = event->isolation_chain0;
+	pisolation->isolation_chain1 = event->isolation_chain1;
+	pisolation->isolation_chain2 = event->isolation_chain2;
+	pisolation->isolation_chain3 = event->isolation_chain3;
+
+	WMA_LOGD("%s: chain1 %d chain2 %d chain3 %d chain4 %d", __func__,
+		 pisolation->isolation_chain0, pisolation->isolation_chain1,
+		 pisolation->isolation_chain2, pisolation->isolation_chain3);
+
+	cds_msg.type = eWNI_SME_ANTENNA_ISOLATION_RSP;
+	cds_msg.bodyptr = pisolation;
+	cds_msg.bodyval = 0;
+	if (QDF_STATUS_SUCCESS !=
+	    scheduler_post_message(QDF_MODULE_ID_WMA,
+				   QDF_MODULE_ID_SME,
+				   QDF_MODULE_ID_SME, &cds_msg)) {
+		WMA_LOGE("%s: could not post peer info rsp msg to SME",
+			 __func__);
+		/* free the mem and return */
+		qdf_mem_free(pisolation);
+	}
+
+	return 0;
+}
+
+/**
  * wma_init_max_no_of_peers - API to initialize wma configuration params
  * @wma_handle: WMA Handle
  * @max_peers: Max Peers supported
@@ -3235,6 +3299,8 @@ QDF_STATUS wma_open(struct wlan_objmgr_psoc *psoc,
 
 	wma_handle->enable_peer_unmap_conf_support =
 			cds_cfg->enable_peer_unmap_conf_support;
+	wma_handle->enable_tx_compl_tsf64 =
+			cds_cfg->enable_tx_compl_tsf64;
 
 	/* Register Converged Event handlers */
 	init_deinit_register_tgt_psoc_ev_handlers(psoc);
@@ -3591,6 +3657,12 @@ QDF_STATUS wma_open(struct wlan_objmgr_psoc *psoc,
 				wma_rx_aggr_failure_event_handler,
 				WMA_RX_SERIALIZER_CTX);
 
+	wmi_unified_register_event_handler(
+				wma_handle->wmi_handle,
+				wmi_coex_report_antenna_isolation_event_id,
+				wma_antenna_isolation_event_handler,
+				WMA_RX_SERIALIZER_CTX);
+
 	wma_handle->ito_repeat_count = cds_cfg->ito_repeat_count;
 	wma_handle->bandcapability = cds_cfg->bandcapability;
 
@@ -3655,7 +3727,7 @@ QDF_STATUS wma_open(struct wlan_objmgr_psoc *psoc,
 #endif
 
 	wma_register_apf_events(wma_handle);
-
+	wma_register_mws_coex_events(wma_handle);
 	return QDF_STATUS_SUCCESS;
 
 err_dbglog_init:
@@ -5529,9 +5601,9 @@ wma_fill_chain_cfg(struct wma_tgt_cfg *tgt_cfg,
  * wma_update_hdd_cfg() - update HDD config
  * @wma_handle: wma handle
  *
- * Return: none
+ * Return: Zero on success err number on failure
  */
-static void wma_update_hdd_cfg(tp_wma_handle wma_handle)
+static int wma_update_hdd_cfg(tp_wma_handle wma_handle)
 {
 	struct wma_tgt_cfg tgt_cfg;
 	uint8_t i;
@@ -5540,26 +5612,27 @@ static void wma_update_hdd_cfg(tp_wma_handle wma_handle)
 	struct wlan_psoc_host_service_ext_param *service_ext_param;
 	struct target_psoc_info *tgt_hdl;
 	struct wmi_unified *wmi_handle;
+	int ret;
 
 	WMA_LOGD("%s: Enter", __func__);
 
 	tgt_hdl = wlan_psoc_get_tgt_if_handle(wma_handle->psoc);
 	if (!tgt_hdl) {
 		WMA_LOGE("%s: target psoc info is NULL", __func__);
-		return;
+		return -EINVAL;
 	}
 
 	wlan_res_cfg = target_psoc_get_wlan_res_cfg(tgt_hdl);
 	if (!wlan_res_cfg) {
 		WMA_LOGE("%s: wlan_res_cfg is null", __func__);
-		return;
+		return -EINVAL;
 	}
 	service_ext_param =
 			target_psoc_get_service_ext_param(tgt_hdl);
 	wmi_handle = get_wmi_unified_hdl_from_psoc(wma_handle->psoc);
 	if (!wmi_handle) {
 		WMA_LOGE("%s: wmi handle is NULL", __func__);
-		return;
+		return -EINVAL;
 	}
 
 	qdf_mem_zero(&tgt_cfg, sizeof(struct wma_tgt_cfg));
@@ -5625,11 +5698,15 @@ static void wma_update_hdd_cfg(tp_wma_handle wma_handle)
 	for (i = 0; i < tgt_hdl->info.total_mac_phy_cnt; i++)
 		wma_fill_chain_cfg(&tgt_cfg, tgt_hdl, i);
 
-	wma_handle->tgt_cfg_update_cb(hdd_ctx, &tgt_cfg);
+	ret = wma_handle->tgt_cfg_update_cb(hdd_ctx, &tgt_cfg);
+	if (ret)
+		return -EINVAL;
+
 	target_if_store_pdev_target_if_ctx(wma_get_pdev_from_scn_handle);
 	target_pdev_set_wmi_handle(wma_handle->pdev->tgt_if_handle,
 				   wma_handle->wmi_handle);
 	wma_green_ap_register_handlers(wma_handle);
+	return ret;
 }
 
 /**
@@ -6293,6 +6370,7 @@ static void wma_print_mac_phy_capabilities(struct wlan_psoc_host_mac_phy_caps
 	WMA_LOGD("\t: cap for hw_mode_id[%d]", cap->hw_mode_id);
 	WMA_LOGD("\t: pdev_id[%d]", cap->pdev_id);
 	WMA_LOGD("\t: phy_id[%d]", cap->phy_id);
+	WMA_LOGD("\t: hw_mode_config_type[%d]", cap->hw_mode_config_type);
 	WMA_LOGD("\t: supports_11b[%d]", cap->supports_11b);
 	WMA_LOGD("\t: supports_11g[%d]", cap->supports_11g);
 	WMA_LOGD("\t: supports_11a[%d]", cap->supports_11a);
@@ -6536,7 +6614,7 @@ static QDF_STATUS wma_update_hw_mode_list(t_wma_handle *wma_handle,
 		/* Update for MAC0 */
 		tmp = &mac_phy_cap[j++];
 		wma_get_hw_mode_params(tmp, &mac0_ss_bw_info);
-		hw_config_type = mac_phy_cap[j].hw_mode_config_type;
+		hw_config_type = tmp->hw_mode_config_type;
 		dbs_mode = HW_MODE_DBS_NONE;
 		sbs_mode = HW_MODE_SBS_NONE;
 		mac1_ss_bw_info.mac_tx_stream = 0;
@@ -6726,6 +6804,16 @@ int wma_rx_service_ready_ext_event(void *handle, uint8_t *event,
 		cdp_cfg_set_peer_unmap_conf_support(soc, false);
 	}
 
+	if (wma_handle->enable_tx_compl_tsf64 &&
+	    wmi_service_enabled(wmi_handle,
+				wmi_service_tx_compl_tsf64)) {
+		wlan_res_cfg->tstamp64_en = true;
+		cdp_cfg_set_tx_compl_tsf64(soc, true);
+	} else {
+		wlan_res_cfg->tstamp64_en = false;
+		cdp_cfg_set_tx_compl_tsf64(soc, false);
+	}
+
 	return 0;
 }
 
@@ -6744,6 +6832,7 @@ int wma_rx_ready_event(void *handle, uint8_t *cmd_param_info,
 	tp_wma_handle wma_handle = (tp_wma_handle) handle;
 	WMI_READY_EVENTID_param_tlvs *param_buf = NULL;
 	wmi_ready_event_fixed_param *ev = NULL;
+	int ret;
 
 	WMA_LOGD("%s: Enter", __func__);
 
@@ -6772,7 +6861,9 @@ int wma_rx_ready_event(void *handle, uint8_t *cmd_param_info,
 	/* copy the mac addr */
 	WMI_MAC_ADDR_TO_CHAR_ARRAY(&ev->mac_addr, wma_handle->myaddr);
 	WMI_MAC_ADDR_TO_CHAR_ARRAY(&ev->mac_addr, wma_handle->hwaddr);
-	wma_update_hdd_cfg(wma_handle);
+	ret = wma_update_hdd_cfg(wma_handle);
+	if (ret)
+		return ret;
 	WMA_LOGD("Exit");
 
 	return 0;
@@ -6844,6 +6935,11 @@ QDF_STATUS wma_wait_for_ready_event(WMA_HANDLE handle)
 
 	status = qdf_wait_for_event_completion(&tgt_hdl->info.event,
 					       WMA_READY_EVENTID_TIMEOUT);
+	if (!tgt_hdl->info.wmi_ready) {
+		wma_err("Error in pdev creation");
+		return QDF_STATUS_E_INVAL;
+	}
+
 	if (status == QDF_STATUS_E_TIMEOUT)
 		wma_err("Timeout waiting for FW ready event");
 	else if (QDF_IS_STATUS_ERROR(status))
@@ -8307,6 +8403,9 @@ static QDF_STATUS wma_mc_process_msg(struct scheduler_msg *msg)
 		wma_get_peer_info_ext(wma_handle, msg->bodyptr);
 		qdf_mem_free(msg->bodyptr);
 		break;
+	case WMA_GET_ISOLATION:
+		wma_get_isolation(wma_handle);
+		break;
 	case WMA_MODEM_POWER_STATE_IND:
 		wma_notify_modem_power_state(wma_handle,
 				(tSirModemPowerStateInd *) msg->bodyptr);
@@ -8668,6 +8767,12 @@ static QDF_STATUS wma_mc_process_msg(struct scheduler_msg *msg)
 		wma_get_roam_scan_stats(wma_handle, msg->bodyptr);
 		qdf_mem_free(msg->bodyptr);
 		break;
+#ifdef WLAN_MWS_INFO_DEBUGFS
+	case WMA_GET_MWS_COEX_INFO_REQ:
+		wma_get_mws_coex_info_req(wma_handle, msg->bodyptr);
+		qdf_mem_free(msg->bodyptr);
+		break;
+#endif
 	default:
 		WMA_LOGD("Unhandled WMA message of type %d", msg->type);
 		if (msg->bodyptr)

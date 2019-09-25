@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -33,6 +33,7 @@
 #include "wlan_p2p_main.h"
 #include "wlan_p2p_off_chan_tx.h"
 #include "wlan_osif_request_manager.h"
+#include <wlan_mlme_main.h>
 
 /**
  * p2p_psoc_get_tx_ops() - get p2p tx ops
@@ -127,6 +128,52 @@ static QDF_STATUS p2p_vdev_check_valid(struct tx_action_context *tx_ctx)
 	wlan_objmgr_vdev_release_ref(vdev, WLAN_P2P_ID);
 
 	return status;
+}
+
+/**
+ * p2p_check_and_update_channel() - check and update tx channel
+ * @tx_ctx:         tx context
+ *
+ * This function checks and updates tx channel if channel is 0 in tx context.
+ * It will update channel to current roc channel if vdev mode is
+ * P2P DEVICE/CLIENT/GO.
+ *
+ * Return: QDF_STATUS_SUCCESS - in case of success
+ */
+static QDF_STATUS p2p_check_and_update_channel(struct tx_action_context *tx_ctx)
+{
+	enum QDF_OPMODE mode;
+	struct wlan_objmgr_vdev *vdev;
+	struct wlan_objmgr_psoc *psoc;
+	struct p2p_soc_priv_obj *p2p_soc_obj;
+	struct p2p_roc_context *curr_roc_ctx;
+
+	if (!tx_ctx || tx_ctx->chan) {
+		p2p_err("NULL tx ctx or channel valid");
+		return QDF_STATUS_E_INVAL;
+	}
+
+	p2p_soc_obj = tx_ctx->p2p_soc_obj;
+	psoc = p2p_soc_obj->soc;
+	vdev = wlan_objmgr_get_vdev_by_id_from_psoc(
+			psoc, tx_ctx->vdev_id, WLAN_P2P_ID);
+	if (!vdev) {
+		p2p_err("null vdev object");
+		return QDF_STATUS_E_INVAL;
+	}
+
+	mode = wlan_vdev_mlme_get_opmode(vdev);
+	curr_roc_ctx = p2p_find_current_roc_ctx(p2p_soc_obj);
+
+	if (curr_roc_ctx &&
+	    (mode == QDF_P2P_DEVICE_MODE ||
+	     mode == QDF_P2P_CLIENT_MODE ||
+	     mode == QDF_P2P_GO_MODE))
+		tx_ctx->chan = curr_roc_ctx->chan;
+
+	wlan_objmgr_vdev_release_ref(vdev, WLAN_P2P_ID);
+
+	return QDF_STATUS_SUCCESS;
 }
 
 /**
@@ -641,11 +688,6 @@ static QDF_STATUS p2p_get_frame_info(uint8_t *data_buf, uint32_t length,
 	}
 
 	frame_info->type = P2P_FRAME_MGMT;
-	if (sub_type != P2P_MGMT_PROBE_RSP &&
-		sub_type != P2P_MGMT_ACTION) {
-		p2p_err("not support sub type");
-		return QDF_STATUS_E_FAILURE;
-	}
 
 	if (sub_type == P2P_MGMT_PROBE_RSP) {
 		frame_info->sub_type = P2P_MGMT_PROBE_RSP;
@@ -657,6 +699,11 @@ static QDF_STATUS p2p_get_frame_info(uint8_t *data_buf, uint32_t length,
 		frame_info->sub_type = P2P_MGMT_PROBE_REQ;
 		p2p_debug("Probe Request");
 		return QDF_STATUS_SUCCESS;
+	}
+
+	if (sub_type != P2P_MGMT_ACTION) {
+		p2p_debug("not support sub type");
+		return QDF_STATUS_E_FAILURE;
 	}
 
 	frame_info->sub_type = P2P_MGMT_ACTION;
@@ -914,13 +961,16 @@ static QDF_STATUS p2p_mgmt_tx(struct tx_action_context *tx_ctx,
 	void *mac_addr;
 	uint8_t pdev_id;
 	struct wlan_objmgr_vdev *vdev;
+	uint16_t chanfreq = 0;
 
 	psoc = tx_ctx->p2p_soc_obj->soc;
 	mgmt_param.tx_frame = packet;
 	mgmt_param.frm_len = buf_len;
 	mgmt_param.vdev_id = tx_ctx->vdev_id;
 	mgmt_param.pdata = frame;
-	mgmt_param.chanfreq = wlan_chan_to_freq(tx_ctx->chan);
+	if (tx_ctx->chan)
+		chanfreq = (uint16_t)wlan_chan_to_freq(tx_ctx->chan);
+	mgmt_param.chanfreq = chanfreq;
 
 	mgmt_param.qdf_ctx = wlan_psoc_get_qdf_dev(psoc);
 	if (!(mgmt_param.qdf_ctx)) {
@@ -1456,9 +1506,21 @@ static QDF_STATUS p2p_populate_rmf_field(struct tx_action_context *tx_ctx,
 	}
 	if (!qdf_is_macaddr_group((struct qdf_mac_addr *)wh->i_addr1) &&
 	    !qdf_is_macaddr_broadcast((struct qdf_mac_addr *)wh->i_addr1)) {
+		uint8_t mic_len, mic_hdr_len, pdev_id;
 
-		frame_len = *size + IEEE80211_CCMP_HEADERLEN +
-			    IEEE80211_CCMP_MICLEN;
+		pdev_id =
+			wlan_get_pdev_id_from_vdev_id(tx_ctx->p2p_soc_obj->soc,
+						      tx_ctx->vdev_id,
+						      WLAN_P2P_ID);
+		status = mlme_get_peer_mic_len(p2p_soc_obj->soc, pdev_id,
+					       wh->i_addr1, &mic_len,
+					       &mic_hdr_len);
+		if (QDF_IS_STATUS_ERROR(status)) {
+			p2p_err("Failed to get peer mic length.");
+			return status;
+		}
+
+		frame_len = *size + mic_hdr_len + mic_len;
 		status = p2p_packet_alloc((uint16_t)frame_len, (void **)&frame,
 			 &pkt);
 		if (status != QDF_STATUS_SUCCESS) {
@@ -1468,7 +1530,7 @@ static QDF_STATUS p2p_populate_rmf_field(struct tx_action_context *tx_ctx,
 		}
 
 		qdf_mem_copy(frame, wh, sizeof(*wh));
-		qdf_mem_copy(frame + sizeof(*wh) + IEEE80211_CCMP_HEADERLEN,
+		qdf_mem_copy(frame + sizeof(*wh) + mic_hdr_len,
 			     *ppbuf + sizeof(*wh),
 			     *size - sizeof(*wh));
 		rmf_wh = (struct wlan_frame_hdr *)frame;
@@ -2717,7 +2779,9 @@ QDF_STATUS p2p_process_mgmt_tx(struct tx_action_context *tx_ctx)
 		tx_ctx->no_ack = 1;
 	}
 
-	if (!tx_ctx->off_chan) {
+	if (!tx_ctx->off_chan || !tx_ctx->chan) {
+		if (!tx_ctx->chan)
+			p2p_check_and_update_channel(tx_ctx);
 		status = p2p_execute_tx_action_frame(tx_ctx);
 		if (status != QDF_STATUS_SUCCESS) {
 			p2p_err("execute tx fail");

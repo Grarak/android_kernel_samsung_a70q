@@ -200,6 +200,8 @@ QDF_STATUS ucfg_tdls_update_config(struct wlan_objmgr_psoc *psoc,
 	soc_obj->tdls_del_all_peers = req->tdls_del_all_peers;
 	soc_obj->tdls_update_dp_vdev_flags = req->tdls_update_dp_vdev_flags;
 	soc_obj->tdls_dp_vdev_update = req->tdls_dp_vdev_update;
+	soc_obj->tdls_osif_init_cb = req->tdls_osif_init_cb;
+	soc_obj->tdls_osif_deinit_cb = req->tdls_osif_deinit_cb;
 	tdls_pm_call_backs.tdls_notify_increment_session =
 			tdls_notify_increment_session;
 
@@ -234,6 +236,8 @@ QDF_STATUS ucfg_tdls_update_config(struct wlan_objmgr_psoc *psoc,
 
 	for (sta_idx = 0; sta_idx < soc_obj->max_num_tdls_sta; sta_idx++) {
 		soc_obj->tdls_conn_info[sta_idx].sta_id = INVALID_TDLS_PEER_ID;
+		soc_obj->tdls_conn_info[sta_idx].index =
+						INVALID_TDLS_PEER_INDEX;
 		soc_obj->tdls_conn_info[sta_idx].session_id = 255;
 		qdf_mem_zero(&soc_obj->tdls_conn_info[sta_idx].peer_mac,
 			     QDF_MAC_ADDR_SIZE);
@@ -660,18 +664,14 @@ QDF_STATUS ucfg_tdls_responder(struct tdls_set_responder_req *req)
 	return status;
 }
 
-QDF_STATUS ucfg_tdls_teardown_links(struct wlan_objmgr_vdev *vdev)
+QDF_STATUS ucfg_tdls_teardown_links(struct wlan_objmgr_psoc *psoc)
 {
 	QDF_STATUS status;
 	struct scheduler_msg msg = {0, };
 
-	if (!vdev) {
-		tdls_err("vdev is NULL ");
-		return QDF_STATUS_E_NULL_VALUE;
-	}
 	tdls_debug("Enter ");
 
-	msg.bodyptr = vdev;
+	msg.bodyptr = psoc;
 	msg.callback = tdls_process_cmd;
 	msg.flush_callback = ucfg_tdls_post_msg_flush_cb;
 	msg.type = TDLS_CMD_TEARDOWN_LINKS;
@@ -1006,4 +1006,15 @@ dec_ref:
 free:
 	qdf_mem_free(req);
 	return status;
+}
+
+void ucfg_tdls_notify_connect_failure(struct wlan_objmgr_psoc *psoc)
+{
+	return tdls_notify_decrement_session(psoc);
+}
+
+struct wlan_objmgr_vdev *ucfg_get_tdls_vdev(struct wlan_objmgr_psoc *psoc,
+					    wlan_objmgr_ref_dbgid dbg_id)
+{
+	return tdls_get_vdev(psoc, dbg_id);
 }

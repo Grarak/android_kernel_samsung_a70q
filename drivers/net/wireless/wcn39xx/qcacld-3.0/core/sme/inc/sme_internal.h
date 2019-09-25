@@ -37,6 +37,7 @@
 #include "csr_link_list.h"
 #include "sme_power_save.h"
 #include "nan_api.h"
+#include "wmi_unified.h"
 
 struct wmi_twt_enable_complete_event_param;
 /*--------------------------------------------------------------------------
@@ -202,6 +203,15 @@ typedef void (*lost_link_info_cb)(hdd_handle_t hdd_handle,
 typedef void (*hidden_ssid_cb)(hdd_handle_t hdd_handle,
 				uint8_t vdev_id);
 
+/**
+ * typedef sme_get_isolation_cb - get isolation callback fun
+ * @param: isolation result reported by firmware
+ * @pcontext: Opaque context that the client can use to associate the
+ *    callback with the request
+ */
+typedef void (*sme_get_isolation_cb)(struct sir_isolation_resp *param,
+				     void *pcontext);
+
 typedef struct tagSmeStruct {
 	eSmeState state;
 	qdf_mutex_t lkSmeGlobalLock;
@@ -250,6 +260,8 @@ typedef struct tagSmeStruct {
 	void (*pget_peer_info_ext_ind_cb)(struct sir_peer_info_ext_resp *param,
 		void *pcontext);
 	void *pget_peer_info_ext_cb_context;
+	sme_get_isolation_cb get_isolation_cb;
+	void *get_isolation_cb_context;
 #ifdef FEATURE_WLAN_EXTSCAN
 	void (*pExtScanIndCb)(void *, const uint16_t, void *);
 #endif /* FEATURE_WLAN_EXTSCAN */
@@ -304,6 +316,12 @@ typedef struct tagSmeStruct {
 	/* hidden ssid rsp callback */
 	hidden_ssid_cb hidden_ssid_cb;
 
+#ifdef WLAN_MWS_INFO_DEBUGFS
+	void *mws_coex_info_ctx;
+	void (*mws_coex_info_state_resp_callback)(void *coex_info_data,
+						  void *context,
+						  wmi_mws_coex_cmd_id cmd_id);
+#endif /* WLAN_MWS_INFO_DEBUGFS */
 } tSmeStruct, *tpSmeStruct;
 
 #endif /* #if !defined( __SMEINTERNAL_H ) */

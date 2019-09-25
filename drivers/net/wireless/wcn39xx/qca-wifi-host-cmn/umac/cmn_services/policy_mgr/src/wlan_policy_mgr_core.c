@@ -828,7 +828,7 @@ void policy_mgr_pdev_set_hw_mode_cb(uint32_t status,
 	pm_ctx = policy_mgr_get_context(context);
 	if (!pm_ctx) {
 		policy_mgr_err("Invalid Context");
-		return;
+		goto send_done_event;
 	}
 
 	policy_mgr_set_hw_mode_change_in_progress(context,
@@ -836,12 +836,12 @@ void policy_mgr_pdev_set_hw_mode_cb(uint32_t status,
 
 	if (status != SET_HW_MODE_STATUS_OK) {
 		policy_mgr_err("Set HW mode failed with status %d", status);
-		return;
+		goto send_done_event;
 	}
 
 	if (!vdev_mac_map) {
 		policy_mgr_err("vdev_mac_map is NULL");
-		return;
+		goto send_done_event;
 	}
 
 	policy_mgr_debug("cfgd_hw_mode_index=%d", cfgd_hw_mode_index);
@@ -855,7 +855,7 @@ void policy_mgr_pdev_set_hw_mode_cb(uint32_t status,
 			&hw_mode);
 	if (ret != QDF_STATUS_SUCCESS) {
 		policy_mgr_err("Get HW mode failed: %d", ret);
-		return;
+		goto send_done_event;
 	}
 
 	policy_mgr_debug("MAC0: TxSS:%d, RxSS:%d, Bw:%d",
@@ -879,14 +879,13 @@ void policy_mgr_pdev_set_hw_mode_cb(uint32_t status,
 	if (PM_NOP != next_action)
 		policy_mgr_next_actions(context, session_id,
 			next_action, reason);
-	else {
+	else
 		policy_mgr_debug("No action needed right now");
-		ret = policy_mgr_set_opportunistic_update(context);
-		if (!QDF_IS_STATUS_SUCCESS(ret))
-			policy_mgr_err("ERROR: set opportunistic_update event failed");
-	}
 
-	return;
+send_done_event:
+	ret = policy_mgr_set_opportunistic_update(context);
+	if (!QDF_IS_STATUS_SUCCESS(ret))
+		policy_mgr_err("ERROR: set opportunistic_update event failed");
 }
 
 /**
@@ -1246,7 +1245,7 @@ QDF_STATUS policy_mgr_pdev_get_pcl(struct wlan_objmgr_psoc *psoc,
 void policy_mgr_set_pcl_for_existing_combo(
 		struct wlan_objmgr_psoc *psoc, enum policy_mgr_con_mode mode)
 {
-	QDF_STATUS status;
+	QDF_STATUS status = QDF_STATUS_E_FAILURE;
 	struct policy_mgr_conc_connection_info
 			info[MAX_NUMBER_OF_CONC_CONNECTIONS] = { {0} };
 	enum QDF_OPMODE pcl_mode;
@@ -1265,7 +1264,6 @@ void policy_mgr_set_pcl_for_existing_combo(
 		return;
 	qdf_mutex_acquire(&pm_ctx->qdf_conc_list_lock);
 	if (policy_mgr_mode_specific_connection_count(psoc, mode, NULL) > 0) {
-		qdf_mutex_release(&pm_ctx->qdf_conc_list_lock);
 		/* Check, store and temp delete the mode's parameter */
 		policy_mgr_store_and_del_conn_info(psoc, mode, false,
 						info, &num_cxn_del);
@@ -1274,14 +1272,14 @@ void policy_mgr_set_pcl_for_existing_combo(
 		policy_mgr_debug("Set PCL to FW for mode:%d", mode);
 		/* Restore the connection info */
 		policy_mgr_restore_deleted_conn_info(psoc, info, num_cxn_del);
+	}
+	qdf_mutex_release(&pm_ctx->qdf_conc_list_lock);
 
-		if (QDF_IS_STATUS_SUCCESS(status)) {
-			status = pm_ctx->sme_cbacks.sme_pdev_set_pcl(&pcl);
-			if (QDF_IS_STATUS_ERROR(status))
-				policy_mgr_err("Send set PCL to SME failed");
-		}
-	} else {
-		qdf_mutex_release(&pm_ctx->qdf_conc_list_lock);
+	/* Send PCL only if policy_mgr_pdev_get_pcl returned success */
+	if (QDF_IS_STATUS_SUCCESS(status)) {
+		status = pm_ctx->sme_cbacks.sme_pdev_set_pcl(&pcl);
+		if (QDF_IS_STATUS_ERROR(status))
+			policy_mgr_err("Send set PCL to SME failed");
 	}
 }
 
