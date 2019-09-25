@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2017-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -39,6 +39,7 @@
 #define WLAN_REG_IS_5GHZ_CH(chan) REG_IS_5GHZ_CH(chan)
 
 #define WLAN_REG_IS_24GHZ_CH_FREQ(freq) REG_IS_24GHZ_CH_FREQ(freq)
+#define WLAN_REG_IS_5GHZ_CH_FREQ(freq) REG_IS_5GHZ_FREQ(freq)
 
 #ifndef CONFIG_LEGACY_CHAN_ENUM
 #define WLAN_REG_IS_49GHZ_FREQ(freq) REG_IS_49GHZ_FREQ(freq)
@@ -381,14 +382,6 @@ bool wlan_reg_is_etsi13_regdmn(struct wlan_objmgr_pdev *pdev);
  */
 bool wlan_reg_is_etsi13_srd_chan_allowed_master_mode(struct wlan_objmgr_pdev
 						     *pdev);
-
-/**
- * wlan_reg_get_fcc_constraint() - API to get FCC constraint set status
- * @pdev: physical dev to get
- *
- * Return: If FCC constraint is set return true else false.
- */
-bool wlan_reg_get_fcc_constraint(struct wlan_objmgr_pdev *pdev);
 
 /**
  * wlan_reg_is_passive_or_disable_ch () - Checks chan state for passive

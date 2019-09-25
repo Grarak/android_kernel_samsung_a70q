@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -35,6 +35,7 @@
 #include "mac_trace.h"
 #include "wlan_policy_mgr_api.h"
 
+#ifdef WLAN_DEBUG
 static const char *lfr_get_config_item_string(uint8_t reason)
 {
 	switch (reason) {
@@ -48,6 +49,7 @@ static const char *lfr_get_config_item_string(uint8_t reason)
 		return "unknown";
 	}
 }
+#endif
 
 static void csr_neighbor_roam_reset_channel_info(tpCsrNeighborRoamChannelInfo
 						 rChInfo);
@@ -143,8 +145,8 @@ QDF_STATUS csr_neighbor_roam_update_fast_roaming_enabled(tpAniSirGlobal mac_ctx,
 						REASON_CONNECT);
 			} else {
 				csr_roam_offload_scan(mac_ctx, session_id,
-						ROAM_SCAN_OFFLOAD_STOP,
-						REASON_SUPPLICANT_DISABLED_ROAMING);
+					ROAM_SCAN_OFFLOAD_STOP,
+					REASON_SUPPLICANT_DISABLED_ROAMING);
 			}
 			sme_release_global_lock(&mac_ctx->sme);
 		} else {
@@ -797,7 +799,7 @@ void csr_roam_reset_roam_params(tpAniSirGlobal mac_ctx)
 		FL("Roaming parameters are reset"));
 	roam_params = &mac_ctx->roam.configParam.roam_params;
 	roam_params->num_ssid_allowed_list = 0;
-	qdf_mem_set(&roam_params->ssid_allowed_list, 0,
+	qdf_mem_zero(&roam_params->ssid_allowed_list,
 			sizeof(tSirMacSSid) * MAX_SSID_ALLOWED_LIST);
 }
 
@@ -1323,8 +1325,8 @@ QDF_STATUS csr_neighbor_roam_init(tpAniSirGlobal pMac, uint8_t sessionId)
 		pNeighborRoamInfo->cfgParams.nRoamBmissFinalBcnt;
 	pNeighborRoamInfo->currentRoamBeaconRssiWeight =
 		pNeighborRoamInfo->cfgParams.nRoamBeaconRssiWeight;
-	qdf_mem_set(&pNeighborRoamInfo->prevConnProfile,
-		    sizeof(tCsrRoamConnectedProfile), 0);
+	qdf_mem_zero(&pNeighborRoamInfo->prevConnProfile,
+		    sizeof(tCsrRoamConnectedProfile));
 
 	status = csr_ll_open(&pNeighborRoamInfo->roamableAPList);
 	if (QDF_STATUS_SUCCESS != status) {

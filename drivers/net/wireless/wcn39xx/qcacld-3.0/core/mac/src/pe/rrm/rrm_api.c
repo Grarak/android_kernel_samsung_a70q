@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -42,8 +42,6 @@
 #include "lim_send_messages.h"
 #include "rrm_global.h"
 #include "rrm_api.h"
-
-#define MAX_RRM_TX_PWR_CAP 22
 
 uint8_t
 rrm_get_min_of_max_tx_power(tpAniSirGlobal pMac,
@@ -252,7 +250,6 @@ rrm_process_link_measurement_request(tpAniSirGlobal pMac,
 	tSirMacLinkReport LinkReport;
 	tpSirMacMgmtHdr pHdr;
 	int8_t currentRSSI = 0;
-	struct lim_max_tx_pwr_attr tx_pwr_attr = {0};
 
 	pe_debug("Received Link measurement request");
 
@@ -262,11 +259,10 @@ rrm_process_link_measurement_request(tpAniSirGlobal pMac,
 	}
 	pHdr = WMA_GET_RX_MAC_HEADER(pRxPacketInfo);
 
-	tx_pwr_attr.reg_max = pSessionEntry->def_max_tx_pwr;
-	tx_pwr_attr.ap_tx_power = pLinkReq->MaxTxPower.maxTxPower;
-	tx_pwr_attr.ini_tx_power = pMac->roam.configParam.nTxPowerCap;
-
-	LinkReport.txPower = lim_get_max_tx_power(pMac, tx_pwr_attr);
+	LinkReport.txPower = lim_get_max_tx_power(pSessionEntry->def_max_tx_pwr,
+						pLinkReq->MaxTxPower.maxTxPower,
+						  pMac->roam.configParam.
+						  nTxPowerCap);
 
 	if ((LinkReport.txPower != (uint8_t) (pSessionEntry->maxTxPower)) &&
 	    (QDF_STATUS_SUCCESS == rrm_send_set_max_tx_power_req(pMac,
@@ -461,7 +457,7 @@ rrm_process_neighbor_report_req(tpAniSirGlobal pMac,
 
 	pe_debug("SSID present: %d", pNeighborReq->noSSID);
 
-	qdf_mem_set(&NeighborReportReq, sizeof(tSirMacNeighborReportReq), 0);
+	qdf_mem_zero(&NeighborReportReq, sizeof(tSirMacNeighborReportReq));
 
 	NeighborReportReq.dialogToken = ++pMac->rrm.rrmPEContext.DialogToken;
 	NeighborReportReq.ssid_present = !pNeighborReq->noSSID;
@@ -1288,7 +1284,7 @@ QDF_STATUS rrm_initialize(tpAniSirGlobal pMac)
 	pMac->rrm.rrmPEContext.rrmEnable = 0;
 	pMac->rrm.rrmPEContext.prev_rrm_report_seq_num = 0xFFFF;
 
-	qdf_mem_set(pRRMCaps, sizeof(tRRMCaps), 0);
+	qdf_mem_zero(pRRMCaps, sizeof(tRRMCaps));
 	pRRMCaps->LinkMeasurement = 1;
 	pRRMCaps->NeighborRpt = 1;
 	pRRMCaps->BeaconPassive = 1;

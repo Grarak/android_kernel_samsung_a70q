@@ -46,6 +46,7 @@
 #define reg_debug_rl(params...) \
 	QDF_TRACE_DEBUG_RL(QDF_MODULE_ID_REGULATORY, params)
 
+
 /**
  * struct wlan_regulatory_psoc_priv_obj - wlan regulatory psoc private object
  * @new_user_ctry_pending: In this array, element[phy_id] is true if any user

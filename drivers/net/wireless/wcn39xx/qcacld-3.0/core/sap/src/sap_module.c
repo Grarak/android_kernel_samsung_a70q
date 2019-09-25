@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -922,7 +922,14 @@ QDF_STATUS wlansap_modify_acl(struct sap_context *sap_ctx,
 			  "%s: Invalid SAP Context", __func__);
 		return QDF_STATUS_E_FAULT;
 	}
-
+	if (qdf_mem_cmp(sap_ctx->bssid.bytes, peer_sta_mac,
+			QDF_MAC_ADDR_SIZE) == 0) {
+		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_ERROR,
+			  "requested peer mac is" MAC_ADDRESS_STR
+			  "our own SAP BSSID. Do not blacklist or whitelist this BSSID",
+			  MAC_ADDR_ARRAY(peer_sta_mac));
+		return QDF_STATUS_E_FAULT;
+	}
 	QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_LOW,
 		  "Modify ACL entered\n" "Before modification of ACL\n"
 		  "size of accept and deny lists %d %d", sap_ctx->nAcceptMac,
@@ -1215,7 +1222,11 @@ wlansap_update_csa_channel_params(struct sap_context *sap_context,
 			op_class = wlan_reg_dmn_get_opclass_from_channel(
 					mac_ctx->scan.countryCodeCurrent,
 					channel, bw);
-			if (!op_class)
+			/*
+			 * Do not continue if bw is 20. This mean channel is not
+			 * found and thus set BW20 for the channel.
+			 */
+			if (!op_class && bw > BW20)
 				continue;
 
 			if (bw == BW80) {
@@ -1690,6 +1701,25 @@ QDF_STATUS wlansap_de_register_mgmt_frame(struct sap_context *sap_ctx,
 	return QDF_STATUS_E_FAULT;
 }
 
+void wlansap_get_sec_channel(uint8_t sec_ch_offset,
+			     uint8_t op_channel,
+			     uint8_t *sec_channel)
+{
+	switch (sec_ch_offset) {
+	case LOW_PRIMARY_CH:
+		*sec_channel = op_channel + 4;
+		break;
+	case HIGH_PRIMARY_CH:
+		*sec_channel = op_channel - 4;
+		break;
+	default:
+		*sec_channel = 0;
+	}
+	QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_DEBUG,
+		  "%s: sec channel offset %d, sec channel %d",
+		  __func__, sec_ch_offset, *sec_channel);
+}
+
 QDF_STATUS wlansap_channel_change_request(struct sap_context *sapContext,
 					  uint8_t target_channel)
 {
@@ -1750,11 +1780,13 @@ QDF_STATUS wlansap_channel_change_request(struct sap_context *sapContext,
 	ch_params = &mac_ctx->sap.SapDfsInfo.new_ch_params;
 	wlan_reg_set_channel_params(mac_ctx->pdev, target_channel,
 			0, ch_params);
-	sapContext->ch_params.ch_width = ch_params->ch_width;
+	sapContext->ch_params = *ch_params;
 	/* Update the channel as this will be used to
 	 * send event to supplicant
 	 */
 	sapContext->channel = target_channel;
+	wlansap_get_sec_channel(ch_params->sec_ch_offset, target_channel,
+				(uint8_t *)(&sapContext->secondary_ch));
 	sapContext->csr_roamProfile.ch_params.ch_width = ch_params->ch_width;
 	sapContext->csr_roamProfile.ch_params.sec_ch_offset =
 						ch_params->sec_ch_offset;

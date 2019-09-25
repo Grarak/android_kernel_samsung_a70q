@@ -74,8 +74,8 @@
 
 static void __lim_init_bss_vars(tpAniSirGlobal pMac)
 {
-	qdf_mem_set((void *)pMac->lim.gpSession,
-		    sizeof(*pMac->lim.gpSession) * pMac->lim.maxBssId, 0);
+	qdf_mem_zero((void *)pMac->lim.gpSession,
+		    sizeof(*pMac->lim.gpSession) * pMac->lim.maxBssId);
 
 	/* This is for testing purposes only, be default should always be off */
 	pMac->lim.gpLimMlmSetKeysReq = NULL;
@@ -101,8 +101,8 @@ static void __lim_init_stats_vars(tpAniSirGlobal pMac)
 	pMac->lim.gLimHeartBeatApMacIndex = 0;
 
 	/* Statistics to keep track of no. beacons rcvd in heart beat interval */
-	qdf_mem_set(pMac->lim.gLimHeartBeatBeaconStats,
-		    sizeof(pMac->lim.gLimHeartBeatBeaconStats), 0);
+	qdf_mem_zero(pMac->lim.gLimHeartBeatBeaconStats,
+		    sizeof(pMac->lim.gLimHeartBeatBeaconStats));
 
 #ifdef WLAN_DEBUG
 	/* Debug counters */
@@ -112,7 +112,7 @@ static void __lim_init_stats_vars(tpAniSirGlobal pMac)
 	pMac->lim.numLearn = 0;
 	pMac->lim.numLearnIgnore = 0;
 	pMac->lim.numSme = 0;
-	qdf_mem_set(pMac->lim.numMAC, sizeof(pMac->lim.numMAC), 0);
+	qdf_mem_zero(pMac->lim.numMAC, sizeof(pMac->lim.numMAC));
 	pMac->lim.gLimNumAssocReqDropInvldState = 0;
 	pMac->lim.gLimNumAssocReqDropACRejectTS = 0;
 	pMac->lim.gLimNumAssocReqDropACRejectSta = 0;
@@ -153,9 +153,9 @@ static void __lim_init_states(tpAniSirGlobal pMac)
 	 * when SME_START_BSS_REQ is received.
 	 */
 
-	qdf_mem_set(&pMac->lim.gLimNoShortParams, sizeof(tLimNoShortParams), 0);
-	qdf_mem_set(&pMac->lim.gLimNoShortSlotParams,
-		    sizeof(tLimNoShortSlotParams), 0);
+	qdf_mem_zero(&pMac->lim.gLimNoShortParams, sizeof(tLimNoShortParams));
+	qdf_mem_zero(&pMac->lim.gLimNoShortSlotParams,
+		    sizeof(tLimNoShortSlotParams));
 
 	pMac->lim.gLimPhyMode = 0;
 	pMac->lim.gLimProbeRespDisableFlag = 0; /* control over probe resp */
@@ -167,15 +167,15 @@ static void __lim_init_vars(tpAniSirGlobal pMac)
 
 
 	/* Deferred Queue Parameters */
-	qdf_mem_set(&pMac->lim.gLimDeferredMsgQ, sizeof(tSirAddtsReq), 0);
+	qdf_mem_zero(&pMac->lim.gLimDeferredMsgQ, sizeof(tSirAddtsReq));
 
 	/* addts request if any - only one can be outstanding at any time */
-	qdf_mem_set(&pMac->lim.gLimAddtsReq, sizeof(tSirAddtsReq), 0);
+	qdf_mem_zero(&pMac->lim.gLimAddtsReq, sizeof(tSirAddtsReq));
 	pMac->lim.gLimAddtsSent = 0;
 	pMac->lim.gLimAddtsRspTimerCount = 0;
 
 	/* protection related config cache */
-	qdf_mem_set(&pMac->lim.cfgProtection, sizeof(tCfgProtection), 0);
+	qdf_mem_zero(&pMac->lim.cfgProtection, sizeof(tCfgProtection));
 	pMac->lim.gLimProtectionControl = 0;
 	SET_LIM_PROCESS_DEFD_MESGS(pMac, true);
 
@@ -190,11 +190,11 @@ static void __lim_init_vars(tpAniSirGlobal pMac)
 	pMac->lim.pDialogueTokenHead = NULL;
 	pMac->lim.pDialogueTokenTail = NULL;
 
-	qdf_mem_set(&pMac->lim.tspecInfo,
-		    sizeof(tLimTspecInfo) * LIM_NUM_TSPEC_MAX, 0);
+	qdf_mem_zero(&pMac->lim.tspecInfo,
+		    sizeof(tLimTspecInfo) * LIM_NUM_TSPEC_MAX);
 
 	/* admission control policy information */
-	qdf_mem_set(&pMac->lim.admitPolicyInfo, sizeof(tLimAdmitPolicyInfo), 0);
+	qdf_mem_zero(&pMac->lim.admitPolicyInfo, sizeof(tLimAdmitPolicyInfo));
 }
 
 static void __lim_init_assoc_vars(tpAniSirGlobal pMac)
@@ -208,10 +208,10 @@ static void __lim_init_assoc_vars(tpAniSirGlobal pMac)
 	/* / MAC level Pre-authentication related globals */
 	pMac->lim.gLimPreAuthChannelNumber = 0;
 	pMac->lim.gLimPreAuthType = eSIR_OPEN_SYSTEM;
-	qdf_mem_set(&pMac->lim.gLimPreAuthPeerAddr, sizeof(tSirMacAddr), 0);
+	qdf_mem_zero(&pMac->lim.gLimPreAuthPeerAddr, sizeof(tSirMacAddr));
 	pMac->lim.gLimNumPreAuthContexts = 0;
-	qdf_mem_set(&pMac->lim.gLimPreAuthTimerTable, sizeof(tLimPreAuthTable),
-		    0);
+	qdf_mem_zero(&pMac->lim.gLimPreAuthTimerTable,
+		     sizeof(tLimPreAuthTable));
 
 	/* Placed holder to deauth reason */
 	pMac->lim.gLimDeauthReasonCode = 0;
@@ -220,10 +220,10 @@ static void __lim_init_assoc_vars(tpAniSirGlobal pMac)
 	pMac->lim.pLimPreAuthList = NULL;
 
 	/* One cache for each overlap and associated case. */
-	qdf_mem_set(pMac->lim.protStaOverlapCache,
-		    sizeof(tCacheParams) * LIM_PROT_STA_OVERLAP_CACHE_SIZE, 0);
-	qdf_mem_set(pMac->lim.protStaCache,
-		    sizeof(tCacheParams) * LIM_PROT_STA_CACHE_SIZE, 0);
+	qdf_mem_zero(pMac->lim.protStaOverlapCache,
+		    sizeof(tCacheParams) * LIM_PROT_STA_OVERLAP_CACHE_SIZE);
+	qdf_mem_zero(pMac->lim.protStaCache,
+		    sizeof(tCacheParams) * LIM_PROT_STA_CACHE_SIZE);
 
 	pMac->lim.pSessionEntry = NULL;
 	pMac->lim.reAssocRetryAttempt = 0;
@@ -597,6 +597,8 @@ void lim_cleanup(tpAniSirGlobal pMac)
 	}
 
 	if (pMac->lim.gpLimMlmSetKeysReq != NULL) {
+		qdf_mem_zero(pMac->lim.gpLimMlmSetKeysReq,
+		     sizeof(tLimMlmSetKeysReq));
 		qdf_mem_free(pMac->lim.gpLimMlmSetKeysReq);
 		pMac->lim.gpLimMlmSetKeysReq = NULL;
 	}
@@ -683,6 +685,7 @@ static void lim_register_debug_callback(void)
 {
 }
 #endif /* WLAN_FEATURE_MEMDUMP_ENABLE */
+#ifdef WLAN_FEATURE_NAN_CONVERGENCE
 static void lim_nan_register_callbacks(tpAniSirGlobal mac_ctx)
 {
 	struct nan_callbacks cb_obj = {0};
@@ -693,6 +696,7 @@ static void lim_nan_register_callbacks(tpAniSirGlobal mac_ctx)
 
 	ucfg_nan_register_lim_callbacks(mac_ctx->psoc, &cb_obj);
 }
+#endif
 
 /*
  * pe_shutdown_notifier_cb - Shutdown notifier callback
@@ -901,7 +905,9 @@ QDF_STATUS pe_open(tpAniSirGlobal pMac, struct cds_config_info *cds_cfg)
 	MTRACE(lim_trace_init(pMac));
 #endif
 	lim_register_debug_callback();
+#ifdef WLAN_FEATURE_NAN_CONVERGENCE
 	lim_nan_register_callbacks(pMac);
+#endif
 	p2p_register_callbacks(pMac);
 	lim_register_sap_bcn_callback(pMac);
 
@@ -1124,9 +1130,11 @@ static QDF_STATUS pe_drop_pending_rx_mgmt_frames(tpAniSirGlobal mac_ctx,
 	qdf_spin_unlock(&mac_ctx->sys.bbt_mgmt_lock);
 	if (mac_ctx->sys.sys_bbt_pending_mgmt_count ==
 	    (MGMT_RX_PACKETS_THRESHOLD / 4)) {
+#ifdef WLAN_DEBUG
 		if (!(mac_ctx->rx_packet_drop_counter % 100))
 			pe_debug("No.of pending RX management frames reaches to 1/4th of threshold, rx_packet_drop_counter: %d",
 				mac_ctx->rx_packet_drop_counter);
+#endif
 			mac_ctx->rx_packet_drop_counter++;
 	}
 	return QDF_STATUS_SUCCESS;
@@ -1294,7 +1302,7 @@ static QDF_STATUS pe_handle_probe_req_frames(tpAniSirGlobal mac_ctx,
 static QDF_STATUS pe_handle_mgmt_frame(struct wlan_objmgr_psoc *psoc,
 			struct wlan_objmgr_peer *peer, qdf_nbuf_t buf,
 			struct mgmt_rx_event_params *mgmt_rx_params,
-			uint32_t frm_type)
+			enum mgmt_frame_type frm_type)
 {
 	tpAniSirGlobal pMac;
 	tpSirMacMgmtHdr mHdr;
@@ -1396,8 +1404,7 @@ void pe_register_mgmt_rx_frm_callback(tpAniSirGlobal mac_ctx)
 	struct mgmt_txrx_mgmt_frame_cb_info frm_cb_info;
 
 	frm_cb_info.frm_type = MGMT_FRAME_TYPE_ALL;
-	frm_cb_info.mgmt_rx_cb = (mgmt_frame_rx_callback)
-				pe_handle_mgmt_frame;
+	frm_cb_info.mgmt_rx_cb = pe_handle_mgmt_frame;
 
 	status = wlan_mgmt_txrx_register_rx_cb(mac_ctx->psoc,
 					 WLAN_UMAC_COMP_MLME, &frm_cb_info, 1);
@@ -1413,8 +1420,7 @@ void pe_deregister_mgmt_rx_frm_callback(tpAniSirGlobal mac_ctx)
 	struct mgmt_txrx_mgmt_frame_cb_info frm_cb_info;
 
 	frm_cb_info.frm_type = MGMT_FRAME_TYPE_ALL;
-	frm_cb_info.mgmt_rx_cb = (mgmt_frame_rx_callback)
-				pe_handle_mgmt_frame;
+	frm_cb_info.mgmt_rx_cb = pe_handle_mgmt_frame;
 
 	status = wlan_mgmt_txrx_deregister_rx_cb(mac_ctx->psoc,
 					 WLAN_UMAC_COMP_MLME, &frm_cb_info, 1);
@@ -1784,8 +1790,6 @@ lim_detect_change_in_ap_capabilities(tpAniSirGlobal pMac,
 	       SIR_MAC_GET_ESS(psessionEntry->limCurrentBssCaps)) ||
 	      (SIR_MAC_GET_PRIVACY(apNewCaps.capabilityInfo) !=
 	       SIR_MAC_GET_PRIVACY(psessionEntry->limCurrentBssCaps)) ||
-	      (SIR_MAC_GET_SHORT_PREAMBLE(apNewCaps.capabilityInfo) !=
-	       SIR_MAC_GET_SHORT_PREAMBLE(psessionEntry->limCurrentBssCaps)) ||
 	      (SIR_MAC_GET_QOS(apNewCaps.capabilityInfo) !=
 	       SIR_MAC_GET_QOS(psessionEntry->limCurrentBssCaps)) ||
 	      ((newChannel != psessionEntry->currentOperChannel) &&

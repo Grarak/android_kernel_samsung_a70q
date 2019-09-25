@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2019 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -367,6 +367,16 @@ sch_bcn_process_sta(tpAniSirGlobal mac_ctx,
 		       bcn->channelNumber);
 		return false;
 	}
+
+	/*
+	 * Ignore bcn as channel switch IE present and csa offload is enabled,
+	 * as in CSA offload enabled case FW will send Event to switch channel
+	 */
+	if (bcn->channelSwitchPresent && wma_is_csa_offload_enabled()) {
+		pe_err_rl("Ignore bcn as channel switch IE present and csa offload is enabled");
+		return false;
+	}
+
 	lim_detect_change_in_ap_capabilities(mac_ctx, bcn, session);
 	if (lim_get_sta_hash_bssidx(mac_ctx, DPH_STA_HASH_INDEX_PEER, bssIdx,
 				    session) != QDF_STATUS_SUCCESS)
@@ -543,6 +553,15 @@ sch_bcn_update_opmode_change(tpAniSirGlobal mac_ctx, tpDphHashNode sta_ds,
 	uint8_t oper_mode;
 	uint32_t fw_vht_ch_wd = wma_get_vht_ch_width();
 	uint8_t ch_width = 0;
+
+	/*
+	 * Ignore opmode change during channel change The opmode will be updated
+	 * with the beacons on new channel once the AP move to new channel.
+	 */
+	if (session->ch_switch_in_progress) {
+		pe_debug("Ignore opmode change as channel switch is in progress");
+		return;
+	}
 
 	if (session->vhtCapability && bcn->OperatingMode.present) {
 		update_nss(mac_ctx, sta_ds, bcn, session, mac_hdr);
@@ -803,7 +822,6 @@ static void __sch_beacon_process_for_session(tpAniSirGlobal mac_ctx,
 	uint8_t sendProbeReq = false;
 	tpSirMacMgmtHdr pMh = WMA_GET_RX_MAC_HEADER(rx_pkt_info);
 	int8_t regMax = 0, maxTxPower = 0, local_constraint;
-	struct lim_max_tx_pwr_attr tx_pwr_attr = {0};
 
 	qdf_mem_zero(&beaconParams, sizeof(tUpdateBeaconParams));
 	beaconParams.paramChangeBitmap = 0;
@@ -836,9 +854,11 @@ static void __sch_beacon_process_for_session(tpAniSirGlobal mac_ctx,
 			 * delete all TDLS peers before leaving BSS and proceed
 			 * for channel switch
 			 */
-			if (LIM_IS_STA_ROLE(session))
+			if (LIM_IS_STA_ROLE(session)) {
+				lim_update_tdls_set_state_for_fw(session,
+								 false);
 				lim_delete_tdls_peers(mac_ctx, session);
-
+			}
 			lim_update_channel_switch(mac_ctx, bcn, session);
 		} else if (session->gLimSpecMgmt.dot11hChanSwState ==
 				eLIM_11H_CHANSW_RUNNING) {
@@ -871,12 +891,8 @@ static void __sch_beacon_process_for_session(tpAniSirGlobal mac_ctx,
 			}
 	}
 
-	tx_pwr_attr.reg_max = regMax;
-	tx_pwr_attr.ap_tx_power = local_constraint;
-	tx_pwr_attr.ini_tx_power = mac_ctx->roam.configParam.nTxPowerCap;
-	tx_pwr_attr.op_ch = session->currentOperChannel;
-
-	maxTxPower = lim_get_max_tx_power(mac_ctx, tx_pwr_attr);
+	maxTxPower = lim_get_max_tx_power(regMax, local_constraint,
+					mac_ctx->roam.configParam.nTxPowerCap);
 
 	pe_debug("RegMax = %d, MaxTx pwr = %d",
 			regMax, maxTxPower);

@@ -196,6 +196,7 @@ enum tdls_feature_mode {
  * @TDLS_CMD_SET_OFFCHANNEL: tdls offchannel
  * @TDLS_CMD_SET_OFFCHANMODE: tdls offchannel mode
  * @TDLS_CMD_SET_SECOFFCHANOFFSET: tdls secondary offchannel offset
+ * @TDLS_DELETE_ALL_PEERS_INDICATION: tdls delete all peers indication
  */
 enum tdls_command_type {
 	TDLS_CMD_TX_ACTION = 1,
@@ -220,7 +221,8 @@ enum tdls_command_type {
 	TDLS_CMD_ANTENNA_SWITCH,
 	TDLS_CMD_SET_OFFCHANNEL,
 	TDLS_CMD_SET_OFFCHANMODE,
-	TDLS_CMD_SET_SECOFFCHANOFFSET
+	TDLS_CMD_SET_SECOFFCHANOFFSET,
+	TDLS_DELETE_ALL_PEERS_INDICATION
 };
 
 /**
@@ -574,6 +576,11 @@ typedef QDF_STATUS
 
 /* This callback is to release vdev ref for tdls offchan param related msg */
 typedef void (*tdls_offchan_parms_callback)(struct wlan_objmgr_vdev *vdev);
+
+/* This callback is to release vdev ref for tdls_delete_all_peers_
+ * callback related msg.
+ */
+typedef void (*tdls_delete_all_peers_callback)(struct wlan_objmgr_vdev *vdev);
 
 /**
  * struct tdls_start_params - tdls start params
@@ -971,24 +978,20 @@ struct tdls_send_mgmt {
 
 /**
  * struct tdls_validate_action_req - tdls validate mgmt request
- * @vdev: vdev object
  * @action_code: action code
  * @peer_mac: peer mac address
  * @dialog_token: dialog code
  * @status_code: status code to add
  * @len: len of the frame
  * @responder: whether to respond or not
- * @max_sta_failed: mgmt failure reason
  */
 struct tdls_validate_action_req {
-	struct wlan_objmgr_vdev *vdev;
 	uint8_t action_code;
 	uint8_t peer_mac[QDF_MAC_ADDR_SIZE];
 	uint8_t dialog_token;
 	uint8_t status_code;
 	size_t len;
 	int responder;
-	int max_sta_failed;
 };
 
 /**
@@ -1006,7 +1009,7 @@ struct tdls_get_all_peers {
 /**
  * struct tdls_send_action_frame_request - tdls send mgmt request
  * @vdev: vdev object
- * @chk_frame: frame validation structure
+ * @chk_frame: This struct used to validate mgmt frame
  * @session_id: session id
  * @vdev_id: vdev id
  * @cmd_buf: cmd buffer
@@ -1016,7 +1019,7 @@ struct tdls_get_all_peers {
  */
 struct tdls_action_frame_request {
 	struct wlan_objmgr_vdev *vdev;
-	struct tdls_validate_action_req *chk_frame;
+	struct tdls_validate_action_req chk_frame;
 	uint8_t session_id;
 	uint8_t vdev_id;
 	const uint8_t *cmd_buf;
@@ -1053,6 +1056,16 @@ struct tdls_sta_notify_params {
 	bool lfr_roam;
 	bool user_disconnect;
 	uint8_t session_id;
+};
+
+/**
+ * struct tdls_delete_all_peers_params - TDLS set mode params
+ * @vdev: vdev object
+ * @callback: callback to release vdev ref
+ */
+struct tdls_delete_all_peers_params {
+	struct wlan_objmgr_vdev *vdev;
+	tdls_delete_all_peers_callback callback;
 };
 
 /**

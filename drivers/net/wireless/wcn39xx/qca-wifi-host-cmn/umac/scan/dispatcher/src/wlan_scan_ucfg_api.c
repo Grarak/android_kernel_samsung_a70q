@@ -240,6 +240,9 @@ wlan_pno_global_init(struct pno_def_config *pno_def)
 	pno_def->stationary_thresh = SCAN_STATIONARY_THRESHOLD;
 	pno_def->channel_prediction_full_scan =
 			SCAN_CHANNEL_PREDICTION_FULL_SCAN_MS;
+	pno_def->scan_timer_repeat_value = SCAN_PNO_DEF_SCAN_TIMER_REPEAT;
+	pno_def->slow_scan_multiplier = SCAN_PNO_DEF_SLOW_SCAN_MULTIPLIER;
+	pno_def->dfs_chnl_scan_enabled = true;
 	pno_def->adaptive_dwell_mode = SCAN_ADAPTIVE_PNOSCAN_DWELL_MODE;
 	mawc_cfg->enable = SCAN_MAWC_NLO_ENABLED;
 	mawc_cfg->exp_backoff_ratio = SCAN_MAWC_NLO_EXP_BACKOFF_RATIO;
@@ -343,12 +346,54 @@ ucfg_scan_get_pno_def_params(struct wlan_objmgr_vdev *vdev,
 	return QDF_STATUS_SUCCESS;
 }
 
+bool ucfg_scan_is_dfs_chnl_scan_enabled(struct wlan_objmgr_psoc *psoc)
+{
+	struct wlan_scan_obj *scan_obj;
+
+	scan_obj = wlan_psoc_get_scan_obj(psoc);
+	if (!scan_obj) {
+		scm_err("NULL scan obj");
+		return true;
+	}
+
+	return scan_obj->pno_cfg.dfs_chnl_scan_enabled;
+}
+
+uint32_t ucfg_scan_get_scan_timer_repeat_value(struct wlan_objmgr_psoc *psoc)
+{
+	struct wlan_scan_obj *scan_obj;
+
+	scan_obj = wlan_psoc_get_scan_obj(psoc);
+	if (!scan_obj) {
+		scm_err("NULL scan obj");
+		return SCAN_PNO_DEF_SCAN_TIMER_REPEAT;
+	}
+
+	return scan_obj->pno_cfg.scan_timer_repeat_value;
+}
+
+uint32_t ucfg_scan_get_slow_scan_multiplier(struct wlan_objmgr_psoc *psoc)
+{
+	struct wlan_scan_obj *scan_obj;
+
+	scan_obj = wlan_psoc_get_scan_obj(psoc);
+	if (!scan_obj) {
+		scm_err("NULL scan obj");
+		return SCAN_PNO_DEF_SLOW_SCAN_MULTIPLIER;
+	}
+
+	return scan_obj->pno_cfg.slow_scan_multiplier;
+}
+
 static QDF_STATUS ucfg_scan_update_pno_config(struct pno_def_config *pno,
 	struct pno_user_cfg *pno_cfg)
 {
 	pno->channel_prediction = pno_cfg->channel_prediction;
 	pno->top_k_num_of_channels = pno_cfg->top_k_num_of_channels;
 	pno->stationary_thresh = pno_cfg->stationary_thresh;
+	pno->scan_timer_repeat_value = pno_cfg->scan_timer_repeat_value;
+	pno->slow_scan_multiplier = pno_cfg->slow_scan_multiplier;
+	pno->dfs_chnl_scan_enabled = pno_cfg->dfs_chnl_scan_enabled;
 	pno->adaptive_dwell_mode = pno_cfg->adaptive_dwell_mode;
 	pno->channel_prediction_full_scan =
 		pno_cfg->channel_prediction_full_scan;
@@ -410,10 +455,7 @@ ucfg_scan_update_pno_config(struct pno_def_config *pno,
  *
  * Non-DBS scan is requested if any of the below case is met:
  *     1. HW is DBS incapable
- *     2. Directed scan
- *     3. Channel list has only few channels
- *     4. Channel list has single band channels
- *     5. A high accuracy scan request is sent by kernel.
+ *     2. A high accuracy scan request is sent by kernel.
  *
  * DBS scan is enabled for these conditions:
  *     1. A low power or low span scan request is sent by kernel.
@@ -423,63 +465,27 @@ ucfg_scan_update_pno_config(struct pno_def_config *pno,
 static void
 ucfg_scan_update_dbs_scan_ctrl_ext_flag(struct scan_start_request *req)
 {
-	uint32_t num_chan;
 	struct wlan_objmgr_psoc *psoc;
 	uint32_t scan_dbs_policy = SCAN_DBS_POLICY_DEFAULT;
-	uint32_t conn_cnt;
 
 	psoc = wlan_vdev_get_psoc(req->vdev);
 
-	if ((DISABLE_DBS_CXN_AND_SCAN ==
-	     wlan_objmgr_psoc_get_dual_mac_disable(psoc)) ||
-	    (ENABLE_DBS_CXN_AND_DISABLE_DBS_SCAN ==
-	     wlan_objmgr_psoc_get_dual_mac_disable(psoc)))
+	if (!policy_mgr_is_hw_dbs_capable(psoc)) {
+		scm_debug("dbs disabled, going for non-dbs scan");
+		scan_dbs_policy = SCAN_DBS_POLICY_FORCE_NONDBS;
 		goto end;
+	}
 
-	if (req->scan_req.scan_policy_high_accuracy)
+	if (req->scan_req.scan_policy_high_accuracy) {
+		scm_debug("high accuracy scan received, going for non-dbs scan");
+		scan_dbs_policy = SCAN_DBS_POLICY_FORCE_NONDBS;
 		goto end;
-
+	}
 	if ((req->scan_req.scan_policy_low_power) ||
 	    (req->scan_req.scan_policy_low_span)) {
+		scm_debug("low power/span scan received, going for dbs scan");
 		scan_dbs_policy = SCAN_DBS_POLICY_IGNORE_DUTY;
 		goto end;
-	}
-
-	conn_cnt = policy_mgr_get_connection_count(psoc);
-	if (conn_cnt > 0) {
-		scm_debug("%d active connections, go for DBS scan",
-				conn_cnt);
-		scan_dbs_policy = SCAN_DBS_POLICY_DEFAULT;
-		goto end;
-	}
-
-	if (req->scan_req.num_ssids) {
-		scm_debug("directed SSID");
-		goto end;
-	}
-
-	if (req->scan_req.num_bssid) {
-		scm_debug("directed BSSID");
-		goto end;
-	}
-
-	num_chan = req->scan_req.chan_list.num_chan;
-
-	/* num_chan=0 means all channels */
-	if (!num_chan)
-		scan_dbs_policy = SCAN_DBS_POLICY_DEFAULT;
-
-	if (num_chan < SCAN_MIN_CHAN_DBS_SCAN_THRESHOLD)
-		goto end;
-
-	while (num_chan > 1) {
-		if (!WLAN_REG_IS_SAME_BAND_CHANNELS(
-			req->scan_req.chan_list.chan[0].freq,
-			req->scan_req.chan_list.chan[num_chan-1].freq)) {
-			scan_dbs_policy = SCAN_DBS_POLICY_DEFAULT;
-			break;
-		}
-		num_chan--;
 	}
 
 end:
@@ -591,14 +597,10 @@ static void ucfg_scan_req_update_concurrency_params(
 {
 	bool ap_present, go_present, sta_active, p2p_cli_present, ndi_present;
 	struct wlan_objmgr_psoc *psoc;
-	uint16_t sap_peer_count = 0;
-	uint16_t go_peer_count = 0;
-	struct wlan_objmgr_pdev *pdev;
 
 	psoc = wlan_vdev_get_psoc(vdev);
-	pdev = wlan_vdev_get_pdev(vdev);
 
-	if (!psoc || !pdev)
+	if (!psoc)
 		return;
 	ap_present = policy_mgr_mode_specific_connection_count(
 				psoc, PM_SAP_MODE, NULL);
@@ -610,13 +612,6 @@ static void ucfg_scan_req_update_concurrency_params(
 				psoc, PM_STA_MODE, NULL);
 	ndi_present = policy_mgr_mode_specific_connection_count(
 				psoc, PM_NDI_MODE, NULL);
-
-	if (ap_present)
-		sap_peer_count =
-		wlan_util_get_peer_count_for_mode(pdev, QDF_SAP_MODE);
-	if (go_present)
-		go_peer_count =
-		wlan_util_get_peer_count_for_mode(pdev, QDF_P2P_GO_MODE);
 
 	if (policy_mgr_get_connection_count(psoc)) {
 		if (req->scan_req.scan_f_passive)
@@ -632,15 +627,25 @@ static void ucfg_scan_req_update_concurrency_params(
 		req->scan_req.idle_time = scan_obj->scan_def.conc_idle_time;
 	}
 
+	if (!wlan_vdev_is_up(req->vdev))
+		req->scan_req.adaptive_dwell_time_mode =
+			scan_obj->scan_def.adaptive_dwell_time_mode_nc;
 	/*
 	 * If AP is active set min rest time same as max rest time, so that
 	 * firmware spends more time on home channel which will increase the
 	 * probability of sending beacon at TBTT
 	 */
-	if ((ap_present && sap_peer_count) ||
-	    (go_present && go_peer_count)) {
+	if (ap_present || go_present) {
 		req->scan_req.dwell_time_active_2g = 0;
 		req->scan_req.min_rest_time = req->scan_req.max_rest_time;
+	}
+
+	/*
+	 * If scan req for SAP (ACS Sacn) use dwell_time_active_def as dwell
+	 * time for 2g channels instead of dwell_time_active_2g
+	 */
+	if (vdev->vdev_mlme.vdev_opmode == QDF_SAP_MODE) {
+		req->scan_req.dwell_time_active_2g = 0;
 	}
 
 	if (req->scan_req.p2p_scan_type == SCAN_NON_P2P_DEFAULT) {
@@ -722,6 +727,7 @@ static void ucfg_scan_req_update_concurrency_params(
 
 	if (ap_present) {
 		uint8_t ap_chan;
+		struct wlan_objmgr_pdev *pdev = wlan_vdev_get_pdev(vdev);
 
 		ap_chan = policy_mgr_get_channel(psoc, PM_SAP_MODE, NULL);
 		/*
@@ -730,21 +736,19 @@ static void ucfg_scan_req_update_concurrency_params(
 		 * dwell time. If DBS is supported and if SAP is on 2G channel
 		 * then keep passive dwell time default.
 		 */
-		if (sap_peer_count) {
-			req->scan_req.dwell_time_active =
+		req->scan_req.dwell_time_active =
 				QDF_MIN(req->scan_req.dwell_time_active,
 					(SCAN_CTS_DURATION_MS_MAX -
 					SCAN_ROAM_SCAN_CHANNEL_SWITCH_TIME));
-			if (!policy_mgr_is_hw_dbs_capable(psoc) ||
-			    (policy_mgr_is_hw_dbs_capable(psoc) &&
-			     WLAN_CHAN_IS_5GHZ(ap_chan))) {
-				req->scan_req.dwell_time_passive =
-					req->scan_req.dwell_time_active;
-			}
+		if (!policy_mgr_is_hw_dbs_capable(psoc) ||
+		    (policy_mgr_is_hw_dbs_capable(psoc) &&
+		     WLAN_CHAN_IS_5GHZ(ap_chan))) {
+			req->scan_req.dwell_time_passive =
+				req->scan_req.dwell_time_active;
 		}
 		if (scan_obj->scan_def.ap_scan_burst_duration) {
 			req->scan_req.burst_duration =
-					scan_obj->scan_def.ap_scan_burst_duration;
+				scan_obj->scan_def.ap_scan_burst_duration;
 		} else {
 			req->scan_req.burst_duration = 0;
 			if (utils_is_dfs_ch(pdev, ap_chan))
@@ -1479,6 +1483,8 @@ wlan_scan_global_init(struct wlan_scan_obj *scan_obj)
 	scan_obj->scan_def.scan_priority = SCAN_PRIORITY;
 	scan_obj->scan_def.idle_time = SCAN_NETWORK_IDLE_TIMEOUT;
 	scan_obj->scan_def.adaptive_dwell_time_mode = SCAN_DWELL_MODE_DEFAULT;
+	scan_obj->scan_def.adaptive_dwell_time_mode_nc =
+					SCAN_DWELL_MODE_DEFAULT;
 	/* init burst durations */
 	scan_obj->scan_def.sta_scan_burst_duration = 0;
 	scan_obj->scan_def.p2p_scan_burst_duration = 0;
@@ -1761,14 +1767,15 @@ ucfg_scan_init_chanlist_params(struct scan_start_request *req,
 	 * too much time to complete.
 	 */
 	if (pdev && !num_chans && ucfg_scan_get_wide_band_scan(pdev)) {
-		reg_chan_list = qdf_mem_malloc(NUM_CHANNELS *
+		reg_chan_list = qdf_mem_malloc_atomic(NUM_CHANNELS *
 				sizeof(struct regulatory_channel));
 		if (!reg_chan_list) {
 			scm_err("Couldn't allocate reg_chan_list memory");
 			status = QDF_STATUS_E_NOMEM;
 			goto end;
 		}
-		scan_freqs = qdf_mem_malloc(sizeof(uint32_t) * max_chans);
+		scan_freqs =
+			qdf_mem_malloc_atomic(sizeof(uint32_t) * max_chans);
 		if (!scan_freqs) {
 			scm_err("Couldn't allocate scan_freqs memory");
 			status = QDF_STATUS_E_NOMEM;
@@ -1964,7 +1971,7 @@ QDF_STATUS ucfg_scan_update_user_config(struct wlan_objmgr_psoc *psoc,
 		scan_cfg->allow_dfs_chan_in_first_scan;
 	scan_def->allow_dfs_chan_in_scan = scan_cfg->allow_dfs_chan_in_scan;
 	scan_def->use_wake_lock_in_user_scan =
-                    scan_cfg->use_wake_lock_in_user_scan;
+					scan_cfg->use_wake_lock_in_user_scan;
 	scan_def->active_dwell = scan_cfg->active_dwell;
 	scan_def->active_dwell_2g = scan_cfg->active_dwell_2g;
 	scan_def->passive_dwell = scan_cfg->passive_dwell;
@@ -1977,6 +1984,8 @@ QDF_STATUS ucfg_scan_update_user_config(struct wlan_objmgr_psoc *psoc,
 	scan_def->prefer_5ghz = scan_cfg->prefer_5ghz;
 	scan_def->select_5ghz_margin = scan_cfg->select_5ghz_margin;
 	scan_def->adaptive_dwell_time_mode = scan_cfg->scan_dwell_time_mode;
+	scan_def->adaptive_dwell_time_mode_nc =
+				scan_cfg->scan_dwell_time_mode_nc;
 	scan_def->scan_f_chan_stat_evnt = scan_cfg->is_snr_monitoring_enabled;
 	scan_obj->ie_whitelist = scan_cfg->ie_whitelist;
 	scan_def->repeat_probe_time = scan_cfg->usr_cfg_probe_rpt_time;
@@ -2034,7 +2043,7 @@ ucfg_scan_cancel_pdev_scan(struct wlan_objmgr_pdev *pdev)
 	QDF_STATUS status;
 	struct wlan_objmgr_vdev *vdev;
 
-	req = qdf_mem_malloc(sizeof(*req));
+	req = qdf_mem_malloc_atomic(sizeof(*req));
 	if (!req) {
 		scm_err("Failed to allocate memory");
 		return QDF_STATUS_E_NOMEM;

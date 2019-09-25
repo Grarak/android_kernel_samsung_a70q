@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -36,6 +36,7 @@
 #include "wlan_hdd_power.h"
 #include "wlan_hdd_tsf.h"
 #include <linux/vmalloc.h>
+#include <scheduler_core.h>
 
 #include "pld_common.h"
 #include "sap_api.h"
@@ -586,6 +587,7 @@ QDF_STATUS cds_open(struct wlan_objmgr_psoc *psoc)
 		hdd_ctx->config->maxNumberOfPeers = cds_cfg->max_station;
 
 	HTCHandle = cds_get_context(QDF_MODULE_ID_HTC);
+	gp_cds_context->cfg_ctx = NULL;
 	if (!HTCHandle) {
 		cds_alert("HTCHandle is null!");
 
@@ -1015,6 +1017,8 @@ QDF_STATUS cds_post_disable(void)
 	tp_wma_handle wma_handle;
 	struct hif_opaque_softc *hif_ctx;
 	struct cdp_pdev *txrx_pdev;
+	struct scheduler_ctx *sched_ctx;
+	QDF_STATUS qdf_status;
 
 	wma_handle = cds_get_context(QDF_MODULE_ID_WMA);
 	if (!wma_handle) {
@@ -1034,6 +1038,11 @@ QDF_STATUS cds_post_disable(void)
 		return QDF_STATUS_E_INVAL;
 	}
 
+	/* flush any unprocessed scheduler messages */
+	sched_ctx = scheduler_get_context();
+	if (sched_ctx)
+		scheduler_queues_flush(sched_ctx);
+
 	/*
 	 * With new state machine changes cds_close can be invoked without
 	 * cds_disable. So, send the following clean up prerequisites to fw,
@@ -1052,6 +1061,12 @@ QDF_STATUS cds_post_disable(void)
 	if (gp_cds_context->htc_ctx) {
 		wma_wmi_stop();
 		htc_stop(gp_cds_context->htc_ctx);
+	}
+
+	qdf_status = cds_close_rx_thread();
+	if (!QDF_IS_STATUS_SUCCESS(qdf_status)) {
+		cds_err("Failed to close RX thread!");
+		return QDF_STATUS_E_INVAL;
 	}
 
 	cdp_pdev_pre_detach(cds_get_context(QDF_MODULE_ID_SOC),
@@ -1751,7 +1766,6 @@ static QDF_STATUS cds_force_assert_target(qdf_device_t qdf)
 
 	/* wmi assert failed, start recovery without the firmware assert */
 	cds_err("Scheduling recovery work without firmware assert");
-	cds_set_recovery_in_progress(true);
 	pld_schedule_recovery_work(qdf->dev, PLD_REASON_DEFAULT);
 
 	return status;
@@ -1821,6 +1835,7 @@ static void cds_trigger_recovery_handler(const char *func, const uint32_t line)
 		goto deinit_rtl;
 	}
 
+	cds_set_recovery_in_progress(true);
 	cds_force_assert_target(qdf);
 
 	status = qdf_runtime_pm_allow_suspend(&rtl);

@@ -59,6 +59,17 @@
 #define scm_debug_rl(params...) \
 	QDF_TRACE_DEBUG_RL(QDF_MODULE_ID_SCAN, params)
 
+#define scm_nofl_alert(params...) \
+	QDF_TRACE_FATAL_NO_FL(QDF_MODULE_ID_SCAN, params)
+#define scm_nofl_err(params...) \
+	QDF_TRACE_ERROR_NO_FL(QDF_MODULE_ID_SCAN, params)
+#define scm_nofl_warn(params...) \
+	QDF_TRACE_WARN_NO_FL(QDF_MODULE_ID_SCAN, params)
+#define scm_nofl_info(params...) \
+	QDF_TRACE_INFO_NO_FL(QDF_MODULE_ID_SCAN, params)
+#define scm_nofl_debug(params...) \
+	QDF_TRACE_DEBUG_NO_FL(QDF_MODULE_ID_SCAN, params)
+
 #define scm_hex_dump(level, data, buf_len) \
 		qdf_trace_hex_dump(QDF_MODULE_ID_SCAN, level, data, buf_len)
 
@@ -249,6 +260,9 @@ struct scan_vdev_obj {
  * @top_k_num_of_channels: def top K number of channels are used for tanimoto
  * distance calculation.
  * @stationary_thresh: def threshold val to determine that STA is stationary.
+ * @scan_timer_repeat_value: PNO scan timer repeat value
+ * @slow_scan_multiplier: PNO slow scan timer multiplier
+ * @dfs_chnl_scan_enable: Enable dfs channel PNO scan
  * @pnoscan_adaptive_dwell_mode: def adaptive dwelltime mode for pno scan
  * @channel_prediction_full_scan: def periodic timer upon which full scan needs
  * to be triggered.
@@ -260,6 +274,9 @@ struct pno_def_config {
 	bool channel_prediction;
 	uint8_t top_k_num_of_channels;
 	uint8_t stationary_thresh;
+	uint32_t scan_timer_repeat_value;
+	uint32_t slow_scan_multiplier;
+	bool dfs_chnl_scan_enabled;
 	enum scan_dwelltime_adaptive_mode adaptive_dwell_mode;
 	uint32_t channel_prediction_full_scan;
 	qdf_wake_lock_t pno_wake_lock;
@@ -273,6 +290,7 @@ struct pno_def_config {
  * @active_dwell: default active dwell time
  * @allow_dfs_chan_in_first_scan: first scan should contain dfs channels or not.
  * @allow_dfs_chan_in_scan: Scan DFS channels or not.
+ * @skip_dfs_chan_in_p2p_search: Skip dfs channels in p2p search.
  * @use_wake_lock_in_user_scan: if wake lock will be acquired during user scan
  * @active_dwell_2g: default active dwell time for 2G channels, if it's not zero
  * @passive_dwell:default passive dwell time
@@ -304,6 +322,8 @@ struct pno_def_config {
  * @max_active_scans_allowed: maximum number of active parallel scan allowed
  *                            per psoc
  * @scan_priority: default scan priority
+ * @adaptive_dwell_time_mode: adaptive dwell mode with connection
+ * @adaptive_dwell_time_mode_nc: adaptive dwell mode without connection
  * @scan_f_passive: passively scan all channels including active channels
  * @scan_f_bcast_probe: add wild card ssid prbreq even if ssid_list is specified
  * @scan_f_cck_rates: add cck rates to rates/xrates ie in prb req
@@ -352,6 +372,7 @@ struct scan_default_params {
 	uint32_t active_dwell;
 	bool allow_dfs_chan_in_first_scan;
 	bool allow_dfs_chan_in_scan;
+	bool skip_dfs_chan_in_p2p_search;
 	bool use_wake_lock_in_user_scan;
 	uint32_t active_dwell_2g;
 	uint32_t passive_dwell;
@@ -369,7 +390,6 @@ struct scan_default_params {
 	uint32_t probe_delay;
 	uint32_t burst_duration;
 	uint32_t max_scan_time;
-	bool skip_dfs_chan_in_p2p_search;
 	uint32_t num_probes;
 	uint32_t scan_cache_aging_time;
 	uint32_t prefer_5ghz;
@@ -389,6 +409,7 @@ struct scan_default_params {
 	uint8_t ap_scan_burst_duration;
 	enum scan_priority scan_priority;
 	enum scan_dwelltime_adaptive_mode adaptive_dwell_time_mode;
+	enum scan_dwelltime_adaptive_mode adaptive_dwell_time_mode_nc;
 	union {
 		struct {
 			uint32_t scan_f_passive:1,
@@ -445,10 +466,12 @@ struct scan_default_params {
  * struct scan_cb - nif/sif function callbacks
  * @inform_beacon: cb to indicate frame to OS
  * @update_beacon: cb to indicate frame to MLME
+ * @unlink_bss: cb to unlink bss from kernel cache
  */
 struct scan_cb {
 	update_beacon_cb inform_beacon;
 	update_beacon_cb update_beacon;
+	update_beacon_cb unlink_bss;
 	/* Define nif/sif function callbacks here */
 };
 

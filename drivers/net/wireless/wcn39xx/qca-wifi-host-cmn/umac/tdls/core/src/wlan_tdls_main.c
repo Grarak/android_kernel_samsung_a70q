@@ -254,6 +254,106 @@ QDF_STATUS tdls_vdev_obj_destroy_notification(struct wlan_objmgr_vdev *vdev,
 	return status;
 }
 
+/**
+ * tdls_process_reset_all_peers() - Reset all tdls peers
+ * @delete_all_peers_ind: Delete all peers indication
+ *
+ * This function is called to reset all tdls peers and
+ * notify upper layers of teardown inidcation
+ *
+ * Return: QDF_STATUS
+ */
+
+static QDF_STATUS tdls_process_reset_all_peers(struct wlan_objmgr_vdev *vdev)
+{
+	QDF_STATUS status = QDF_STATUS_SUCCESS;
+	uint8_t staidx;
+	struct tdls_peer *curr_peer = NULL;
+	struct tdls_vdev_priv_obj *tdls_vdev;
+	struct tdls_soc_priv_obj *tdls_soc;
+	uint8_t reset_session_id;
+
+	status = tdls_get_vdev_objects(vdev, &tdls_vdev, &tdls_soc);
+	if (QDF_STATUS_SUCCESS != status) {
+		tdls_err("tdls objects are NULL ");
+		return status;
+	}
+
+	if (!tdls_soc->connected_peer_count) {
+		tdls_debug("No tdls connected peers");
+		return status;
+	}
+
+	reset_session_id = tdls_vdev->session_id;
+	for (staidx = 0; staidx < tdls_soc->max_num_tdls_sta;
+							staidx++) {
+		if (tdls_soc->tdls_conn_info[staidx].sta_id
+						== INVALID_TDLS_PEER_ID)
+			continue;
+		if (tdls_soc->tdls_conn_info[staidx].session_id !=
+		    reset_session_id)
+			continue;
+
+		curr_peer =
+		tdls_find_all_peer(tdls_soc,
+				   tdls_soc->tdls_conn_info[staidx].
+				   peer_mac.bytes);
+		if (!curr_peer)
+			continue;
+
+		tdls_notice("indicate TDLS teardown (staId %d)",
+			    curr_peer->sta_id);
+
+		/* Indicate teardown to supplicant */
+		tdls_indicate_teardown(tdls_vdev,
+				       curr_peer,
+				       TDLS_TEARDOWN_PEER_UNSPEC_REASON);
+
+		tdls_reset_peer(tdls_vdev, curr_peer->peer_mac.bytes);
+
+		if (tdls_soc->tdls_dereg_peer)
+			tdls_soc->tdls_dereg_peer(
+					tdls_soc->tdls_peer_context,
+					wlan_vdev_get_id(vdev),
+					curr_peer->sta_id);
+		tdls_decrement_peer_count(tdls_soc);
+		tdls_soc->tdls_conn_info[staidx].sta_id = INVALID_TDLS_PEER_ID;
+		tdls_soc->tdls_conn_info[staidx].session_id = 255;
+
+		qdf_mem_zero(&tdls_soc->tdls_conn_info[staidx].peer_mac,
+			     sizeof(struct qdf_mac_addr));
+	}
+	return status;
+}
+
+/**
+ * tdls_reset_all_peers() - Reset all tdls peers
+ * @delete_all_peers_ind: Delete all peers indication
+ *
+ * This function is called to reset all tdls peers and
+ * notify upper layers of teardown inidcation
+ *
+ * Return: QDF_STATUS
+ */
+static QDF_STATUS tdls_reset_all_peers(
+		struct tdls_delete_all_peers_params *delete_all_peers_ind)
+{
+	QDF_STATUS status;
+
+	if (!delete_all_peers_ind || !delete_all_peers_ind->vdev) {
+		tdls_err("invalid param");
+		return QDF_STATUS_E_INVAL;
+	}
+
+	status = tdls_process_reset_all_peers(delete_all_peers_ind->vdev);
+
+	if (delete_all_peers_ind->callback)
+		delete_all_peers_ind->callback(delete_all_peers_ind->vdev);
+
+	qdf_mem_free(delete_all_peers_ind);
+	return status;
+}
+
 QDF_STATUS tdls_process_cmd(struct scheduler_msg *msg)
 {
 	QDF_STATUS status = QDF_STATUS_SUCCESS;
@@ -306,8 +406,10 @@ QDF_STATUS tdls_process_cmd(struct scheduler_msg *msg)
 	case TDLS_CMD_SET_TDLS_MODE:
 		tdls_set_operation_mode(msg->bodyptr);
 		break;
-	case TDLS_CMD_SESSION_INCREMENT:
 	case TDLS_CMD_SESSION_DECREMENT:
+		tdls_process_decrement_active_session(msg->bodyptr);
+	/*Fall through to take decision on connection tracker.*/
+	case TDLS_CMD_SESSION_INCREMENT:
 		tdls_process_policy_mgr_notification(msg->bodyptr);
 		break;
 	case TDLS_CMD_TEARDOWN_LINKS:
@@ -330,6 +432,9 @@ QDF_STATUS tdls_process_cmd(struct scheduler_msg *msg)
 		break;
 	case TDLS_CMD_SET_SECOFFCHANOFFSET:
 		tdls_process_set_secoffchanneloffset(msg->bodyptr);
+		break;
+	case TDLS_DELETE_ALL_PEERS_INDICATION:
+		tdls_reset_all_peers(msg->bodyptr);
 		break;
 	default:
 		break;
@@ -638,13 +743,52 @@ set_state:
 QDF_STATUS
 tdls_process_policy_mgr_notification(struct wlan_objmgr_psoc *psoc)
 {
+	struct tdls_vdev_priv_obj *tdls_priv_vdev;
+	struct wlan_objmgr_vdev *tdls_obj_vdev;
+	struct tdls_soc_priv_obj *tdls_priv_soc;
+
 	if (!psoc) {
 		tdls_err("psoc: %pK", psoc);
 		return QDF_STATUS_E_NULL_VALUE;
 	}
+	tdls_obj_vdev = tdls_get_vdev(psoc, WLAN_TDLS_NB_ID);
 	tdls_debug("enter ");
 	tdls_set_ct_mode(psoc);
+	if (tdls_obj_vdev && (tdls_get_vdev_objects(tdls_obj_vdev,
+	    &tdls_priv_vdev, &tdls_priv_soc) == QDF_STATUS_SUCCESS) &&
+	    tdls_priv_soc->enable_tdls_connection_tracker)
+		tdls_implicit_enable(tdls_priv_vdev);
+
+	if (tdls_obj_vdev)
+		wlan_objmgr_vdev_release_ref(tdls_obj_vdev, WLAN_TDLS_NB_ID);
+
 	tdls_debug("exit ");
+	return QDF_STATUS_SUCCESS;
+}
+
+QDF_STATUS
+tdls_process_decrement_active_session(struct wlan_objmgr_psoc *psoc)
+{
+	struct tdls_soc_priv_obj *tdls_priv_soc;
+	struct tdls_vdev_priv_obj *tdls_priv_vdev;
+	struct wlan_objmgr_vdev *tdls_obj_vdev;
+	uint8_t vdev_id;
+
+	tdls_debug("Enter");
+	if (!psoc)
+		return QDF_STATUS_E_NULL_VALUE;
+
+	tdls_obj_vdev = tdls_get_vdev(psoc, WLAN_TDLS_NB_ID);
+	if (tdls_obj_vdev) {
+		tdls_debug("Enable TDLS in FW and host as only one active sta/p2p_cli interface is present");
+		vdev_id = wlan_vdev_get_id(tdls_obj_vdev);
+		if (tdls_get_vdev_objects(tdls_obj_vdev, &tdls_priv_vdev,
+		    &tdls_priv_soc) == QDF_STATUS_SUCCESS)
+			tdls_send_update_to_fw(tdls_priv_vdev, tdls_priv_soc,
+					       false, false, true, vdev_id);
+		wlan_objmgr_vdev_release_ref(tdls_obj_vdev, WLAN_TDLS_NB_ID);
+	}
+
 	return QDF_STATUS_SUCCESS;
 }
 
@@ -752,15 +896,19 @@ void tdls_send_update_to_fw(struct tdls_vdev_priv_obj *tdls_vdev_obj,
 	struct tdls_config_params *threshold_params;
 	uint32_t tdls_feature_flags;
 	QDF_STATUS status;
+	uint8_t set_state_cnt;
 
+	tdls_debug("Enter");
 	tdls_feature_flags = tdls_soc_obj->tdls_configs.tdls_feature_flags;
 	if (!TDLS_IS_ENABLED(tdls_feature_flags)) {
 		tdls_debug("TDLS mode is not enabled");
 		return;
 	}
 
-	if (tdls_soc_obj->set_state_info.set_state_cnt == 0 &&
-	    !sta_connect_event) {
+	set_state_cnt = tdls_soc_obj->set_state_info.set_state_cnt;
+	if ((set_state_cnt == 0 && !sta_connect_event) ||
+	    (set_state_cnt && sta_connect_event)) {
+		tdls_debug("FW TDLS state is already in requested state");
 		return;
 	}
 
@@ -807,19 +955,7 @@ void tdls_send_update_to_fw(struct tdls_vdev_priv_obj *tdls_vdev_obj,
 	tdls_info_to_fw->rssi_teardown_threshold =
 		threshold_params->rssi_teardown_threshold;
 	tdls_info_to_fw->rssi_delta = threshold_params->rssi_delta;
-
-	if (tdls_soc_obj->set_state_info.set_state_cnt == 1 &&
-	    sta_connect_event) {
-		tdls_warn("Concurrency not allowed in TDLS! set state cnt %d",
-			tdls_soc_obj->set_state_info.set_state_cnt);
-		/* disable off channel and teardown links */
-		/* Go through the peer list and delete them */
-		tdls_disable_offchan_and_teardown_links(tdls_vdev_obj->vdev);
-		tdls_soc_obj->tdls_current_mode = TDLS_SUPPORT_DISABLED;
-		tdls_info_to_fw->vdev_id = tdls_soc_obj->set_state_info.vdev_id;
-	} else {
-		tdls_info_to_fw->vdev_id = session_id;
-	}
+	tdls_info_to_fw->vdev_id = session_id;
 
 	/* record the session id in vdev context */
 	tdls_vdev_obj->session_id = session_id;
@@ -1179,6 +1315,37 @@ QDF_STATUS tdls_peers_deleted_notification(struct wlan_objmgr_psoc *psoc,
 		qdf_mem_free(notify);
 		tdls_alert("message post failed ");
 
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	return QDF_STATUS_SUCCESS;
+}
+
+QDF_STATUS tdls_delete_all_peers_indication(
+		struct tdls_delete_all_peers_params *delete_peers_ind)
+{
+	struct scheduler_msg msg = {0, };
+	struct tdls_delete_all_peers_params *indication;
+	QDF_STATUS status;
+
+	indication = qdf_mem_malloc(sizeof(*indication));
+	if (!indication) {
+		tdls_err("memory allocation failed !!!");
+		return QDF_STATUS_E_NULL_VALUE;
+	}
+
+	*indication = *delete_peers_ind;
+
+	msg.bodyptr = indication;
+	msg.callback = tdls_process_cmd;
+	msg.type = TDLS_DELETE_ALL_PEERS_INDICATION;
+
+	status = scheduler_post_message(QDF_MODULE_ID_TDLS,
+					QDF_MODULE_ID_TDLS,
+					QDF_MODULE_ID_OS_IF, &msg);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		qdf_mem_free(indication);
+		tdls_alert("message post failed ");
 		return QDF_STATUS_E_FAILURE;
 	}
 

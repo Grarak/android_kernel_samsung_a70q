@@ -117,20 +117,6 @@ typedef struct last_processed_frame {
 	uint16_t seq_num;
 } last_processed_msg;
 
-/**
- * struct lim_max_tx_pwr_attr - List of tx powers from various sources
- * @reg_max: power from regulatory database
- * @ap_tx_power: local power constraint adjusted value
- * @ini_tx_power: Max tx power from ini config
- * @op_ch: current operating channel for which above powers are defined
- */
-struct lim_max_tx_pwr_attr {
-	int8_t reg_max;
-	int8_t ap_tx_power;
-	uint8_t ini_tx_power;
-	uint8_t op_ch;
-};
-
 /* LIM utility functions */
 bool lim_is_valid_frame(last_processed_msg *last_processed_frm,
 		uint8_t *pRxPacketInfo);
@@ -152,20 +138,8 @@ void lim_print_msg_name(tpAniSirGlobal pMac, uint16_t logLevel, uint32_t msgType
 extern QDF_STATUS lim_send_set_max_tx_power_req(tpAniSirGlobal pMac,
 		int8_t txPower,
 		tpPESession pSessionEntry);
-
-/**
- * lim_get_max_tx_power() - Utility to get maximum tx power
- * @mac: mac handle
- * @attr: list of powers from which maximum value is to be calculated
- *
- * This function is used to get the maximum possible tx power from the list
- * of tx powers mentioned in @attr.
- *
- * Return: Max tx power
- */
-uint8_t lim_get_max_tx_power(tpAniSirGlobal mac,
-			     struct lim_max_tx_pwr_attr attr);
-
+extern uint8_t lim_get_max_tx_power(int8_t regMax, int8_t apTxPower,
+		uint8_t iniTxPower);
 uint8_t lim_is_addr_bc(tSirMacAddr);
 uint8_t lim_is_group_addr(tSirMacAddr);
 
@@ -345,6 +319,26 @@ void lim_prepare_for11h_channel_switch(tpAniSirGlobal pMac,
 		tpPESession psessionEntry);
 void lim_switch_channel_cback(tpAniSirGlobal pMac, QDF_STATUS status,
 		uint32_t *data, tpPESession psessionEntry);
+
+/**
+ * lim_assoc_rej_get_remaining_delta() - Get remaining time delta for
+ * the rssi based disallowed list entry
+ * @node: rssi based disallowed list entry
+ *
+ * Return: remaining delta, can be -ve if time has already expired.
+ */
+int
+lim_assoc_rej_get_remaining_delta(struct sir_rssi_disallow_lst *node);
+
+/**
+ * lim_rem_blacklist_entry_with_lowest_delta() - Remove the entry with lowest
+ * time delta
+ * @list: rssi based rejected BSSID list
+ *
+ * Return: QDF_STATUS
+ */
+QDF_STATUS
+lim_rem_blacklist_entry_with_lowest_delta(qdf_list_t *list);
 
 /**
  * lim_get_session_by_macaddr() - api to find session based on MAC

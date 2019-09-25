@@ -151,7 +151,7 @@ static void scm_scan_post_event(struct wlan_objmgr_vdev *vdev,
 		  event->vdev_id, event->type, event->reason, event->chan_freq,
 		  event->requester, event->scan_id);
 
-	listeners = qdf_mem_malloc(sizeof(*listeners));
+	listeners = qdf_mem_malloc_atomic(sizeof(*listeners));
 	if (!listeners) {
 		scm_warn("couldn't allocate listeners list");
 		return;
@@ -418,8 +418,7 @@ scm_scan_start_req(struct scheduler_msg *msg)
 
 	cmd.cmd_type = WLAN_SER_CMD_SCAN;
 	cmd.cmd_id = req->scan_req.scan_id;
-	cmd.cmd_cb = (wlan_serialization_cmd_callback)
-		scm_scan_serialize_callback;
+	cmd.cmd_cb = scm_scan_serialize_callback;
 	cmd.umac_cmd = req;
 	cmd.source = WLAN_UMAC_COMP_SCAN;
 	cmd.is_high_priority = false;

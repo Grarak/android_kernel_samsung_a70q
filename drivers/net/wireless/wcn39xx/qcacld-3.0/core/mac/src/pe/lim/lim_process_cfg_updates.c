@@ -52,8 +52,8 @@ void lim_set_cfg_protection(tpAniSirGlobal pMac, tpPESession pesessionEntry)
 	if (pesessionEntry != NULL && LIM_IS_AP_ROLE(pesessionEntry)) {
 		if (pesessionEntry->gLimProtectionControl ==
 		    WNI_CFG_FORCE_POLICY_PROTECTION_DISABLE)
-			qdf_mem_set((void *)&pesessionEntry->cfgProtection,
-				    sizeof(tCfgProtection), 0);
+			qdf_mem_zero((void *)&pesessionEntry->cfgProtection,
+				    sizeof(tCfgProtection));
 		else {
 			pe_debug("frm11a = %d, from11b = %d, frm11g = %d, "
 				   "ht20 = %d, nongf = %d, lsigTxop = %d, "
@@ -83,8 +83,8 @@ void lim_set_cfg_protection(tpAniSirGlobal pMac, tpPESession pesessionEntry)
 
 		if (pMac->lim.gLimProtectionControl ==
 		    WNI_CFG_FORCE_POLICY_PROTECTION_DISABLE)
-			qdf_mem_set((void *)&pMac->lim.cfgProtection,
-				    sizeof(tCfgProtection), 0);
+			qdf_mem_zero((void *)&pMac->lim.cfgProtection,
+				    sizeof(tCfgProtection));
 		else {
 			pMac->lim.cfgProtection.fromlla =
 				(val >> WNI_CFG_PROTECTION_ENABLED_FROM_llA) & 1;
@@ -140,8 +140,10 @@ void lim_handle_param_update(tpAniSirGlobal pMac, eUpdateIEsType cfgId)
 		msg.type = SIR_LIM_UPDATE_BEACON;
 		status = lim_post_msg_api(pMac, &msg);
 
+#ifdef WLAN_DEBUG
 		if (status != QDF_STATUS_SUCCESS)
 			pe_err("Failed lim_post_msg_api %u", status);
+#endif
 			break;
 	}
 	default:
@@ -207,10 +209,12 @@ void lim_handle_cf_gparam_update(tpAniSirGlobal pMac, uint32_t cfgId)
 		val16 = (uint16_t) val1;
 		pAmpduParamInfo = (tSirMacHTParametersInfo *) &val16;
 		pAmpduParamInfo->mpduDensity = (uint8_t) val2;
+#ifdef WLAN_DEBUG
 		if (cfg_set_int
 			    (pMac, WNI_CFG_HT_AMPDU_PARAMS,
 			    *(uint8_t *) pAmpduParamInfo) != QDF_STATUS_SUCCESS)
 			pe_err("could not update HT AMPDU Param CFG");
+#endif
 			break;
 	case WNI_CFG_MAX_RX_AMPDU_FACTOR:
 		if (wlan_cfg_get_int(pMac, WNI_CFG_HT_AMPDU_PARAMS, &val1) !=
@@ -226,10 +230,12 @@ void lim_handle_cf_gparam_update(tpAniSirGlobal pMac, uint32_t cfgId)
 		val16 = (uint16_t) val1;
 		pAmpduParamInfo = (tSirMacHTParametersInfo *) &val16;
 		pAmpduParamInfo->maxRxAMPDUFactor = (uint8_t) val2;
+#ifdef WLAN_DEBUG
 		if (cfg_set_int
 			    (pMac, WNI_CFG_HT_AMPDU_PARAMS,
 			    *(uint8_t *) pAmpduParamInfo) != QDF_STATUS_SUCCESS)
 			pe_err("could not update HT AMPDU Param CFG");
+#endif
 			break;
 
 	case WNI_CFG_DOT11_MODE:

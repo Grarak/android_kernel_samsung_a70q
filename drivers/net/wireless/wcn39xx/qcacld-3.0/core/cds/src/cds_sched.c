@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -36,6 +36,9 @@
 #include <linux/spinlock.h>
 #include <linux/kthread.h>
 #include <linux/cpu.h>
+#ifdef RX_PERFORMANCE
+#include <linux/sched/types.h>
+#endif
 /* Preprocessor Definitions and Constants */
 #define CDS_SCHED_THREAD_HEART_BEAT    INFINITE
 /* Milli seconds to delay SSR thread when an Entry point is Active */
@@ -126,8 +129,8 @@ static void cds_rx_thread_log_cpu_affinity_change(unsigned char core_affine_cnt,
 	char new_mask_str[10];
 	char old_mask_str[10];
 
-	qdf_mem_set(new_mask_str, sizeof(new_mask_str), 0);
-	qdf_mem_set(new_mask_str, sizeof(old_mask_str), 0);
+	qdf_mem_zero(new_mask_str, sizeof(new_mask_str));
+	qdf_mem_zero(new_mask_str, sizeof(old_mask_str));
 
 	cpumap_print_to_pagebuf(false, old_mask_str, old_mask);
 	cpumap_print_to_pagebuf(false, new_mask_str, new_mask);
@@ -609,6 +612,38 @@ cds_indicate_rxpkt(p_cds_sched_context pSchedContext,
 }
 
 /**
+ * cds_close_rx_thread() - close the Rx thread
+ *
+ * This api closes the Rx thread:
+ *
+ * Return: qdf status
+ */
+QDF_STATUS cds_close_rx_thread(void)
+{
+	cds_debug("invoked");
+
+	if (!gp_cds_sched_context) {
+		cds_err("gp_cds_sched_context == NULL");
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	if (!gp_cds_sched_context->ol_rx_thread)
+		return QDF_STATUS_SUCCESS;
+
+	/* Shut down Tlshim Rx thread */
+	set_bit(RX_SHUTDOWN_EVENT, &gp_cds_sched_context->ol_rx_event_flag);
+	set_bit(RX_POST_EVENT, &gp_cds_sched_context->ol_rx_event_flag);
+	wake_up_interruptible(&gp_cds_sched_context->ol_rx_wait_queue);
+	wait_for_completion(&gp_cds_sched_context->ol_rx_shutdown);
+	gp_cds_sched_context->ol_rx_thread = NULL;
+	cds_drop_rxpkt_by_staid(gp_cds_sched_context, WLAN_MAX_STA_COUNT);
+	cds_free_ol_rx_pkt_freeq(gp_cds_sched_context);
+	qdf_cpuhp_unregister(&gp_cds_sched_context->cpuhp_event_handle);
+
+	return QDF_STATUS_SUCCESS;
+} /* cds_close_rx_thread */
+
+/**
  * cds_drop_rxpkt_by_staid() - api to drop pending rx packets for a sta
  * @pSchedContext: Pointer to the global CDS Sched Context
  * @staId: Station Id
@@ -770,20 +805,7 @@ QDF_STATUS cds_sched_close(void)
 		return QDF_STATUS_E_FAILURE;
 	}
 
-#ifdef QCA_CONFIG_SMP
-	if (!gp_cds_sched_context->ol_rx_thread)
-		return QDF_STATUS_SUCCESS;
-
-	/* Shut down Tlshim Rx thread */
-	set_bit(RX_SHUTDOWN_EVENT, &gp_cds_sched_context->ol_rx_event_flag);
-	set_bit(RX_POST_EVENT, &gp_cds_sched_context->ol_rx_event_flag);
-	wake_up_interruptible(&gp_cds_sched_context->ol_rx_wait_queue);
-	wait_for_completion(&gp_cds_sched_context->ol_rx_shutdown);
-	gp_cds_sched_context->ol_rx_thread = NULL;
-	cds_drop_rxpkt_by_staid(gp_cds_sched_context, WLAN_MAX_STA_COUNT);
-	cds_free_ol_rx_pkt_freeq(gp_cds_sched_context);
-	qdf_cpuhp_unregister(&gp_cds_sched_context->cpuhp_event_handle);
-#endif
+	cds_close_rx_thread();
 	gp_cds_sched_context = NULL;
 	return QDF_STATUS_SUCCESS;
 } /* cds_sched_close() */

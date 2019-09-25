@@ -42,6 +42,35 @@ void pmo_set_wow_event_bitmap(WOW_WAKE_EVENT_TYPE event,
 	bitmask[idx] |= 1 << bit_idx;
 }
 
+QDF_STATUS pmo_core_del_wow_pattern(struct wlan_objmgr_vdev *vdev)
+{
+	QDF_STATUS status;
+	uint8_t id;
+	uint8_t pattern_count;
+	struct pmo_vdev_priv_obj *vdev_ctx;
+
+	pmo_enter();
+	status = pmo_vdev_get_ref(vdev);
+	if (QDF_IS_STATUS_ERROR(status))
+		goto out;
+
+	vdev_ctx = pmo_vdev_get_priv(vdev);
+	pattern_count = pmo_get_wow_default_ptrn(vdev_ctx);
+	/* clear all default patterns cofigured by pmo */
+	for (id = 0; id < pattern_count; id++)
+		status = pmo_tgt_del_wow_pattern(vdev, id, false);
+
+	/* clear all user patterns cofigured by pmo */
+	pattern_count = pmo_get_wow_user_ptrn(vdev_ctx);
+	for (id = 0; id < pattern_count; id++)
+		status = pmo_tgt_del_wow_pattern(vdev, id, true);
+
+	pmo_vdev_put_ref(vdev);
+out:
+	pmo_exit();
+	return status;
+}
+
 QDF_STATUS pmo_core_add_wow_user_pattern(struct wlan_objmgr_vdev *vdev,
 		struct pmo_wow_add_pattern *ptrn)
 {
@@ -290,6 +319,16 @@ bool pmo_core_is_wow_applicable(struct wlan_objmgr_psoc *psoc)
 		return true;
 	}
 
+	if (pmo_core_is_lpass_enabled(psoc)) {
+		pmo_info("lpass enabled, enabling wow");
+		return true;
+	}
+
+	if (pmo_core_is_nan_enabled(psoc)) {
+		pmo_debug("nan enabled, enabling wow");
+		return true;
+	}
+
 	/* Iterate through VDEV list */
 	for (vdev_id = 0; vdev_id < WLAN_UMAC_PSOC_MAX_VDEVS; vdev_id++) {
 		vdev = pmo_psoc_get_vdev(psoc, vdev_id);
@@ -311,12 +350,6 @@ bool pmo_core_is_wow_applicable(struct wlan_objmgr_psoc *psoc)
 			is_wow_applicable = true;
 		} else if (pmo_core_is_p2plo_in_progress(vdev)) {
 			pmo_debug("P2P LO is in progress, enabling wow");
-			is_wow_applicable = true;
-		} else if (pmo_core_is_lpass_enabled(vdev)) {
-			pmo_debug("LPASS is enabled, enabling WoW");
-			is_wow_applicable = true;
-		} else if (pmo_core_is_nan_enabled(vdev)) {
-			pmo_debug("NAN is enabled, enabling WoW");
 			is_wow_applicable = true;
 		} else if (pmo_core_get_vdev_op_mode(vdev) == QDF_NDI_MODE) {
 			pmo_debug("vdev %d is in NAN data mode, enabling wow",
@@ -391,7 +424,9 @@ void pmo_set_sta_wow_bitmask(uint32_t *bitmask, uint32_t wow_bitmap_size)
 
 void pmo_set_sap_wow_bitmask(uint32_t *bitmask, uint32_t wow_bitmap_size)
 {
-
+	pmo_set_wow_event_bitmap(WOW_CLIENT_KICKOUT_EVENT,
+				 wow_bitmap_size,
+				 bitmask);
 	pmo_set_wow_event_bitmap(WOW_PROBE_REQ_WPS_IE_EVENT,
 				 wow_bitmap_size,
 				 bitmask);

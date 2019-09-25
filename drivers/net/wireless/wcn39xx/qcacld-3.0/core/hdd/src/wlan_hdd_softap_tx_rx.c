@@ -826,7 +826,7 @@ static void hdd_softap_notify_tx_compl_cbk(struct sk_buff *skb,
 QDF_STATUS hdd_softap_rx_packet_cbk(void *context, qdf_nbuf_t rx_buf)
 {
 	struct hdd_adapter *adapter = NULL;
-	int rxstat;
+	QDF_STATUS qdf_status;
 	unsigned int cpu_index;
 	struct sk_buff *skb = NULL;
 	struct sk_buff *next = NULL;
@@ -913,9 +913,10 @@ QDF_STATUS hdd_softap_rx_packet_cbk(void *context, qdf_nbuf_t rx_buf)
 		skb->protocol = eth_type_trans(skb, skb->dev);
 
 		/* hold configurable wakelock for unicast traffic */
-		if (hdd_ctx->config->rx_wakelock_timeout &&
-			skb->pkt_type != PACKET_BROADCAST &&
-			skb->pkt_type != PACKET_MULTICAST) {
+		if (!hdd_is_current_high_throughput(hdd_ctx) &&
+		    hdd_ctx->config->rx_wakelock_timeout &&
+		    skb->pkt_type != PACKET_BROADCAST &&
+		    skb->pkt_type != PACKET_MULTICAST) {
 			cds_host_diag_log_work(&hdd_ctx->rx_wake_lock,
 						   hdd_ctx->config->rx_wakelock_timeout,
 						   WIFI_POWER_EVENT_WAKELOCK_HOLD_RX);
@@ -928,15 +929,10 @@ QDF_STATUS hdd_softap_rx_packet_cbk(void *context, qdf_nbuf_t rx_buf)
 		 * it to stack
 		 */
 		qdf_net_buf_debug_release_skb(skb);
-		if (hdd_napi_enabled(HDD_NAPI_ANY) &&
-			!hdd_ctx->enable_rxthread)
-			rxstat = netif_receive_skb(skb);
-		else
-			rxstat = netif_rx_ni(skb);
 
-		hdd_ctx->no_rx_offload_pkt_cnt++;
+		qdf_status = hdd_rx_deliver_to_stack(adapter, skb);
 
-		if (NET_RX_SUCCESS == rxstat)
+		if (QDF_IS_STATUS_SUCCESS(qdf_status))
 			++adapter->hdd_stats.tx_rx_stats.rx_delivered[cpu_index];
 		else
 			++adapter->hdd_stats.tx_rx_stats.rx_refused[cpu_index];
@@ -950,14 +946,11 @@ QDF_STATUS hdd_softap_deregister_sta(struct hdd_adapter *adapter,
 {
 	QDF_STATUS qdf_status = QDF_STATUS_SUCCESS;
 	struct hdd_context *hdd_ctx;
-	mac_handle_t mac_handle;
 
 	if (NULL == adapter) {
 		hdd_err("NULL adapter");
 		return QDF_STATUS_E_INVAL;
 	}
-
-	mac_handle = hdd_adapter_get_mac_handle(adapter);
 
 	if (WLAN_HDD_ADAPTER_MAGIC != adapter->magic) {
 		hdd_err("Invalid adapter magic");
@@ -995,7 +988,6 @@ QDF_STATUS hdd_softap_deregister_sta(struct hdd_adapter *adapter,
 	}
 
 	hdd_ctx->sta_to_adapter[sta_id] = NULL;
-	sme_update_oce_flags(mac_handle, false);
 
 	return qdf_status;
 }
@@ -1013,7 +1005,6 @@ QDF_STATUS hdd_softap_register_sta(struct hdd_adapter *adapter,
 	struct ol_txrx_ops txrx_ops;
 	void *soc = cds_get_context(QDF_MODULE_ID_SOC);
 	void *pdev = cds_get_context(QDF_MODULE_ID_TXRX);
-	mac_handle_t mac_handle = hdd_adapter_get_mac_handle(adapter);
 
 	hdd_info("STA:%u, Auth:%u, Priv:%u, WMM:%u",
 		 sta_id, auth_required, privacy_required, wmm_enabled);
@@ -1091,7 +1082,6 @@ QDF_STATUS hdd_softap_register_sta(struct hdd_adapter *adapter,
 	wlan_hdd_netif_queue_control(adapter,
 				   WLAN_START_ALL_NETIF_QUEUE_N_CARRIER,
 				   WLAN_CONTROL_PATH);
-	sme_update_oce_flags(mac_handle, true);
 
 	return qdf_status;
 }
@@ -1171,7 +1161,8 @@ QDF_STATUS hdd_softap_stop_bss(struct hdd_adapter *adapter)
 		wlan_hdd_restore_channels(hdd_ctx, true);
 
 	/*  Mark the indoor channel (passive) to enable  */
-	if (hdd_ctx->config->force_ssc_disable_indoor_channel) {
+	if (hdd_ctx->config->force_ssc_disable_indoor_channel &&
+	    adapter->device_mode == QDF_SAP_MODE) {
 		hdd_update_indoor_channel(hdd_ctx, false);
 		sme_update_channel_list(hdd_ctx->mac_handle);
 	}

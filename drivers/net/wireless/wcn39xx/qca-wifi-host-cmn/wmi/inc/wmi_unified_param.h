@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -37,7 +37,6 @@
 
 #define IEEE80211_ADDR_LEN  6  /* size of 802.11 address */
 #define WMI_MAC_MAX_SSID_LENGTH              32
-#define WMI_SCAN_MAX_NUM_SSID                0x0A
 #define mgmt_tx_dl_frm_len 64
 #define WMI_SMPS_MASK_LOWER_16BITS 0xFF
 #define WMI_SMPS_MASK_UPPER_3BITS 0x7
@@ -1973,6 +1972,8 @@ struct roam_fils_params {
  * @assoc_ie: Assoc IE buffer
  * @add_fils_tlv: add FILS TLV boolean
  * @roam_fils_params: roam fils params
+ * @rct_validity_timer: duration value for which the entries in
+ * roam candidate table are valid
  */
 struct roam_offload_scan_params {
 	uint8_t is_roam_req_valid;
@@ -1994,6 +1995,7 @@ struct roam_offload_scan_params {
 	int auth_mode;
 	bool fw_okc;
 	bool fw_pmksa_cache;
+	uint32_t rct_validity_timer;
 #endif
 	uint32_t min_delay_btw_roam_scans;
 	uint32_t roam_trigger_reason_bitmask;
@@ -2197,6 +2199,10 @@ struct param_slot_scoring {
  *                  BITS 16-23 :- It contains scoring percentage of 3x3
  *                  BITS 24-31 :- It contains scoring percentage of 4x4
  *                  The value of each index must be 0-100
+ * @roam_score_delta: delta value expected over the roam score of the candidate
+ * ap over the roam score of the current ap
+ * @roam_trigger_bitmap: bitmap of roam triggers on which roam_score_delta
+ * will be applied
  * @rssi_scoring: RSSI scoring information.
  * @esp_qbss_scoring: ESP/QBSS scoring percentage information
  * @oce_wan_scoring: OCE WAN metrics percentage information
@@ -2217,6 +2223,8 @@ struct scoring_param {
 	uint32_t bw_index_score;
 	uint32_t band_index_score;
 	uint32_t nss_index_score;
+	uint32_t roam_score_delta;
+	uint32_t roam_trigger_bitmap;
 	struct rssi_scoring rssi_scoring;
 	struct param_slot_scoring esp_qbss_scoring;
 	struct param_slot_scoring oce_wan_scoring;
@@ -5457,6 +5465,7 @@ typedef enum {
 	wmi_p2p_disc_event_id,
 	wmi_p2p_noa_event_id,
 	wmi_p2p_lo_stop_event_id,
+	wmi_vdev_add_macaddr_rx_filter_event_id,
 	wmi_pdev_resume_event_id,
 	wmi_d0_wow_disable_ack_event_id,
 	wmi_wow_initial_wakeup_event_id,
@@ -5566,6 +5575,14 @@ typedef enum {
 	wmi_apf_get_vdev_work_memory_resp_event_id,
 	wmi_roam_scan_stats_event_id,
 	wmi_wlan_sar2_result_event_id,
+	wmi_vdev_bcn_reception_stats_event_id,
+	wmi_roam_blacklist_event_id,
+	wmi_pdev_cold_boot_cal_event_id,
+	wmi_vdev_get_mws_coex_state_eventid,
+	wmi_vdev_get_mws_coex_dpwb_state_eventid,
+	wmi_vdev_get_mws_coex_tdm_state_eventid,
+	wmi_vdev_get_mws_coex_idrx_state_eventid,
+	wmi_vdev_get_mws_coex_antenna_sharing_state_eventid,
 	wmi_events_max,
 } wmi_conv_event_id;
 
@@ -5997,6 +6014,10 @@ typedef enum {
 	wmi_service_twt_responder,
 	wmi_service_listen_interval_offload_support,
 	wmi_service_per_vdev_chain_support,
+	wmi_service_new_htt_msg_format,
+	wmi_service_peer_unmap_cnf_support,
+	wmi_service_beacon_reception_stats,
+	wmi_service_vdev_latency_config,
 	wmi_services_max,
 } wmi_conv_service_ids;
 #define WMI_SERVICE_UNAVAILABLE 0xFFFF
@@ -6086,6 +6107,7 @@ struct wmi_host_fw_abi_ver {
  * @atf_config: ATF config
  * @mgmt_comp_evt_bundle_support: bundle support required for mgmt complete evt
  * @tx_msdu_new_partition_id_support: new partiition id support for tx msdu
+ * @peer_unmap_conf_support: peer unmap conf support in fw
  * @iphdr_pad_config: ipheader pad config
  * @qwrap_config: Qwrap configuration
  * @alloc_frag_desc_for_data_pkt: Frag desc for data
@@ -6158,7 +6180,9 @@ typedef struct {
 	uint32_t tt_support;
 	uint32_t atf_config:1,
 		 mgmt_comp_evt_bundle_support:1,
-		 tx_msdu_new_partition_id_support:1;
+		 tx_msdu_new_partition_id_support:1,
+		 new_htt_msg_format:1,
+		 peer_unmap_conf_support:1;
 	uint32_t iphdr_pad_config;
 	uint32_t
 		qwrap_config:16,
@@ -8091,6 +8115,8 @@ struct wmi_mawc_roam_params {
  * @btm_solicited_timeout: Timeout value for waiting BTM request
  * @btm_max_attempt_cnt: Maximum attempt for sending BTM query to ESS
  * @btm_sticky_time: Stick time after roaming to new AP by BTM
+ * @disassoc_timer_threshold: threshold value till which the firmware can
+ * wait before triggering the roam scan after receiving the disassoc iminent
  */
 struct wmi_btm_config {
 	uint8_t vdev_id;
@@ -8098,6 +8124,18 @@ struct wmi_btm_config {
 	uint32_t btm_solicited_timeout;
 	uint32_t btm_max_attempt_cnt;
 	uint32_t btm_sticky_time;
+	uint32_t disassoc_timer_threshold;
+};
+
+/**
+ * struct wmi_bss_load_config - BSS load trigger parameters
+ * @vdev_id: VDEV on which the parameters should be applied
+ * @bss_load_threshold: BSS load threshold after which roam scan should trigger
+ */
+struct wmi_bss_load_config {
+	uint32_t vdev_id;
+	uint32_t bss_load_threshold;
+	uint32_t bss_load_sample_time;
 };
 
 /**
@@ -8599,4 +8637,139 @@ struct wmi_roam_scan_stats_res {
 
 /* End of roam scan stats definitions */
 
+/**
+ * struct mws_coex_state - Modem Wireless Subsystem(MWS) coex info
+ * @vdev_id : vdev id
+ * @coex_scheme_bitmap: LTE-WLAN coexistence scheme bitmap
+ * Indicates the final schemes applied for the currrent Coex scenario.
+ * Bit 0 - TDM policy
+ * Bit 1 - Forced TDM policy
+ * Bit 2 - Dynamic Power Back-off policy
+ * Bit 3 - Channel Avoidance policy
+ * Bit 4 - Static Power Back-off policy.
+ * @active_conflict_count : active conflict count
+ * @potential_conflict_count: Potential conflict count
+ * @chavd_group0_bitmap : Indicates the WLAN channels to be avoided in
+ * b/w WLAN CH-1 and WLAN CH-14
+ * @chavd_group1_bitmap : Indicates the WLAN channels to be avoided in
+ * WLAN CH-36 and WLAN CH-64
+ * @chavd_group2_bitmap : Indicates the WLAN channels to be avoided in
+ * b/w WLAN CH-100 and WLAN CH-140
+ * @chavd_group2_bitmap : Indicates the WLAN channels to be avoided in
+ * b/w WLAN CH-149 and WLAN CH-165
+ */
+struct mws_coex_state {
+	uint32_t vdev_id;
+	uint32_t coex_scheme_bitmap;
+	uint32_t active_conflict_count;
+	uint32_t potential_conflict_count;
+	uint32_t chavd_group0_bitmap;
+	uint32_t chavd_group1_bitmap;
+	uint32_t chavd_group2_bitmap;
+	uint32_t chavd_group3_bitmap;
+};
+
+/**
+ * struct hdd_mws_coex_dpwb_state - Modem Wireless Subsystem(MWS) coex DPWB info
+ * @vdev_id : vdev id
+ * @current_dpwb_state: Current state of the Dynamic Power Back-off SM
+ * @pnp1_value: Tx power to be applied in next Dynamic Power Back-off cycle
+ * @lte_dutycycle: Indicates the duty cycle of current LTE frame
+ * @sinr_wlan_on: LTE SINR value in dB, when WLAN is ON
+ * @sinr_wlan_off: LTE SINR value in dB, when WLAN is OFF
+ * @bler_count: LTE blocks with error for the current block err report.
+ * @block_count: Number of LTE blocks considered for bler count report.
+ * @wlan_rssi_level: WLAN RSSI level
+ * @wlan_rssi: WLAN RSSI value in dBm considered in DP backoff algo
+ * @is_tdm_running: Indicates whether any TDM policy triggered
+ */
+struct mws_coex_dpwb_state {
+	uint32_t vdev_id;
+	int32_t  current_dpwb_state;
+	int32_t  pnp1_value;
+	uint32_t lte_dutycycle;
+	int32_t  sinr_wlan_on;
+	int32_t  sinr_wlan_off;
+	uint32_t bler_count;
+	uint32_t block_count;
+	uint32_t wlan_rssi_level;
+	int32_t  wlan_rssi;
+	uint32_t is_tdm_running;
+};
+
+/**
+ * struct mws_coex_tdm_state - Modem Wireless Subsystem(MWS) coex TDM state info
+ * @vdev_id: vdev id
+ * @tdm_policy_bitmap: Time Division Multiplexing (TDM) LTE-Coex Policy type.
+ * @tdm_sf_bitmap: TDM LTE/WLAN sub-frame bitmap.
+ */
+struct mws_coex_tdm_state {
+	uint32_t vdev_id;
+	uint32_t tdm_policy_bitmap;
+	uint32_t tdm_sf_bitmap;
+};
+
+/**
+ * struct mws_coex_idrx_state - Modem Wireless Subsystem(MWS) coex IDRX state
+ * @vdev_id: vdev id
+ * @sub0_techid: SUB0 LTE-coex tech.
+ * @sub0_policy: SUB0 mitigation policy.
+ * @sub0_is_link_critical: Set if SUB0 is in link critical state.
+ * @sub0_static_power: LTE SUB0 imposed static power applied
+ * to WLAN due to LTE-WLAN coex.
+ * @sub0_rssi: LTE SUB0 RSSI value in dBm.
+ * @sub1_techid: SUB1 LTE-coex tech.
+ * @sub1_policy: SUB1 mitigation policy.
+ * @sub1_is_link_critical: Set if SUB1 is in link critical state.
+ * @sub1_static_power: LTE SUB1 imposed static power applied
+ * to WLAN due to LTE-WLAN coex.
+ * @sub1_rssi: LTE SUB1 RSSI value in dBm.
+ */
+struct mws_coex_idrx_state {
+	uint32_t vdev_id;
+	uint32_t sub0_techid;
+	uint32_t sub0_policy;
+	uint32_t sub0_is_link_critical;
+	int32_t  sub0_static_power;
+	int32_t  sub0_rssi;
+	uint32_t sub1_techid;
+	uint32_t sub1_policy;
+	uint32_t sub1_is_link_critical;
+	int32_t  sub1_static_power;
+	int32_t  sub1_rssi;
+};
+
+/**
+ * struct mws_antenna_sharing_info - MWS Antenna sharing Info
+ * @vdev_id: vdev id
+ * @coex_flags: BDF values of Coex flags
+ * @coex_config: BDF values of Coex Antenna sharing config
+ * @tx_chain_mask: Tx Chain mask value
+ * @rx_chain_mask: Rx Chain mask value
+ * @rx_nss: Currently active Rx Spatial streams
+ * @force_mrc: Forced MRC policy type
+ * @rssi_type: RSSI value considered for MRC
+ * @chain0_rssi: RSSI value measured at Chain-0 in dBm
+ * @chain1_rssi: RSSI value measured at Chain-1 in dBm
+ * @combined_rssi: RSSI value of two chains combined in dBm
+ * @imbalance: Absolute imbalance between two Rx chains in dB
+ * @mrc_threshold: RSSI threshold defined for the above imbalance value in dBm
+ * @grant_duration: Antenna grant duration to WLAN, in milliseconds
+ */
+struct mws_antenna_sharing_info {
+	uint32_t vdev_id;
+	uint32_t coex_flags;
+	uint32_t coex_config;
+	uint32_t tx_chain_mask;
+	uint32_t rx_chain_mask;
+	uint32_t rx_nss;
+	uint32_t force_mrc;
+	uint32_t rssi_type;
+	int32_t  chain0_rssi;
+	int32_t  chain1_rssi;
+	int32_t  combined_rssi;
+	uint32_t imbalance;
+	int32_t  mrc_threshold;
+	uint32_t grant_duration;
+};
 #endif /* _WMI_UNIFIED_PARAM_H_ */

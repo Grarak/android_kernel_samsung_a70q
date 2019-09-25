@@ -133,6 +133,7 @@ static int sap_start_dfs_cac_timer(struct sap_context *sapContext);
  *
  * Return: string for the @event.
  */
+#ifdef WLAN_DEBUG
 static uint8_t *sap_hdd_event_to_string(eSapHddEvent event)
 {
 	switch (event) {
@@ -167,6 +168,7 @@ static uint8_t *sap_hdd_event_to_string(eSapHddEvent event)
 		return "eSAP_HDD_EVENT_UNKNOWN";
 	}
 }
+#endif
 
 /*----------------------------------------------------------------------------
  * Externalized Function Definitions
@@ -1116,13 +1118,14 @@ QDF_STATUS sap_channel_sel(struct sap_context *sap_context)
 
 	/* Initiate a SCAN request */
 	ucfg_scan_init_default_params(vdev, req);
-	req->scan_req.dwell_time_active = 0;
 	scan_id = ucfg_scan_get_scan_id(mac_ctx->psoc);
 	req->scan_req.scan_id = scan_id;
 	vdev_id = wlan_vdev_get_id(vdev);
 	req->scan_req.vdev_id = vdev_id;
+	req->scan_req.scan_f_passive = false;
 	req->scan_req.scan_req_id = sap_context->req_id;
 	req->scan_req.scan_priority = SCAN_PRIORITY_HIGH;
+	req->scan_req.scan_f_bcast_probe = true;
 	sap_get_channel_list(sap_context, &channel_list, &num_of_channels);
 
 #ifdef FEATURE_WLAN_AP_AP_ACS_OPTIMIZE
@@ -1631,6 +1634,10 @@ QDF_STATUS sap_signal_hdd_event(struct sap_context *sap_ctx,
 			reassoc_complete->ht_caps = csr_roaminfo->ht_caps;
 		if (csr_roaminfo->vht_caps.present)
 			reassoc_complete->vht_caps = csr_roaminfo->vht_caps;
+		reassoc_complete->he_caps_present =
+						csr_roaminfo->he_caps_present;
+		reassoc_complete->capability_info =
+						csr_roaminfo->capability_info;
 
 		break;
 
@@ -1765,8 +1772,8 @@ QDF_STATUS sap_signal_hdd_event(struct sap_context *sap_ctx,
 		sap_ap_event.sapHddEventCode = eSAP_CHANNEL_CHANGE_EVENT;
 
 		acs_selected = &sap_ap_event.sapevt.sap_ch_selected;
-		acs_selected->pri_ch = sap_ctx->acs_cfg->pri_ch;
-		acs_selected->ht_sec_ch = sap_ctx->acs_cfg->ht_sec_ch;
+		acs_selected->pri_ch = sap_ctx->channel;
+		acs_selected->ht_sec_ch = sap_ctx->secondary_ch;
 		acs_selected->ch_width =
 			sap_ctx->csr_roamProfile.ch_params.ch_width;
 		acs_selected->vht_seg0_center_ch =
@@ -1802,6 +1809,15 @@ QDF_STATUS sap_signal_hdd_event(struct sap_context *sap_ctx,
 			     sap_ctx->sessionId, sap_ctx->self_mac_addr,
 			     sap_ctx->channel);
 		break;
+
+	case eSAP_CHANNEL_CHANGE_RESP:
+		sap_ap_event.sapHddEventCode = eSAP_CHANNEL_CHANGE_RESP;
+		sap_ap_event.sapevt.ch_change_rsp_status = (QDF_STATUS)context;
+		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_INFO_HIGH,
+			  "In %s, SAP event callback event = %s",
+			 __func__, "eSAP_CHANNEL_CHANGE_RESP");
+		break;
+
 	default:
 		QDF_TRACE(QDF_MODULE_ID_SAP, QDF_TRACE_LEVEL_ERROR,
 			  FL("SAP Unknown callback event = %d"),
@@ -2749,7 +2765,9 @@ QDF_STATUS sap_fsm(struct sap_context *sap_ctx, ptWLAN_SAPEvent sap_event)
 	 * state var that keeps track of state machine
 	 */
 	enum sap_fsm_state state_var = sap_ctx->fsm_state;
+#ifdef WLAN_DEBUG
 	uint32_t msg = sap_event->event; /* State machine input event message */
+#endif
 	QDF_STATUS qdf_status = QDF_STATUS_E_FAILURE;
 	tHalHandle hal = CDS_GET_HAL_CB();
 	tpAniSirGlobal mac_ctx;

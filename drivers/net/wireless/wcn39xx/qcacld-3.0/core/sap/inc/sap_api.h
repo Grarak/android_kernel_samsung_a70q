@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -169,6 +169,8 @@ typedef enum {
 	eSAP_ACS_CHANNEL_SELECTED,
 	eSAP_ECSA_CHANGE_CHAN_IND,
 	eSAP_DFS_NEXT_CHANNEL_REQ,
+	/* Event sent channel switch status to upper layer */
+	eSAP_CHANNEL_CHANGE_RESP,
 } eSapHddEvent;
 
 typedef enum {
@@ -289,6 +291,8 @@ typedef struct sap_StationAssocReassocCompleteEvent_s {
 	uint8_t ecsa_capable;
 	tDot11fIEHTCaps ht_caps;
 	tDot11fIEVHTCaps vht_caps;
+	tSirMacCapabilityInfo capability_info;
+	bool he_caps_present;
 } tSap_StationAssocReassocCompleteEvent;
 
 typedef struct sap_StationDisassocCompleteEvent_s {
@@ -476,6 +480,7 @@ typedef struct sap_Event_s {
 		struct sap_roc_ready_ind_s sap_roc_ind;
 		struct sap_ch_change_ind sap_chan_cng_ind;
 		struct sap_acs_scan_complete_event sap_acs_scan_comp;
+		QDF_STATUS ch_change_rsp_status;
 	} sapevt;
 } tSap_Event, *tpSap_Event;
 
@@ -1218,6 +1223,22 @@ QDF_STATUS wlansap_de_register_mgmt_frame(struct sap_context *sap_ctx,
  */
 QDF_STATUS wlansap_channel_change_request(struct sap_context *sapContext,
 					  uint8_t target_channel);
+
+/**
+ * wlansap_get_sec_channel() - get the secondary sap channel
+ * @sec_ch_offset: secondary channel offset.
+ * @op_channel: Operating sap channel.
+ * @sec_channel: channel to be filled.
+ *
+ * This API will get the secondary sap channel from the offset, and
+ * operating channel.
+ *
+ * Return: None
+ *
+ */
+void wlansap_get_sec_channel(uint8_t sec_ch_offset,
+			     uint8_t op_channel,
+			     uint8_t *sec_channel);
 
 /**
  * wlansap_start_beacon_req() - Send Start Beaconing Request

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2016-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -153,11 +153,10 @@ static void nan_req_activated(void *in_req, uint32_t cmdtype)
 	tx_ops->nan_req_tx(in_req, req_type);
 }
 
-static QDF_STATUS nan_serialized_cb(void *cmd,
-				enum wlan_serialization_cb_reason reason)
+static QDF_STATUS nan_serialized_cb(struct wlan_serialization_command *ser_cmd,
+				    enum wlan_serialization_cb_reason reason)
 {
 	void *req;
-	struct wlan_serialization_command *ser_cmd = cmd;
 
 	if (!ser_cmd || !ser_cmd->umac_cmd) {
 		nan_alert("cmd or umac_cmd is null");
@@ -338,9 +337,8 @@ static QDF_STATUS nan_handle_ndp_ind(
 			return status;
 		}
 	}
-	if (NAN_DATAPATH_ROLE_RESPONDER == ndp_ind->role)
-		psoc_nan_obj->cb_obj.os_if_event_handler(psoc, ndp_ind->vdev,
-						NDP_INDICATION, ndp_ind);
+	psoc_nan_obj->cb_obj.os_if_event_handler(psoc, ndp_ind->vdev,
+						 NDP_INDICATION, ndp_ind);
 
 	return status;
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2019 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -2187,6 +2187,7 @@ more_watermarks:
 					   CE_WATERMARK_MASK |
 					   HOST_IS_COPY_COMPLETE_MASK);
 		} else {
+			qdf_atomic_set(&CE_state->rx_pending, 0);
 			hif_err_rl("%s: target access is not allowed",
 				   __func__);
 			goto unlock_end;
@@ -2870,6 +2871,12 @@ ssize_t hif_dump_desc_event(struct hif_softc *scn, char *buf)
 
 	ce_hist = &scn->hif_ce_desc_hist;
 
+	if (ce_hist->hist_id >= CE_COUNT_MAX ||
+	    ce_hist->hist_index >= HIF_CE_HISTORY_MAX) {
+		qdf_print("Invalid values");
+		return -EINVAL;
+	}
+
 	hist_ev =
 		(struct hif_ce_desc_event *)ce_hist->hist_ev[ce_hist->hist_id];
 
@@ -2879,12 +2886,6 @@ ssize_t hif_dump_desc_event(struct hif_softc *scn, char *buf)
 	}
 
 	event = &hist_ev[ce_hist->hist_index];
-
-	if ((ce_hist->hist_id >= CE_COUNT_MAX) ||
-		(ce_hist->hist_index >= HIF_CE_HISTORY_MAX)) {
-		qdf_print("Invalid values\n");
-		return -EINVAL;
-	}
 
 	qdf_log_timestamp_to_secs(event->time, &secs, &usecs);
 
@@ -2945,8 +2946,8 @@ ssize_t hif_input_desc_trace_buf_index(struct hif_softc *scn,
 		return -EINVAL;
 	}
 
-	if (sscanf(buf, "%d %d", &ce_hist->hist_id,
-			&ce_hist->hist_index) != 2) {
+	if (sscanf(buf, "%u %u", (unsigned int *)&ce_hist->hist_id,
+		   (unsigned int *)&ce_hist->hist_index) != 2) {
 		pr_err("%s: Invalid input value.\n", __func__);
 		return -EINVAL;
 	}
@@ -2990,7 +2991,8 @@ ssize_t hif_ce_en_desc_hist(struct hif_softc *scn, const char *buf, size_t size)
 		return -EINVAL;
 	}
 
-	if (sscanf(buf, "%d %d", &ce_id, &cfg) != 2) {
+	if (sscanf(buf, "%u %u", (unsigned int *)&ce_id,
+		   (unsigned int *)&cfg) != 2) {
 		pr_err("%s: Invalid input: Enter CE Id<sp><1/0>.\n", __func__);
 		return -EINVAL;
 	}
