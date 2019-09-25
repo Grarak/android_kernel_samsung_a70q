@@ -43,6 +43,10 @@
 #include "wlan_hdd_green_ap_cfg.h"
 #include "wlan_hdd_twt.h"
 
+#if defined (SEC_CONFIG_PSM_SYSFS) || defined (SEC_CONFIG_POWER_BACKOFF)
+#define MAX_RETRY 5
+#endif /* SEC_CONFIG_PSM_SYSFS || SEC_CONFIG_POWER_BACKOFF */
+
 static void
 cb_notify_set_roam_prefer5_g_hz(struct hdd_context *hdd_ctx,
 				unsigned long notify_id)
@@ -6249,6 +6253,9 @@ static QDF_STATUS hdd_apply_cfg_ini(struct hdd_context *hdd_ctx,
 	uint32_t cbOutString;
 	int i;
 	int rv;
+#ifdef SEC_CONFIG_PSM_SYSFS
+	int is_rfmode_off = wlan_hdd_sec_get_psm();
+#endif /* SEC_CONFIG_PSM_SYSFS */
 
 	BUILD_BUG_ON(MAX_CFG_INI_ITEMS < cRegTableEntries);
 
@@ -6325,6 +6332,38 @@ static QDF_STATUS hdd_apply_cfg_ini(struct hdd_context *hdd_ctx,
 					value = pRegEntry->VarDefault;
 				}
 			}
+#ifdef SEC_CONFIG_PSM_SYSFS
+			if (!strcmp(pRegEntry->RegName, CFG_ENABLE_IMPS_NAME) || !strcmp(pRegEntry->RegName, CFG_ENABLE_PS_NAME)) {
+				printk("[WIFI] %s: original_value  = %u", pRegEntry->RegName, value);
+				if(!is_rfmode_off)
+					value = 0;
+				printk("[WIFI] %s: sec_control_psm = %u", pRegEntry->RegName, value);
+			}
+			// newly added for LFR enabling,disabling.
+			if (!strcmp(pRegEntry->RegName, CFG_LFR_FEATURE_ENABLED_NAME) ||
+				!strcmp(pRegEntry->RegName, CFG_FAST_TRANSITION_ENABLED_NAME) ||
+				!strcmp(pRegEntry->RegName, CFG_ENABLE_HOST_ARPOFFLOAD_NAME)) {
+				printk("[WIFI] %s: original_value  = %u", pRegEntry->RegName, value);
+				if(!is_rfmode_off)
+					value = 0;
+				printk("[WIFI] %s: sec_control_psm = %u", pRegEntry->RegName, value);
+			}
+			// newly added for DBS enabling,disabling.
+			if (!strcmp(pRegEntry->RegName, CFG_DUAL_MAC_FEATURE_DISABLE)) {
+				printk("[WIFI] %s: original_value  = %u", pRegEntry->RegName, value);
+				if(!is_rfmode_off)
+					value = 1;
+				printk("[WIFI] %s: sec_control_psm = %u", pRegEntry->RegName, value);
+			}
+			// newly added for abg tx_chains.
+			if (!strcmp(pRegEntry->RegName, CFG_11B_NUM_TX_CHAIN_NAME)) {
+				printk("[WIFI] %s: original_value  = %u", pRegEntry->RegName, value);
+				if(!is_rfmode_off)
+					value = 2;
+				printk("[WIFI] %s: sec_control_psm = %u", pRegEntry->RegName, value);
+			}
+#endif /* SEC_CONFIG_PSM_SYSFS */
+
 			/* Move the variable into the output field. */
 			memcpy(pField, &value, pRegEntry->VarSize);
 		} else if (WLAN_PARAM_SignedInteger == pRegEntry->RegType) {
