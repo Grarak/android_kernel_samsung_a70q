@@ -1098,8 +1098,6 @@ static ssize_t ffs_epfile_io(struct file *file, struct ffs_io_data *io_data)
 			spin_unlock_irq(&epfile->ffs->eps_lock);
 		}
 
-		ffs_log("ep status %d for req %pK", ep->status, req);
-
 		if (interrupted) {
 			ret = -EINTR;
 			goto error_mutex;
@@ -1112,8 +1110,10 @@ static ssize_t ffs_epfile_io(struct file *file, struct ffs_io_data *io_data)
 		 * disabled (disconnect) or changed
 		 * (composition switch) ?
 		 */
-		if (epfile->ep == ep)
+		if (epfile->ep == ep) {
 			ret = ep->status;
+			ffs_log("ep status %d for req %pK", ep->status, req);
+		}
 		spin_unlock_irq(&epfile->ffs->eps_lock);
 		if (io_data->read && ret > 0)
 			ret = __ffs_epfile_read_data(epfile, data, ep->status,
@@ -1389,6 +1389,7 @@ static long ffs_epfile_ioctl(struct file *file, unsigned code,
 		struct usb_endpoint_descriptor desc1, *desc;
 
 		switch (epfile->ffs->gadget->speed) {
+		case USB_SPEED_SUPER_PLUS:
 		case USB_SPEED_SUPER:
 			desc_idx = 2;
 			break;

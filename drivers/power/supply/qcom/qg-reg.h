@@ -1,4 +1,4 @@
-/* Copyright (c) 2018 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2018-2019 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -131,6 +131,7 @@
 #if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 #define QG_SDAM_PROFILE_VERSION_OFFSET		0xA3 /* 1-byte 0xA3*/
 #endif
+#define QG_SDAM_MAGIC_OFFSET			0x80 /* 4-byte 0x80-0x83 */
 #define QG_SDAM_MAX_OFFSET			0xA4
 
 /* Below offset is used by PBS */

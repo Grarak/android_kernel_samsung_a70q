@@ -1512,25 +1512,25 @@ static void mmc_card_error_logging(struct mmc_card *card, struct mmc_blk_request
 	if (status & STATUS_MASK || brq->stop.resp[0] & STATUS_MASK) {
 		if (status & R1_ERROR || brq->stop.resp[0] & R1_ERROR) {
 			err_log[index].ge_cnt++;
-			if (!(err_log[index].ge_cnt % 1000)) 
-				noti = true; 
+			if (!(err_log[index].ge_cnt % 1000))
+				noti = true;
 		}
 		if (status & R1_CC_ERROR || brq->stop.resp[0] & R1_CC_ERROR)
 			err_log[index].cc_cnt++;
 		if (status & R1_CARD_ECC_FAILED || brq->stop.resp[0] & R1_CARD_ECC_FAILED) {
 			err_log[index].ecc_cnt++;
-			if (!(err_log[index].ecc_cnt % 1000)) 
-				noti = true; 
+			if (!(err_log[index].ecc_cnt % 1000))
+				noti = true;
 		}
 		if (status & R1_WP_VIOLATION || brq->stop.resp[0] & R1_WP_VIOLATION) {
 			err_log[index].wp_cnt++;
-			if (!(err_log[index].wp_cnt % 100)) 
-				noti = true; 
+			if (!(err_log[index].wp_cnt % 100))
+				noti = true;
 		}
 		if (status & R1_OUT_OF_RANGE || brq->stop.resp[0] & R1_OUT_OF_RANGE) {
 			err_log[index].oor_cnt++;
-			if (!(err_log[index].oor_cnt % 100)) 
-				noti = true; 
+			if (!(err_log[index].oor_cnt % 100))
+				noti = true;
 		}
 	}
 
@@ -4678,10 +4678,8 @@ static int mmc_blk_probe(struct mmc_card *card)
 
 	dev_set_drvdata(&card->dev, md);
 
-#ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME
 	if (card && mmc_card_sd(card))
 		mmc_set_bus_resume_policy(card->host, 1);
-#endif
 
 	if (mmc_add_disk(md))
 		goto out;
@@ -4705,7 +4703,7 @@ static int mmc_blk_probe(struct mmc_card *card)
 		pm_runtime_set_active(&card->dev);
 		pm_runtime_enable(&card->dev);
 	}
-	
+
 	if (card)
 		mmc_card_debug_log_sysfs_init(card);
 
@@ -4732,10 +4730,8 @@ static void mmc_blk_remove(struct mmc_card *card)
 	pm_runtime_put_noidle(&card->dev);
 	mmc_blk_remove_req(md);
 	dev_set_drvdata(&card->dev, NULL);
-#ifdef CONFIG_MMC_BLOCK_DEFERRED_RESUME
 	if (card && mmc_card_sd(card))
 		mmc_set_bus_resume_policy(card->host, 0);
-#endif
 }
 
 static int _mmc_blk_suspend(struct mmc_card *card, bool wait)
@@ -4845,4 +4841,3 @@ module_exit(mmc_blk_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Multimedia Card (MMC) block device driver");
-

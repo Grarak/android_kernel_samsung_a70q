@@ -1706,7 +1706,7 @@ static int qg_get_ttf_param(void *data, enum ttf_param param, int *val)
 		break;
 	case TTF_MODE:
 		if (chip->ttf->step_chg_cfg_valid)
-			*val = TTF_MODE_V_STEP_CHG;
+			*val = TTF_MODE_VBAT_STEP_CHG;
 		else
 			*val = TTF_MODE_NORMAL;
 		break;
@@ -1847,7 +1847,7 @@ static int qg_reset(struct qpnp_qg *chip)
 	}
 
 #if defined(CONFIG_BATTERY_SAMSUNG_USING_QC) && defined(CONFIG_SEC_FACTORY)
-	if (get_rid_type() == 5){ 
+	if (get_rid_type() == 5){
 	/*RID_ADC_523K*/
 		if (is_usb_available(chip)){
 		union power_supply_propval prop = {0, };
@@ -1860,7 +1860,7 @@ static int qg_reset(struct qpnp_qg *chip)
 				  ocv_uv = prop.intval;
 		}
 	}
-#endif	
+#endif
 	qg_dbg(chip, QG_DEBUG_STATUS, "S7_OCV = %duV\n", ocv_uv);
 
 	chip->kdata.param[QG_GOOD_OCV_UV].data = ocv_uv;
@@ -2243,7 +2243,7 @@ static int qg_charge_full_update(struct qpnp_qg *chip)
 		rc = power_supply_get_property(chip->batt_psy,
 				POWER_SUPPLY_PROP_CHARGE_TYPE, &prop);
 		charge_status = prop.intval;
-		
+
 		rc = power_supply_get_property(chip->batt_psy,
 				POWER_SUPPLY_PROP_RECHARGE_VBAT, &prop);
 		recharge_vbat = prop.intval;
@@ -2426,7 +2426,7 @@ static int qg_battery_aging_update(struct qpnp_qg *chip)
 	*/
 	cycle_count = chip->batt_cycle;
 
-//	if (cycle_count % 50) 
+//	if (cycle_count % 50)
 //		return 0;
 
 	rc = get_val(chip->vfloat_data, cycle_count, &vbat);
@@ -2455,10 +2455,10 @@ static int qg_battery_aging_update(struct qpnp_qg *chip)
 			rc);
 		return 0;
 	}
-	
+
 	if (!is_usb_available(chip))
 		return 0;
-	
+
 	vbat = vbat / 1000;	// mV
 	rc = power_supply_get_property(chip->usb_psy,
 			(enum power_supply_property)POWER_SUPPLY_EXT_FIXED_RECHARGE_VBAT, &prop);
@@ -2494,7 +2494,7 @@ static int qg_battery_aging_update(struct qpnp_qg *chip)
 		return 0;
 	}
 	chip->full_condition_soc = full_condi_soc;
-	
+
 	return 0;
 }
 #endif
@@ -2678,6 +2678,12 @@ static ssize_t qg_device_read(struct file *file, char __user *buf, size_t count,
 	int rc;
 	struct qpnp_qg *chip = file->private_data;
 	unsigned long data_size = sizeof(chip->kdata);
+
+	if (count < data_size) {
+		pr_err("Invalid datasize %lu, expected lesser then %zu\n",
+							data_size, count);
+		return -EINVAL;
+	}
 
 	/* non-blocking access, return */
 	if (!chip->data_ready && (file->f_flags & O_NONBLOCK))
@@ -3386,6 +3392,39 @@ static int qg_set_wa_flags(struct qpnp_qg *chip)
 	qg_dbg(chip, QG_DEBUG_PON, "wa_flags = %x\n", chip->wa_flags);
 
 	return 0;
+}
+
+#define SDAM_MAGIC_NUMBER		0x12345678
+static int qg_sanitize_sdam(struct qpnp_qg *chip)
+{
+	int rc = 0;
+	u32 data = 0;
+
+	rc = qg_sdam_read(SDAM_MAGIC, &data);
+	if (rc < 0) {
+		pr_err("Failed to read SDAM rc=%d\n", rc);
+		return rc;
+	}
+
+	if (data == SDAM_MAGIC_NUMBER) {
+		qg_dbg(chip, QG_DEBUG_PON, "SDAM valid\n");
+	} else if (data == 0) {
+		rc = qg_sdam_write(SDAM_MAGIC, SDAM_MAGIC_NUMBER);
+		if (!rc)
+			qg_dbg(chip, QG_DEBUG_PON, "First boot. SDAM initilized\n");
+	} else {
+		/* SDAM has invalid value */
+		rc = qg_sdam_clear();
+		if (!rc) {
+			pr_err("SDAM uninitialized, SDAM reset\n");
+			rc = qg_sdam_write(SDAM_MAGIC, SDAM_MAGIC_NUMBER);
+		}
+	}
+
+	if (rc < 0)
+		pr_err("Failed in SDAM operation, rc=%d\n", rc);
+
+	return rc;
 }
 
 #define ADC_CONV_DLY_512MS		0xA
@@ -4459,6 +4498,12 @@ static int qpnp_qg_probe(struct platform_device *pdev)
 		return rc;
 	}
 #endif
+
+	rc = qg_sanitize_sdam(chip);
+	if (rc < 0) {
+		pr_err("Failed to sanitize SDAM, rc=%d\n", rc);
+		return rc;
+	}
 
 	rc = qg_soc_init(chip);
 	if (rc < 0) {
