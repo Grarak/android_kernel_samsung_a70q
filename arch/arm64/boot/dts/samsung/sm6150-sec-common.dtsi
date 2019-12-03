@@ -344,17 +344,9 @@
 	android {
 		vbmeta {
 			compatible = "android,vbmeta";
-			parts = "vbmeta,boot,system,vendor,product,recovery,dtbo,abl,xbl,tz,hyp";
+			parts = "vbmeta,boot,system,vendor,recovery,dtbo,abl,xbl,tz,hyp";
 		};
 		fstab {
-			product {
-				compatible = "android,product";
-				/* dev = "/dev/block/bootdevice/by-name/product"; */
-				dev = "/dev/block/platform/soc/1d84000.ufshc/by-name/product";
-				type = "ext4";
-				mnt_flags = "ro,errors=panic";
-				fsmgr_flags = "wait";
-			};
 			vendor {
 				compatible = "android,vendor";
 				dev = "/dev/block/platform/soc/1d84000.ufshc/by-name/vendor";

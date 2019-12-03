@@ -13,7 +13,7 @@
 #include "sm6150-sec-a60q-chn-r00.dtsi"
 
 &soc {
-	
+
 };
 
 /* not use ufs */
@@ -35,9 +35,6 @@
 &firmware {
 	android {
 		fstab {
-			product {
-				dev = "/dev/block/platform/soc/7c4000.sdhci/by-name/product";
-			};
 			vendor {
 				dev = "/dev/block/platform/soc/7c4000.sdhci/by-name/vendor";
 			};
