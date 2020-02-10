@@ -3738,8 +3738,16 @@ static void usbpd_sm(struct work_struct *w)
 				break;
 			}
 			memcpy(&ado, rx_msg->payload, sizeof(ado));
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+			usbpd_err(&pd->dev, "Received Alert 0x%08x\n", ado);
+			if (ado & 0x4000000) {
+				union power_supply_propval value;
+				power_supply_set_property(pd->usb_psy,
+					POWER_SUPPLY_PROP_TA_ALERT, &value);
+			}
+#else
 			usbpd_dbg(&pd->dev, "Received Alert 0x%08x\n", ado);
-
+#endif
 			/*
 			 * Don't send Get_Status right away so we can coalesce
 			 * multiple Alerts. 150ms should be enough to not get

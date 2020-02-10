@@ -151,6 +151,10 @@ enum print_reason {
 #define CCx_VBUS_SHORT 0x30
 #endif
 
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+#define SLOW_CHARGING_CURRENT_STANDARD	400000
+#endif
+
 enum smb_mode {
 	PARALLEL_MASTER = 0,
 	PARALLEL_SLAVE,
@@ -496,6 +500,8 @@ struct smb_charger {
 	struct delayed_work	detach_work;
 #if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 	struct delayed_work    compliant_check_work;
+	struct delayed_work	ta_alert_wa_work;
+	int			ta_alert_mode;
 #endif
 
 	struct alarm		lpd_recheck_timer;
@@ -678,7 +684,8 @@ struct smb_charger {
 	int			 vbus_chg_by_full;
 	int			 now_icl;
 
-	bool			float_type_recheck;
+	bool		float_type_recheck;
+	bool		forced_5v_qc30;
 #endif
 };
 

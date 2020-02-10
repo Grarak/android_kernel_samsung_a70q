@@ -96,6 +96,7 @@ static void update_sw_icl_max(struct smb_charger *chg, int pst);
 #if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 static int smblib_update_jeita(struct smb_charger *chg, u32 *thresholds, int type);
 extern int get_rid_type(void);
+static int settled_icl = 0;
 #endif
 
 
@@ -1989,6 +1990,11 @@ int smblib_get_prop_batt_status(struct smb_charger *chg,
 #if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 	smblib_get_prop_batt_capacity(chg, &pval);
 	soc = pval.intval;
+	if (chg->ta_alert_mode) {
+		val->intval = POWER_SUPPLY_STATUS_CHARGING;
+		pr_info("%s: ta_alert : %d\n", __func__, chg->ta_alert_mode);
+		return 0;
+	}
 #endif
 	if (!usb_online && !dc_online) {
 		switch (stat) {
@@ -2146,6 +2152,14 @@ int smblib_get_prop_batt_charge_type(struct smb_charger *chg,
 	default:
 		val->intval = POWER_SUPPLY_CHARGE_TYPE_NONE;
 	}
+
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	if (settled_icl < SLOW_CHARGING_CURRENT_STANDARD  && val->intval != POWER_SUPPLY_CHARGE_TYPE_NONE 
+			&& chg->real_charger_type != POWER_SUPPLY_TYPE_USB_PD && settled_icl != 0) {
+		pr_info("%s: slow charging on \n",__func__);
+		val->intval = POWER_SUPPLY_CHARGE_TYPE_SLOW;
+	}
+#endif
 
 	return rc;
 }
@@ -2706,12 +2720,20 @@ int smblib_dp_dm(struct smb_charger *chg, int val)
 		if (target_icl_ua != get_client_vote(chg->usb_icl_votable,
 							SW_QC3_VOTER))
 			chg->usb_icl_delta_ua = 0;
-
-		chg->usb_icl_delta_ua += 100000;
-		vote(chg->usb_icl_votable, SW_QC3_VOTER, true,
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+		if((target_icl_ua - 100000) >= 500000/*500mA*/) {
+#endif
+			chg->usb_icl_delta_ua += 100000;
+			vote(chg->usb_icl_votable, SW_QC3_VOTER, true,
 						target_icl_ua - 100000);
-		smblib_dbg(chg, PR_PARALLEL, "ICL DOWN ICL=%d reduction=%d\n",
-				target_icl_ua, chg->usb_icl_delta_ua);
+			smblib_dbg(chg, PR_PARALLEL, "ICL DOWN ICL=%d reduction=%d\n",
+					target_icl_ua, chg->usb_icl_delta_ua);
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+		}
+		else {
+			smblib_dbg(chg, PR_PARALLEL, "Skip ICL DOWN ICL if (%d - 100000) is lower than 500mA", target_icl_ua);
+		}
+#endif
 		break;
 	case POWER_SUPPLY_DP_DM_FORCE_5V:
 #if defined(CONFIG_AFC)
@@ -4822,8 +4844,10 @@ irqreturn_t default_irq_handler(int irq, void *data)
 	struct smb_charger *chg = irq_data->parent_data;
 	u8 stat;
 	int rc = 0; 
-	int settled_icl = 0;
 	int max_icl = 0;
+#if !defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	int settled_icl = 0;
+#endif
 
 	smblib_dbg(chg, PR_INTERRUPT, "IRQ: %s\n", irq_data->name);
 
@@ -5227,6 +5251,11 @@ void smblib_usb_plugin_hard_reset_locked(struct smb_charger *chg)
 		/* Remove FCC_STEPPER 1.5A init vote to allow FCC ramp up */
 		if (chg->fcc_stepper_enable)
 			vote(chg->fcc_votable, FCC_STEPPER_VOTER, false, 0);
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+		if (chg->ta_alert_mode) {
+			cancel_delayed_work_sync(&chg->ta_alert_wa_work);
+		}
+#endif
 	} else {
 		if (chg->wa_flags & BOOST_BACK_WA) {
 			data = chg->irq_info[SWITCHER_POWER_OK_IRQ].irq_data;
@@ -5242,16 +5271,25 @@ void smblib_usb_plugin_hard_reset_locked(struct smb_charger *chg)
 		}
 
 		/* Force 1500mA FCC on USB removal if fcc stepper is enabled */
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+		if (chg->fcc_stepper_enable) {
+			if (chg->ta_alert_mode) {
+				cancel_delayed_work_sync(&chg->ta_alert_wa_work);
+				schedule_delayed_work(&chg->ta_alert_wa_work,
+						msecs_to_jiffies(3000));
+			}
+#if defined(CONFIG_SEC_FACTORY)
+			vote(chg->fcc_votable, FCC_STEPPER_VOTER,
+					true, 2100000);
+#else
+			vote(chg->fcc_votable, FCC_STEPPER_VOTER,
+					true, 100000);
+#endif
+		}
+#else
 		if (chg->fcc_stepper_enable)
 			vote(chg->fcc_votable, FCC_STEPPER_VOTER,
-#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
-#if defined(CONFIG_SEC_FACTORY)
-							true, 2100000);
-#else
-							true, 100000);
-#endif
-#else
-							true, 1500000);
+					true, 1500000);
 #endif
 	}
 #if defined(CONFIG_VBUS_NOTIFIER)
@@ -5284,6 +5322,9 @@ void smblib_usb_plugin_locked(struct smb_charger *chg)
 
 	if (vbus_rising) {
 #if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+		if (chg->ta_alert_mode) {
+			cancel_delayed_work_sync(&chg->ta_alert_wa_work);
+		}
 		/* Do fast FCC stepping for initial plugin for fast VBUS jump */
 		chg->initial_ramp = true;
 #endif
@@ -5322,6 +5363,11 @@ void smblib_usb_plugin_locked(struct smb_charger *chg)
 					msecs_to_jiffies(PL_DELAY_MS));
 	} else {
 #if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+		if (chg->ta_alert_mode) {
+			cancel_delayed_work_sync(&chg->ta_alert_wa_work);
+			schedule_delayed_work(&chg->ta_alert_wa_work,
+					msecs_to_jiffies(3000));
+		}
 		/* disable fast FCC step rate */
 		chg->initial_ramp = false;
 #endif
@@ -6597,6 +6643,17 @@ static void smblib_usbov_dbc_work(struct work_struct *work)
 	chg->dbc_usbov = false;
 	vote(chg->awake_votable, USBOV_DBC_VOTER, false, 0);
 }
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+static void smblib_ta_alert_wa_work(struct work_struct *work)
+{
+	struct smb_charger *chg = container_of(work, struct smb_charger,
+						ta_alert_wa_work.work);
+
+	smblib_err(chg, "%s\n", __func__);
+	chg->ta_alert_mode = false;
+	power_supply_changed(chg->batt_psy);
+}
+#endif
 
 #define USB_OV_DBC_PERIOD_MS		1000
 irqreturn_t usbin_ov_irq_handler(int irq, void *data)
@@ -7550,6 +7607,7 @@ int smblib_init(struct smb_charger *chg)
 	INIT_DELAYED_WORK(&chg->detach_work, smblib_detach_work);
 #if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 	INIT_DELAYED_WORK(&chg->compliant_check_work, smblib_compliant_check_work);
+	INIT_DELAYED_WORK(&chg->ta_alert_wa_work, smblib_ta_alert_wa_work);
 #endif
 
 	if (chg->wa_flags & CHG_TERMINATION_WA) {
@@ -7586,6 +7644,9 @@ int smblib_init(struct smb_charger *chg)
 	chg->sec_chg_selected = POWER_SUPPLY_CHARGER_SEC_NONE;
 	chg->cp_reason = POWER_SUPPLY_CP_NONE;
 	chg->thermal_status = TEMP_BELOW_RANGE;
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	chg->forced_5v_qc30 = false;
+#endif
 
 	switch (chg->mode) {
 	case PARALLEL_MASTER:

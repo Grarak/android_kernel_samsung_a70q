@@ -845,6 +845,7 @@ static enum power_supply_property smb5_usb_props[] = {
 	POWER_SUPPLY_PROP_VPH_VOLTAGE,
 #if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 	POWER_SUPPLY_PROP_VOLTAGE_MAX_LIMIT,
+	POWER_SUPPLY_PROP_TA_ALERT,
 #endif
 };
 #if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
@@ -883,6 +884,10 @@ static int smb5_usb_get_prop(struct power_supply *psy,
 		{
 			rc = smblib_get_prop_usb_online(chg, val);
 		}
+		if (chg->ta_alert_mode) {
+			val->intval = 1;
+			break;
+		}  	
 #else
 		rc = smblib_get_prop_usb_online(chg, val);
 #endif
@@ -1053,6 +1058,9 @@ static int smb5_usb_get_prop(struct power_supply *psy,
 		else
 			val->intval = chg->input_voltage_limit;
 		break;
+	case POWER_SUPPLY_PROP_TA_ALERT:
+		val->intval = chg->ta_alert_mode;
+		break;
 	case POWER_SUPPLY_PROP_MAX ... POWER_SUPPLY_EXT_PROP_MAX:
 		switch (ext_psp) {
 		case POWER_SUPPLY_EXT_FIXED_RECHARGE_VBAT:
@@ -1200,6 +1208,11 @@ static int smb5_usb_set_prop(struct power_supply *psy,
 		chg->input_voltage_limit = val->intval;
 		pr_info("hv_disable(%d), set input_voltage_limit: %d\n",
 				chg->hv_disable, chg->input_voltage_limit);
+		break;
+	case POWER_SUPPLY_PROP_TA_ALERT:
+		sec_bat_set_ocp_mode();
+		chg->ta_alert_mode = true;
+		pr_info("POWER_SUPPLY_EXT_PROP_TA_ALERT\n");
 		break;
 	case POWER_SUPPLY_PROP_MAX ... POWER_SUPPLY_EXT_PROP_MAX:
 		switch (ext_psp) {
@@ -1498,8 +1511,12 @@ static int smb5_usb_main_set_prop(struct power_supply *psy,
 		rc = smblib_set_icl_current(chg, val->intval);
 		break;
 	case POWER_SUPPLY_PROP_FLASH_ACTIVE:
+#if !defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 		if ((chg->smb_version == PMI632_SUBTYPE)
 				&& (chg->flash_active != val->intval)) {
+#else
+		if (chg->flash_active != val->intval) {
+#endif
 			chg->flash_active = val->intval;
 
 			rc = smblib_get_prop_usb_present(chg, &pval);
@@ -1552,6 +1569,9 @@ static int smb5_usb_main_prop_is_writeable(struct power_supply *psy,
 	switch (psp) {
 	case POWER_SUPPLY_PROP_TOGGLE_STAT:
 	case POWER_SUPPLY_PROP_MAIN_FCC_MAX:
+#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	case POWER_SUPPLY_PROP_FLASH_ACTIVE:
+#endif
 		rc = 1;
 		break;
 	default:
@@ -3881,6 +3901,7 @@ static int smb5_probe(struct platform_device *pdev)
 	chg->hv_disable = false;
 	chg->last_capacity = 0;
 	chg->float_type_recheck = false;
+	chg->ta_alert_mode = false;
 #endif
 	chg->regmap = dev_get_regmap(chg->dev->parent, NULL);
 	if (!chg->regmap) {

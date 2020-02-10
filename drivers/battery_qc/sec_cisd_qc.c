@@ -40,6 +40,8 @@ const char *cisd_data_str_d[] = {
 	"VBAT_OVP_D", "USB_OVERHEAT_RAPID_CHANGE_D", "BUCK_OFF_D", "USB_OVERHEAT_ALONE_D", "DROP_SENSOR_D"
 };
 
+const char *cisd_event_data_str[] = {"DC_ERR", "TA_OCP_DET", "TA_OCP_ON"};
+
 bool sec_bat_cisd_check(struct sec_battery_info *battery)
 {
 //	union power_supply_propval capcurr_val = {0, };

@@ -437,6 +437,7 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(battery_type),
 	POWER_SUPPLY_ATTR(cycle_counts),
 	POWER_SUPPLY_ATTR(afc_charger_mode),
+	POWER_SUPPLY_ATTR(ta_alert),
 	/* Properties of type `const char *' */
 	POWER_SUPPLY_ATTR(model_name),
 };

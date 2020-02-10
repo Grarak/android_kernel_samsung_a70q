@@ -2240,7 +2240,6 @@ static int dwc3_gadget_pullup(struct usb_gadget *g, int is_on)
 			pm_runtime_put_autosuspend(dwc->dev);
 			dbg_event(0xFF, "Pullup timeout put",
 				atomic_read(&dwc->dev->power.usage_count));
-			return -ETIMEDOUT;
 		}
 	}
 
