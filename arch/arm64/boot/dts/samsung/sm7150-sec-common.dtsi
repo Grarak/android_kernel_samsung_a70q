@@ -83,7 +83,7 @@
 };
 
 &removed_region {
-	reg = <0 0x86200000 0 0x5100000>;
+	reg = <0 0x86200000 0 0x5600000>;
 };
 
 &pil_camera_mem{

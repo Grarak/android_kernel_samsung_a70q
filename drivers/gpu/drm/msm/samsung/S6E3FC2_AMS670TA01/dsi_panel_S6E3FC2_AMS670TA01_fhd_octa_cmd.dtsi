@@ -249,6 +249,8 @@
 		 */
 		samsung,acl_on_tx_cmds_revA = [
 			/* 32 frame AVG ACL ON, Start 50%, ACL 15%, 32Frame AVG */
+			29 01 00 00 00 00 02 B0 D8	/* Global Para */
+			29 01 00 00 00 00 02 B9 02	/* HBM ACL OFF */
 			29 01 00 00 00 00 02 55 03	/* ACL ON */
 		]; /* ACL on */
 

@@ -55,7 +55,6 @@ extern char *sec_cable_type[];
 #define SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING_3RD			0x00008
 #define SEC_BAT_CURRENT_EVENT_SWELLING_MODE		(SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING | SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING_2ND | SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING_3RD | SEC_BAT_CURRENT_EVENT_HIGH_TEMP_SWELLING)
 #define SEC_BAT_CURRENT_EVENT_LOW_TEMP_MODE		(SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING | SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING_2ND | SEC_BAT_CURRENT_EVENT_LOW_TEMP_SWELLING_3RD)
-#define SEC_BAT_CURRENT_EVENT_HIGH_TEMP_LIMIT		0x80000
 #define SEC_BAT_CURRENT_EVENT_USB_SUPER			0x00100
 #define SEC_BAT_CURRENT_EVENT_CHG_LIMIT			0x00200
 #define SEC_BAT_CURRENT_EVENT_CALL			0x00400
@@ -67,6 +66,8 @@ extern char *sec_cable_type[];
 #define SEC_BAT_CURRENT_EVENT_HV_DISABLE		0x10000
 #define SEC_BAT_CURRENT_EVENT_SELECT_PDO		0x20000
 #define SEC_BAT_CURRENT_EVENT_FG_RESET			0x40000
+#define SEC_BAT_CURRENT_EVENT_HIGH_TEMP_LIMIT		0x80000
+#define SEC_BAT_CURRENT_EVENT_25W_OCP			0x100000
 
 #if defined(CONFIG_SEC_FACTORY)             // SEC_FACTORY
 #define STORE_MODE_CHARGING_MAX 80
@@ -347,4 +348,5 @@ extern void sec_bat_safety_timer_reset(void);
 extern int get_usb_voltage_now(struct sec_battery_info *battery);
 extern void sec_bat_set_cable_type_current(int real_cable_type, bool attached);
 extern int get_rid_type(void);
+extern void sec_bat_set_ocp_mode(void);
 #endif /* __SEC_BATTERY_H */
