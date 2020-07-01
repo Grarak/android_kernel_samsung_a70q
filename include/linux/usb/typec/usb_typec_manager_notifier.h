@@ -28,6 +28,7 @@
 #include <linux/usb/typec/pdic_notifier.h>
 #include <linux/muic/muic.h>
 #include <linux/muic/muic_notifier.h>
+
 #ifdef CONFIG_VBUS_NOTIFIER
 #include <linux/vbus_notifier.h>
 #endif

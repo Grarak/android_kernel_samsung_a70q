@@ -40,38 +40,77 @@
 #define MSM_EEPROM_MEMORY_MAP_MAX_SIZE          80
 #define MSM_EEPROM_MAX_MEM_MAP_CNT              50
 #define MSM_EEPROM_MEM_MAP_PROPERTIES_CNT       6
+#define PROJECT_CAL_TYPE_MAX_SIZE               (20)
 
 #if defined(CONFIG_SAMSUNG_REAR_TRIPLE)
+#if defined(CONFIG_SEC_R3Q_PROJECT) || defined(CONFIG_SEC_A70S_PROJECT)
+#define REAR3_MODULE_FW_VERSION                 0x0077
+#elif defined(CONFIG_SEC_R5Q_PROJECT)
+#define REAR3_MODULE_FW_VERSION                 0x005E
+#define REAR3_MODULE_ID_ADDR                    0x00AE
+#elif defined(CONFIG_SEC_A71_PROJECT)
+#define REAR3_MODULE_FW_VERSION                 0x0077
+#define REAR3_MODULE_ID_ADDR                    0x00AE
+#else
 #define REAR3_MODULE_FW_VERSION                 0x1560
+#endif
 #if defined(CONFIG_SEC_A90Q_PROJECT)
 #define REAR2_MODULE_FW_VERSION                 0x2ACC
+#elif defined(CONFIG_SEC_R3Q_PROJECT) || defined(CONFIG_SEC_A70S_PROJECT)
+#define REAR2_MODULE_FW_VERSION                 0x005E
+#elif defined(CONFIG_SEC_A71_PROJECT) || defined(CONFIG_SEC_R5Q_PROJECT)
+#define REAR2_MODULE_FW_VERSION                 0x005E
 #else
 #define REAR2_MODULE_FW_VERSION                 0x0048
 #endif
 #endif
 #define FROM_MODULE_FW_INFO_SIZE                11
 #define FROM_REAR_HEADER_SIZE                   0x0100
-
 #define REAR_CAL_VERSION_ADDR                   0x2D44
 #define REAR3_CAL_VERSION_ADDR                  0x1618
 #define REAR2_CAL_VERSION_ADDR                  0x00E0
 
+
+#if defined(CONFIG_SEC_R3Q_PROJECT)  || defined(CONFIG_SEC_A71_PROJECT) || defined(CONFIG_SEC_A70S_PROJECT)
+#define REAR_CAM_MAP_VERSION_ADDR               0x0090
+#define REAR_DLL_VERSION_ADDR                   0x0094
+#define REAR2_CAM_MAP_VERSION_ADDR              0x0090
+#else
 #define REAR_CAM_MAP_VERSION_ADDR               0x00E0
-#define REAR3_CAM_MAP_VERSION_ADDR		0x1618
-#define REAR2_CAM_MAP_VERSION_ADDR		0x00E0
 #define REAR_DLL_VERSION_ADDR                   0x00E4
+#define REAR2_CAM_MAP_VERSION_ADDR              0x00E0
+#endif
+#if defined(CONFIG_SEC_R5Q_PROJECT)  || defined(CONFIG_SEC_A71_PROJECT) || defined(CONFIG_SEC_A70S_PROJECT)
+#define REAR3_CAM_MAP_VERSION_ADDR        0x0090
+#else
+#define REAR3_CAM_MAP_VERSION_ADDR        0x1618
+#endif
+
+
 #if defined(CONFIG_SAMSUNG_REAR_TRIPLE)
-#define REAR3_DLL_VERSION_ADDR                  0x161C
+#if defined(CONFIG_SEC_R5Q_PROJECT)  || defined(CONFIG_SEC_A71_PROJECT) || defined(CONFIG_SEC_A70S_PROJECT)
+#define REAR3_DLL_VERSION_ADDR      0x0094
+#else
+#define REAR3_DLL_VERSION_ADDR      0x161C
+#endif
+#if defined(CONFIG_SEC_R3Q_PROJECT) || defined(CONFIG_SEC_A70SQ_EUR_PROJECT) || defined(CONFIG_SEC_R5Q_PROJECT) || defined(CONFIG_SEC_A70S_PROJECT) || defined(CONFIG_SEC_A71_PROJECT)
+#define REAR2_DLL_VERSION_ADDR                  0x0094
+#else
 #define REAR2_DLL_VERSION_ADDR                  0x00E4
+#endif
 #endif
 
 /* Module ID : 0x00A8~0x00B7(16Byte) for FROM, EEPROM (Don't support OTP)*/
 #define FROM_MODULE_ID_ADDR                     0x00AE
 #define FROM_MODULE_ID_SIZE                     10
 #define FROM_REAR_SENSOR_ID_ADDR                0x00B8
+#if defined(CONFIG_SEC_R3Q_PROJECT) || defined(CONFIG_SEC_A71_PROJECT) || defined(CONFIG_SEC_R5Q_PROJECT) || defined(CONFIG_SEC_A70S_PROJECT)
+#define REAR_MODULE_FW_VERSION                  0x005E
+#else
 #define REAR_MODULE_FW_VERSION                  0x0048
+#endif
 
-#if defined(CONFIG_SEC_A70Q_PROJECT)
+#if defined(CONFIG_SEC_A70Q_PROJECT) || defined(CONFIG_SEC_A70S_PROJECT)
 #define FRONT_CAL_VERSION_ADDR                  0x0090
 #define FRONT_CAM_MAP_VERSION_ADDR              0x0090
 #define FROM_FRONT_MODULE_ID_ADDR               0x005E
@@ -82,11 +121,29 @@
 #define FROM_FRONT_MODULE_ID_ADDR               0x00AE
 #define FROM_FRONT_SENSOR_ID_ADDR               0x00B8
 #define FRONT_MODULE_FW_VERSION                 0x0048
-#elif defined(CONFIG_SEC_A60Q_PROJECT)
+#elif defined(CONFIG_SEC_A60Q_PROJECT) || defined(CONFIG_SEC_M40_PROJECT)
 #define FRONT_CAM_MAP_VERSION_ADDR              0x00CB
 #define FROM_FRONT_MODULE_ID_ADDR               0x00A9
 #define FROM_FRONT_SENSOR_ID_ADDR               0x00B3
 #define FRONT_MODULE_FW_VERSION                 0x0048
+#elif defined(CONFIG_SEC_R3Q_PROJECT)
+#define FRONT_CAL_VERSION_ADDR                  0x0090
+#define FRONT_CAM_MAP_VERSION_ADDR              0x0090
+#define FROM_FRONT_MODULE_ID_ADDR               0x005E
+#define FROM_FRONT_SENSOR_ID_ADDR               0x0048
+#define FRONT_MODULE_FW_VERSION                 0x005E
+#elif defined(CONFIG_SEC_R5Q_PROJECT) || defined(CONFIG_SEC_A71_PROJECT)
+#define FRONT_CAL_VERSION_ADDR                  0x0090
+#define FRONT_CAM_MAP_VERSION_ADDR              0x0090
+#define FROM_FRONT_MODULE_ID_ADDR               0x00AE
+#define FROM_FRONT_SENSOR_ID_ADDR               0x00B8
+#define FRONT_MODULE_FW_VERSION                 0x005E
+#elif defined(CONFIG_SEC_A71_PROJECT)
+#define FRONT_CAL_VERSION_ADDR                  0x0090
+#define FRONT_CAM_MAP_VERSION_ADDR              0x0090
+#define FROM_FRONT_MODULE_ID_ADDR               0x0090
+#define FROM_FRONT_SENSOR_ID_ADDR               0x00B8
+#define FRONT_MODULE_FW_VERSION                 0x005E
 #else
 #define FRONT_CAL_VERSION_ADDR                  0x10E0
 #define FRONT_CAM_MAP_VERSION_ADDR              0x00CB
@@ -100,14 +157,20 @@
 #define FRONT_MODULE_VER_ON_PVR                 0x72
 #define FRONT_MODULE_VER_ON_SRA                 0x78
 
+#if defined(CONFIG_SEC_R3Q_PROJECT) || defined(CONFIG_SEC_A71_PROJECT) || defined(CONFIG_SEC_R5Q_PROJECT) || defined(CONFIG_SEC_A70S_PROJECT)
+#define FROM_REAR_AF_CAL_D10_ADDR               0x010C
+#define FROM_REAR_AF_CAL_PAN_ADDR               0x0110
+#define FROM_REAR_AF_CAL_MACRO_ADDR             0x010C
+#else
 #define FROM_REAR_AF_CAL_D10_ADDR               0x0818
+#define FROM_REAR_AF_CAL_PAN_ADDR               0x081C
+#define FROM_REAR_AF_CAL_MACRO_ADDR             0x0818
+#endif
 #if defined(CONFIG_SEC_A90Q_PROJECT)
 #define FROM_REAR_AF_CAL_D40_ADDR               0x0814
 #endif
 //#define FROM_REAR_AF_CAL_D50_ADDR             0x4688
 //#define FROM_REAR_AF_CAL_D80_ADDR             0x4680
-#define FROM_REAR_AF_CAL_PAN_ADDR               0x081C
-#define FROM_REAR_AF_CAL_MACRO_ADDR             0x0818
 //#define FROM_FRONT_AF_CAL_PAN_ADDR              0x0104
 //#define FROM_FRONT_AF_CAL_MACRO_ADDR            0x0110
 
@@ -156,6 +219,49 @@
 #define FROM_REAR2_DUAL_TILT_DLL_VERSION        0x0CE6
 #define FROM_REAR2_DUAL_CAL_ADDR                0x0CE6
 #define FROM_REAR2_DUAL_CAL_SIZE                1024
+#elif defined(CONFIG_SEC_R3Q_PROJECT)
+#define REAR2_MODULE_ID_ADDR                    0xAE
+#define FROM_REAR2_SENSOR_ID_ADDR               0xB8
+#define FROM_REAR2_DUAL_TILT_X                  0x0D4A
+#define FROM_REAR2_DUAL_TILT_Y                  0x0D4E
+#define FROM_REAR2_DUAL_TILT_Z                  0x0D52
+#define FROM_REAR2_DUAL_TILT_SX                 0x0DAA
+#define FROM_REAR2_DUAL_TILT_SY                 0x0DAE
+#define FROM_REAR2_DUAL_TILT_RANGE              0x10D6
+#define FROM_REAR2_DUAL_TILT_MAX_ERR            0x10D2
+#define FROM_REAR2_DUAL_TILT_AVG_ERR            0x10CE
+#define FROM_REAR2_DUAL_TILT_DLL_VERSION        0x1E80
+#define FROM_REAR2_DUAL_CAL_ADDR                0x1E80
+#define FROM_REAR2_DUAL_CAL_SIZE                1024
+#elif defined(CONFIG_SEC_A71_PROJECT)
+#define REAR2_MODULE_ID_ADDR                    0xAE
+#define FROM_REAR2_SENSOR_ID_ADDR               0xB8
+#define FROM_REAR2_DUAL_TILT_X                  0x0D4A
+#define FROM_REAR2_DUAL_TILT_Y                  0x0D4E
+#define FROM_REAR2_DUAL_TILT_Z                  0x0D52
+#define FROM_REAR2_DUAL_TILT_SX                 0x0DAA
+#define FROM_REAR2_DUAL_TILT_SY                 0x0DAE
+#define FROM_REAR2_DUAL_TILT_RANGE              0x10D6
+#define FROM_REAR2_DUAL_TILT_MAX_ERR            0x10D2
+#define FROM_REAR2_DUAL_TILT_AVG_ERR            0x10CE
+#define FROM_REAR2_DUAL_TILT_DLL_VERSION        0x1E80
+#define FROM_REAR2_DUAL_CAL_ADDR                0x1E80
+#define FROM_REAR2_DUAL_CAL_SIZE                1024
+#elif defined(CONFIG_SEC_R5Q_PROJECT)
+#define REAR2_MODULE_ID_ADDR                    0x00AE
+#define FROM_REAR2_SENSOR_ID_ADDR               0xB8
+#define FROM_REAR2_DUAL_TILT_X                  0x1C18
+#define FROM_REAR2_DUAL_TILT_Y                  0x1C1C
+#define FROM_REAR2_DUAL_TILT_Z                  0x1C20
+#define FROM_REAR2_DUAL_TILT_SX                 0x1C24
+#define FROM_REAR2_DUAL_TILT_SY                 0x1C28
+#define FROM_REAR2_DUAL_TILT_PROJECT_CAL_TYPE   0x1C2C
+#define FROM_REAR2_DUAL_TILT_RANGE              0x1E64
+#define FROM_REAR2_DUAL_TILT_MAX_ERR            0x1E68
+#define FROM_REAR2_DUAL_TILT_AVG_ERR            0x1E6C
+#define FROM_REAR2_DUAL_TILT_DLL_VERSION        0x1A80
+#define FROM_REAR2_DUAL_CAL_ADDR                0x1A80
+#define FROM_REAR2_DUAL_CAL_SIZE                1024
 #else
 #define REAR2_MODULE_ID_ADDR                    0x00AE
 #define FROM_REAR2_SENSOR_ID_ADDR               0x00B8
@@ -172,9 +278,35 @@
 #define FROM_REAR2_DUAL_CAL_SIZE                2048
 #endif
 
-//rear3
-#define FROM_REAR3_SENSOR_ID_ADDR               0x1600
+#if defined(CONFIG_SEC_R3Q_PROJECT) || defined(CONFIG_SEC_R5Q_PROJECT) || defined(CONFIG_SEC_A71_PROJECT) ||defined(CONFIG_SEC_A70S_PROJECT)
+#define FROM_REAR_DUAL_CAL_ADDR                 0x1A80
+#define FROM_REAR_DUAL_CAL_SIZE                 1024
+#else
+#define FROM_REAR_DUAL_CAL_ADDR                 0x08E8
+#define FROM_REAR_DUAL_CAL_SIZE                 1024
+#endif
 
+//rear3
+#if defined(CONFIG_SEC_R3Q_PROJECT) || defined(CONFIG_SEC_A71_PROJECT) || defined(CONFIG_SEC_A70S_PROJECT)
+#define FROM_REAR3_SENSOR_ID_ADDR               0xC8
+#define FROM_REAR3_DUAL_TILT_X                  0x1C18
+#define FROM_REAR3_DUAL_TILT_Y                  0x1C1C
+#define FROM_REAR3_DUAL_TILT_Z                  0x1C20
+#define FROM_REAR3_DUAL_TILT_SX                 0x1C24
+#define FROM_REAR3_DUAL_TILT_SY                 0x1C28
+#define FROM_REAR3_DUAL_TILT_PROJECT_CAL_TYPE   0x1C2C
+#define FROM_REAR3_DUAL_TILT_RANGE              0x1E64
+#define FROM_REAR3_DUAL_TILT_MAX_ERR            0x1E68
+#define FROM_REAR3_DUAL_TILT_AVG_ERR            0x1E6C
+#define FROM_REAR3_DUAL_TILT_DLL_VERSION        0x1A80
+#define FROM_REAR3_DUAL_CAL_ADDR                0x1A80
+#define FROM_REAR3_DUAL_CAL_SIZE                1024
+#else
+#if defined(CONFIG_SEC_R5Q_PROJECT)
+#define FROM_REAR3_SENSOR_ID_ADDR               0xB8
+#else
+#define FROM_REAR3_SENSOR_ID_ADDR               0x1600
+#endif
 #define FROM_REAR3_DUAL_TILT_X                  0x0948
 #define FROM_REAR3_DUAL_TILT_Y                  0x094C
 #define FROM_REAR3_DUAL_TILT_Z                  0x0950
@@ -186,8 +318,7 @@
 #define FROM_REAR3_DUAL_TILT_DLL_VERSION        0x08E8
 #define FROM_REAR3_DUAL_CAL_ADDR                0x08E8
 #define FROM_REAR3_DUAL_CAL_SIZE                1024
-#define FROM_REAR_DUAL_CAL_ADDR                 0x08E8
-#define FROM_REAR_DUAL_CAL_SIZE                 1024
+#endif
 #endif
 
 #define FROM_REAR_AF_CAL_SIZE                   10
@@ -209,14 +340,15 @@
 #define MODULE_VER_ON_SRA                       0x4D
 #define REAR_PAF_CAL_INFO_SIZE                  1024
 
-extern uint32_t front_af_cal_pan;
-extern uint32_t front_af_cal_macro;
+/*extern uint32_t front_af_cal_pan;
+extern uint32_t front_af_cal_macro;*/
 #if defined(CONFIG_SAMSUNG_REAR_TRIPLE)
 extern uint8_t rear_dual_cal[FROM_REAR_DUAL_CAL_SIZE + 1];
 extern uint8_t rear2_dual_cal[FROM_REAR2_DUAL_CAL_SIZE + 1];
 extern uint8_t rear3_dual_cal[FROM_REAR3_DUAL_CAL_SIZE + 1];
 extern int rear2_af_cal[FROM_REAR_AF_CAL_SIZE + 1];
 extern int rear3_af_cal[FROM_REAR_AF_CAL_SIZE + 1];
+extern int front_af_cal[FROM_REAR_AF_CAL_SIZE + 1];
 #endif
 extern int rear_af_cal[FROM_REAR_AF_CAL_SIZE + 1];
 extern char rear_sensor_id[FROM_SENSOR_ID_SIZE + 1];
@@ -232,6 +364,7 @@ extern int rear2_dual_tilt_range;
 extern int rear2_dual_tilt_max_err;
 extern int rear2_dual_tilt_avg_err;
 extern int rear2_dual_tilt_dll_ver;
+extern char rear2_project_cal_type[PROJECT_CAL_TYPE_MAX_SIZE+1];
 extern char rear3_sensor_id[FROM_SENSOR_ID_SIZE + 1];
 extern int rear3_dual_tilt_x;
 extern int rear3_dual_tilt_y;
@@ -242,6 +375,7 @@ extern int rear3_dual_tilt_range;
 extern int rear3_dual_tilt_max_err;
 extern int rear3_dual_tilt_avg_err;
 extern int rear3_dual_tilt_dll_ver;
+extern char rear3_project_cal_type[PROJECT_CAL_TYPE_MAX_SIZE+1];
 #endif
 extern char rear_paf_cal_data_far[REAR_PAF_CAL_INFO_SIZE];
 extern char rear_paf_cal_data_mid[REAR_PAF_CAL_INFO_SIZE];
@@ -260,6 +394,10 @@ extern char rear_mtf2_exif[FROM_MTF_SIZE + 1];
 #if defined(CONFIG_SAMSUNG_REAR_TRIPLE)
 extern char rear2_mtf_exif[FROM_MTF_SIZE + 1];
 extern uint8_t rear2_module_id[FROM_MODULE_ID_SIZE + 1];
+#if defined(CONFIG_SEC_R5Q_PROJECT)
+extern uint8_t rear3_module_id[FROM_MODULE_ID_SIZE + 1];
+#endif
+extern char rear2_mtf_exif[FROM_MTF_SIZE + 1];
 extern char cam2_fw_ver[SYSFS_FW_VER_SIZE];
 extern char cam2_fw_full_ver[SYSFS_FW_VER_SIZE];
 extern char rear3_mtf_exif[FROM_MTF_SIZE + 1];
@@ -293,6 +431,30 @@ extern char module_info[SYSFS_MODULE_INFO_SIZE];
 #define VENDOR_INFO                             ("P")
 #define PROCESS_INFO                            ("A")
 #define CRITERION_REV                           (0)
+#elif defined(CONFIG_SEC_R3Q_PROJECT)
+#define HW_INFO                                 ("B48QS")
+#define SW_INFO                                 ("MD00")
+#define VENDOR_INFO                             ("A")
+#define PROCESS_INFO                            ("A")
+#define CRITERION_REV                           (0)
+#elif defined(CONFIG_SEC_A70S_PROJECT)
+#define HW_INFO                                 ("B64QL")
+#define SW_INFO                                 ("MG00")
+#define VENDOR_INFO                             ("M")
+#define PROCESS_INFO                            ("A")
+#define CRITERION_REV                           (0)
+#elif defined(CONFIG_SEC_A71_PROJECT)
+#define HW_INFO                                 ("A64QL")
+#define SW_INFO                                 ("MD00")
+#define VENDOR_INFO                             ("M")
+#define PROCESS_INFO                            ("A")
+#define CRITERION_REV                           (0)
+#elif defined(CONFIG_SEC_R5Q_PROJECT)
+#define HW_INFO                                 ("C48QS")
+#define SW_INFO                                 ("MD00")
+#define VENDOR_INFO                             ("Y")
+#define PROCESS_INFO                            ("A")
+#define CRITERION_REV                           (0)
 #else
 #define HW_INFO                                 ("B32QL")
 #define SW_INFO                                 ("LA00")
@@ -301,17 +463,63 @@ extern char module_info[SYSFS_MODULE_INFO_SIZE];
 #define CRITERION_REV                           (0)
 #endif
 
+#if defined(CONFIG_SEC_R3Q_PROJECT)
+#define HW_INFO_ULTRA_WIDE                      ("D08QL")
+#define SW_INFO_ULTRA_WIDE                      ("MD00")
+#define VENDOR_INFO_ULTRA_WIDE                  ("A")
+#define PROCESS_INFO_ULTRA_WIDE                 ("A")
+#define CRITERION_REV_ULTRA_WIDE                (0)
+#elif defined(CONFIG_SEC_A70S_PROJECT)
+#define HW_INFO_ULTRA_WIDE                      ("E08QL")
+#define SW_INFO_ULTRA_WIDE                      ("MG00")
+#define VENDOR_INFO_ULTRA_WIDE                  ("M")
+#define PROCESS_INFO_ULTRA_WIDE                 ("A")
+#define CRITERION_REV_ULTRA_WIDE                (0)
+#elif defined(CONFIG_SEC_A71_PROJECT)
+#define HW_INFO_ULTRA_WIDE                      ("F13QL")
+#define SW_INFO_ULTRA_WIDE                      ("MD00")
+#define VENDOR_INFO_ULTRA_WIDE                  ("M")
+#define PROCESS_INFO_ULTRA_WIDE                 ("A")
+#define CRITERION_REV_ULTRA_WIDE                (0)
+#elif defined(CONFIG_SEC_R5Q_PROJECT)
+#define HW_INFO_ULTRA_WIDE                      ("E13QL")
+#define SW_INFO_ULTRA_WIDE                      ("MD00")
+#define VENDOR_INFO_ULTRA_WIDE                  ("Y")
+#define PROCESS_INFO_ULTRA_WIDE                 ("A")
+#define CRITERION_REV_ULTRA_WIDE                (0)
+#else
 #define HW_INFO_ULTRA_WIDE                      ("C08QL")
 #define SW_INFO_ULTRA_WIDE                      ("LA00")
 #define VENDOR_INFO_ULTRA_WIDE                  ("P")
 #define PROCESS_INFO_ULTRA_WIDE                 ("A")
 #define CRITERION_REV_ULTRA_WIDE                (0)
+#endif
 
+#if defined(CONFIG_SEC_R3Q_PROJECT)
+#define HW_INFO_BOKEH                           ("X05QG")
+#define SW_INFO_BOKEH                           ("MD00")
+#define VENDOR_INFO_BOKEH                       ("A")
+#define PROCESS_INFO_BOKEH                      ("A")
+#define CRITERION_REV_BOKEH                      (0)
+#elif defined(CONFIG_SEC_R5Q_PROJECT)
+#define HW_INFO_BOKEH                           ("V05QL")
+#define SW_INFO_BOKEH                           ("MD01")
+#define VENDOR_INFO_BOKEH                       ("Y")
+#define PROCESS_INFO_BOKEH                      ("A")
+#define CRITERION_REV_BOKEH                      (0)
+#elif defined(CONFIG_SEC_A71_PROJECT)
+#define HW_INFO_BOKEH                           ("B05QG")
+#define SW_INFO_BOKEH                           ("MG00")
+#define VENDOR_INFO_BOKEH                       ("M")
+#define PROCESS_INFO_BOKEH                      ("A")
+#define CRITERION_REV_BOKEH                      (0)
+#else
 #define HW_INFO_BOKEH                           ("U05QG")
 #define SW_INFO_BOKEH                           ("LA00")
 #define VENDOR_INFO_BOKEH                       ("M")
 #define PROCESS_INFO_BOKEH                      ("A")
 #define CRITERION_REV_BOKEH                      (0)
+#endif
 #else
 #define HW_INFO                                 ("H12QS")
 #define SW_INFO                                 ("KK01")
@@ -320,7 +528,7 @@ extern char module_info[SYSFS_MODULE_INFO_SIZE];
 #define CRITERION_REV                           (14)
 #endif
 
-#if defined(CONFIG_SEC_A60Q_PROJECT)
+#if defined(CONFIG_SEC_A60Q_PROJECT) || defined(CONFIG_SEC_M40_PROJECT)
 #define FRONT_HW_INFO                           ("D16QL")
 #define FRONT_SW_INFO                           ("LA00")
 #define FRONT_VENDOR_INFO                       ("M")
@@ -332,12 +540,30 @@ extern char module_info[SYSFS_MODULE_INFO_SIZE];
 #define FRONT_VENDOR_INFO                       ("P")
 #define FRONT_PROCESS_INFO                      ("A")
 #define CRITERION_REV_FRONT                     (10)
-#elif defined(CONFIG_SEC_A70Q_PROJECT)
+#elif defined(CONFIG_SEC_A70Q_PROJECT) || defined(CONFIG_SEC_A70S_PROJECT)
 #define FRONT_HW_INFO                           ("A32QL")
 #define FRONT_SW_INFO                           ("LA00")
 #define FRONT_VENDOR_INFO                       ("S")
 #define FRONT_PROCESS_INFO                      ("A")
 #define CRITERION_REV_FRONT                      (10)
+#elif defined(CONFIG_SEC_R3Q_PROJECT)
+#define FRONT_HW_INFO                           ("E32QL")
+#define FRONT_SW_INFO                           ("MD00")
+#define FRONT_VENDOR_INFO                       ("C")
+#define FRONT_PROCESS_INFO                      ("A")
+#define CRITERION_REV_FRONT                      (0)
+#elif defined(CONFIG_SEC_A71_PROJECT)
+#define FRONT_HW_INFO                           ("D32QS")
+#define FRONT_SW_INFO                           ("MD00")
+#define FRONT_VENDOR_INFO                       ("N")
+#define FRONT_PROCESS_INFO                      ("A")
+#define CRITERION_REV_FRONT                      (0)
+#elif defined(CONFIG_SEC_R5Q_PROJECT) || defined(CONFIG_SEC_A71_PROJECT)
+#define FRONT_HW_INFO                           ("C32QS")
+#define FRONT_SW_INFO                           ("MD00")
+#define FRONT_VENDOR_INFO                       ("C")
+#define FRONT_PROCESS_INFO                      ("A")
+#define CRITERION_REV_FRONT                      (0)
 #else
 #define FRONT_HW_INFO                           ("B32QL")
 #define FRONT_SW_INFO                           ("LA00")
@@ -424,6 +650,30 @@ extern int rear2_tof_dual_tilt_range;
 extern int rear2_tof_dual_tilt_max_err;
 extern int rear2_tof_dual_tilt_avg_err;
 extern int rear2_tof_dual_tilt_dll_ver;
+#endif
+#if defined(CONFIG_SAMSUNG_REAR_QUAD)
+#define REAR4_FROM_CAL_MAP_VERSION        ('3')
+#define REAR4_MODULE_VER_ON_PVR           ('B')
+#define REAR4_MODULE_VER_ON_SRA           ('M')
+#define REAR4_CAM_MAP_VERSION_ADDR        0x0090
+#define REAR4_DLL_VERSION_ADDR            0x0094
+#define REAR4_MODULE_FW_VERSION           0x005E
+#define REAR4_MODULE_ID_ADDR              0x00AE
+#define REAR4_SENSOR_ID_ADDR              0x00B8
+
+#define FROM_REAR4_AF_CAL_D10_ADDR               0x010C
+#define FROM_REAR4_AF_CAL_PAN_ADDR               0x0110
+#define FROM_REAR4_AF_CAL_MACRO_ADDR             0x010C
+
+extern char cam4_fw_ver[SYSFS_FW_VER_SIZE];
+extern char cam4_fw_full_ver[SYSFS_FW_VER_SIZE];
+extern char cam4_fw_user_ver[SYSFS_FW_VER_SIZE];
+extern char cam4_fw_factory_ver[SYSFS_FW_VER_SIZE];
+extern char rear4_module_info[SYSFS_MODULE_INFO_SIZE];
+extern char rear4_sensor_id[FROM_SENSOR_ID_SIZE + 1];
+extern uint8_t rear4_module_id[FROM_MODULE_ID_SIZE + 1];
+extern char rear4_mtf_exif[FROM_MTF_SIZE + 1];
+extern int rear4_af_cal[FROM_REAR_AF_CAL_SIZE + 1];
 #endif
 
 #if defined(CONFIG_SAMSUNG_FRONT_TOF)
@@ -642,6 +892,7 @@ struct cam_eeprom_ctrl_t {
 	struct camera_io_master io_master_info;
 	struct msm_camera_gpio_num_info *gpio_num_info;
 	enum cci_i2c_master_t cci_i2c_master;
+	enum cci_device_num cci_num;
 	struct cam_subdev v4l2_dev_str;
 	struct cam_eeprom_intf_params bridge_intf;
 	enum msm_camera_device_type_t eeprom_device_type;
@@ -666,6 +917,9 @@ typedef enum{
 	CAM_EEPROM_IDX_FRONT,
 	CAM_EEPROM_IDX_ULTRA_WIDE,
 	CAM_EEPROM_IDX_BOKEH,
+#if defined(CONFIG_SAMSUNG_REAR_QUAD) || defined(CONFIG_SEC_R5Q_PROJECT)
+	CAM_EEPROM_IDX_BACK_MACRO,
+#endif
 #if defined(CONFIG_SAMSUNG_REAR_TOF)
 	CAM_EEPROM_IDX_BACK_TOF,
 #endif

@@ -71,6 +71,8 @@ source "drivers/pinctrl/Kconfig"
 
 source "drivers/gpio/Kconfig"
 
+source "drivers/gnsssirf/Kconfig"
+
 source "drivers/w1/Kconfig"
 
 source "drivers/power/Kconfig"
@@ -227,7 +229,7 @@ source "drivers/sensors/Kconfig"
 
 source "drivers/esoc/Kconfig"
 
-source "drivers/debug/Kconfig"
+source "drivers/samsung/Kconfig"
 
 source "drivers/battery_v2/Kconfig"
 
@@ -243,7 +245,7 @@ source "drivers/motor/Kconfig"
 
 source "drivers/five/Kconfig"
 
-source "drivers/icdrv/Kconfig"
+source "drivers/security/samsung/icdrv/Kconfig"
 
 source "drivers/ccic/Kconfig"
 

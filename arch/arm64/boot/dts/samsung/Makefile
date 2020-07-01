@@ -10,7 +10,7 @@ SEC_A60Q_CHN_DTBO := \
 		sm6150-sec-a60q-chn-overlay-r05.dtbo \
 		sm6150-sec-a60q-chn-overlay-r06.dtbo \
 		sm6150-sec-a60q-chn-overlay-r08.dtbo 
-		
+
 # A60Q_SWA_OPEN(SM6150)
 SEC_A60Q_SWA_DTBO := \
                 sm6150-sec-a60q-swa-overlay-r00.dtbo \
@@ -19,6 +19,17 @@ SEC_A60Q_SWA_DTBO := \
 				sm6150-sec-a60q-swa-overlay-r03.dtbo \
 				sm6150-sec-a60q-swa-overlay-r04.dtbo \
 				sm6150-sec-a60q-swa-overlay-r05.dtbo
+				
+# M40_SWA_OPEN(SM6150)		
+SEC_M40_SWA_DTBO := \
+                sm6150-sec-m40-swa-overlay-r00.dtbo \
+				sm6150-sec-m40-swa-overlay-r01.dtbo \
+				sm6150-sec-m40-swa-overlay-r02.dtbo \
+				sm6150-sec-m40-swa-overlay-r03.dtbo \
+				sm6150-sec-m40-swa-overlay-r04.dtbo \
+				sm6150-sec-m40-swa-overlay-r05.dtbo \
+				sm6150-sec-m40-swa-overlay-r06.dtbo \
+				sm6150-sec-m40-swa-overlay-r08.dtbo
 
 # A70Q(SM6150)
 SEC_A70Q_EUR_DTBO := \
@@ -63,7 +74,9 @@ SEC_A70Q_EUR_LDU_DTBO := \
 				sm6150-sec-a70q-eur-ldu-overlay-r14.dtbo
 
 SEC_A70Q_USA_DTBO := \
-                sm6150-sec-a70q-usa-overlay-r00.dtbo
+                sm6150-sec-a70q-usa-overlay-r00.dtbo \
+				sm6150-sec-a70q-usa-overlay-r02.dtbo \
+				sm6150-sec-a70q-usa-overlay-r03.dtbo
 
 SEC_A70Q_KOR_DTBO := \
                 sm6150-sec-a70q-kor-overlay-r00.dtbo \
@@ -146,6 +159,14 @@ SEC_A70Q_CAN_DTBO := \
 				sm6150-sec-a70q-can-overlay-r13.dtbo \
 				sm6150-sec-a70q-can-overlay-r14.dtbo
 
+# A70S(SM6150)				
+SEC_A70S_SWA_DTBO := \
+				sm6150-sec-a70s-swa-overlay-r00.dtbo \
+				sm6150-sec-a70s-swa-overlay-r01.dtbo
+
+SEC_A70S_CHN_DTBO := \
+				sm6150-sec-a70s-chn-overlay-r00.dtbo
+
 # R1Q(SM7150)
 SEC_R1Q_EUR_DTBO := \
                 sm7150-sec-r1q-eur-overlay-r00.dtbo \
@@ -178,8 +199,53 @@ SEC_R1Q_KOR_DTBO := \
 		sm7150-sec-r1q-kor-overlay-r05.dtbo \
 		sm7150-sec-r1q-kor-overlay-r06.dtbo \
 		sm7150-sec-r1q-kor-overlay-r07.dtbo \
-		sm7150-sec-r1q-kor-overlay-r08.dtbo
+		sm7150-sec-r1q-kor-overlay-r08.dtbo \
+		sm7150-sec-r1q-kor-overlay-r09.dtbo
 
+# A70S(SM7150)
+SEC_A70SQ_EUR_DTBO := \
+                sm7150-sec-a70sq-eur-overlay-r00.dtbo \
+				sm7150-sec-a70sq-eur-overlay-r01.dtbo
+				
+# A71(SM7150)
+SEC_A71_CAN_DTBO := \
+                sm7150-sec-a71-can-overlay-r00.dtbo \
+				sm7150-sec-a71-can-overlay-r01.dtbo \
+				sm7150-sec-a71-can-overlay-r02.dtbo \
+				sm7150-sec-a71-can-overlay-r03.dtbo \
+				sm7150-sec-a71-can-overlay-r04.dtbo \
+				sm7150-sec-a71-can-overlay-r05.dtbo \
+				sm7150-sec-a71-can-overlay-r06.dtbo
+				
+SEC_A71_EUR_LDU_DTBO := \
+                sm7150-sec-a71-eur-ldu-overlay-r00.dtbo \
+				sm7150-sec-a71-eur-ldu-overlay-r01.dtbo \
+				sm7150-sec-a71-eur-ldu-overlay-r02.dtbo \
+				sm7150-sec-a71-eur-ldu-overlay-r03.dtbo \
+				sm7150-sec-a71-eur-ldu-overlay-r04.dtbo \
+				sm7150-sec-a71-eur-ldu-overlay-r05.dtbo \
+				sm7150-sec-a71-eur-ldu-overlay-r06.dtbo
+				
+SEC_A71_SWA_DTBO := \
+                sm7150-sec-a71-swa-overlay-r00.dtbo \
+				sm7150-sec-a71-swa-overlay-r01.dtbo \
+				sm7150-sec-a71-swa-overlay-r02.dtbo \
+				sm7150-sec-a71-swa-overlay-r03.dtbo
+				
+SEC_A71_EUR_DTBO := \
+                sm7150-sec-a71-eur-overlay-r00.dtbo \
+				sm7150-sec-a71-eur-overlay-r01.dtbo \
+				sm7150-sec-a71-eur-overlay-r02.dtbo \
+				sm7150-sec-a71-eur-overlay-r03.dtbo \
+				sm7150-sec-a71-eur-overlay-r04.dtbo \
+				sm7150-sec-a71-eur-overlay-r05.dtbo \
+				sm7150-sec-a71-eur-overlay-r06.dtbo
+
+
+# A70S(SM7150)
+SEC_A70SQ_SWA_DTBO := \
+                sm7150-sec-a70sq-swa-overlay-r00.dtbo \
+				sm7150-sec-a70sq-swa-overlay-r01.dtbo				
 
 define __sec_dtbo_build
 dtbo-$(2) += $(1)
@@ -198,6 +264,9 @@ SEC_SM7150_BASE_DTB := ../qcom/sdmmagpie.dtb
 
 $(eval $(call sec_dtbo_build, \
 		$(SEC_A60Q_CHN_DTBO),$(CONFIG_SEC_A60Q_CHN_PROJECT),$(SEC_SM6150_BASE_DTB)))
+		
+$(eval $(call sec_dtbo_build, \
+		$(SEC_M40_SWA_DTBO),$(CONFIG_SEC_M40_SWA_PROJECT),$(SEC_SM6150_BASE_DTB)))
 		
 $(eval $(call sec_dtbo_build, \
 		$(SEC_A60Q_SWA_DTBO),$(CONFIG_SEC_A60Q_SWA_PROJECT),$(SEC_SM6150_BASE_DTB)))
@@ -233,6 +302,12 @@ $(eval $(call sec_dtbo_build, \
 		$(SEC_A70Q_SWA_DTBO),$(CONFIG_SEC_A70Q_SWA_PROJECT),$(SEC_SM6150_BASE_DTB)))
 		
 $(eval $(call sec_dtbo_build, \
+		$(SEC_A70S_SWA_DTBO),$(CONFIG_SEC_A70S_SWA_PROJECT),$(SEC_SM6150_BASE_DTB)))
+
+$(eval $(call sec_dtbo_build, \
+		$(SEC_A70S_CHN_DTBO),$(CONFIG_SEC_A70S_CHN_PROJECT),$(SEC_SM6150_BASE_DTB)))
+		
+$(eval $(call sec_dtbo_build, \
 		$(SEC_R1Q_EUR_DTBO),$(CONFIG_SEC_R1Q_EUR_PROJECT),$(SEC_SM7150_BASE_DTB)))
 
 $(eval $(call sec_dtbo_build, \
@@ -246,6 +321,24 @@ $(eval $(call sec_dtbo_build, \
 
 $(eval $(call sec_dtbo_build, \
 		$(SEC_R1Q_KOR_DTBO),$(CONFIG_SEC_R1Q_KOR_PROJECT),$(SEC_SM7150_BASE_DTB)))
+
+$(eval $(call sec_dtbo_build, \
+		$(SEC_A70SQ_EUR_DTBO),$(CONFIG_SEC_A70SQ_EUR_PROJECT),$(SEC_SM7150_BASE_DTB)))
+
+$(eval $(call sec_dtbo_build, \
+		$(SEC_A71_EUR_LDU_DTBO),$(CONFIG_SEC_A71_EUR_LDU_PROJECT),$(SEC_SM7150_BASE_DTB)))
+		
+$(eval $(call sec_dtbo_build, \
+		$(SEC_A71_CAN_DTBO),$(CONFIG_SEC_A71_CAN_PROJECT),$(SEC_SM7150_BASE_DTB)))
+		
+$(eval $(call sec_dtbo_build, \
+		$(SEC_A71_SWA_DTBO),$(CONFIG_SEC_A71_SWA_PROJECT),$(SEC_SM7150_BASE_DTB)))
+		
+$(eval $(call sec_dtbo_build, \
+		$(SEC_A71_EUR_DTBO),$(CONFIG_SEC_A71_EUR_PROJECT),$(SEC_SM7150_BASE_DTB)))
+
+$(eval $(call sec_dtbo_build, \
+		$(SEC_A70SQ_SWA_DTBO),$(CONFIG_SEC_A70SQ_SWA_PROJECT),$(SEC_SM7150_BASE_DTB)))		
 
 endif
 

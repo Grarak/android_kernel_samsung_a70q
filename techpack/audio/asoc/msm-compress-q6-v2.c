@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -1613,7 +1613,7 @@ static int msm_compr_playback_open(struct snd_compr_stream *cstream)
 
 	q6_state = apr_get_q6_state();
 	if (q6_state == APR_SUBSYS_DOWN) {
-		pr_debug("%s,adsp is down\n", __func__);
+		pr_debug("%s: adsp is down\n", __func__);
 		return -ENETRESET;
 	}
 	prtd = kzalloc(sizeof(struct msm_compr_audio), GFP_KERNEL);
@@ -1716,7 +1716,7 @@ static int msm_compr_capture_open(struct snd_compr_stream *cstream)
 
 	q6_state = apr_get_q6_state();
 	if (q6_state == APR_SUBSYS_DOWN) {
-		pr_debug("%s,adsp is down\n", __func__);
+		pr_debug("%s: adsp is down\n", __func__);
 		return -ENETRESET;
 	}
 	prtd = kzalloc(sizeof(struct msm_compr_audio), GFP_KERNEL);
@@ -1759,6 +1759,11 @@ static int msm_compr_capture_open(struct snd_compr_stream *cstream)
 	atomic_set(&prtd->close, 0);
 	atomic_set(&prtd->wait_on_close, 0);
 	atomic_set(&prtd->error, 0);
+
+	init_waitqueue_head(&prtd->eos_wait);
+	init_waitqueue_head(&prtd->drain_wait);
+	init_waitqueue_head(&prtd->close_wait);
+	init_waitqueue_head(&prtd->wait_for_stream_avail);
 
 	runtime->private_data = prtd;
 
@@ -2747,12 +2752,10 @@ static int msm_compr_pointer(struct snd_compr_stream *cstream,
 				rc = q6asm_get_session_time(
 				prtd->audio_client, &prtd->marker_timestamp);
 			if (rc < 0) {
-				pr_err("%s: Get Session Time return =%lld\n",
-					__func__, timestamp);
 				if (atomic_read(&prtd->error))
 					return -ENETRESET;
 				else
-					return -EAGAIN;
+					return rc;
 			}
 		}
 	} else {

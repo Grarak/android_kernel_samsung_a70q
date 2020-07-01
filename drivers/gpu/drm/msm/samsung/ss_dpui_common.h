@@ -89,6 +89,8 @@ enum dpui_key {
 	/* GPU */
 	DPUI_KEY_QCT_GPU_PF,	/* GPU Page Fault Count */
 
+	DPUI_KEY_UB_CON,	/* UB con detect */
+
 	MAX_DPUI_KEY,
 };
 

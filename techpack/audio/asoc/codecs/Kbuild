@@ -199,6 +199,9 @@ ifeq ($(KERNEL_BUILD), 1)
 	obj-y	+= wcd937x/
 	obj-y	+= bolero/
 endif
+ifdef CONFIG_SND_SOC_TAS2562
+	obj-y	 += tas2562/
+endif
 
 ifeq ($(CONFIG_SND_SOC_GCOV), y)
 GCOV_PROFILE := y

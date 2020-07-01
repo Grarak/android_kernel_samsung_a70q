@@ -214,6 +214,7 @@ struct ts_test_result {
 
 #ifdef CONFIG_SEC_DEBUG_TSP_LOG
 #include <linux/sec_debug.h>
+#include <linux/sec_ts_common.h>
 
 #define tsp_err(fmt, ...)    \
 ({    \
@@ -330,6 +331,7 @@ struct ts_test_result {
 #define IST40XX_HIB_COORD		IST40XX_HA_ADDR(IST40XX_HIB_BASE | 0x08)
 #define IST40XX_HIB_GESTURE_REG		IST40XX_HA_ADDR(IST40XX_HIB_BASE | 0x0C)
 #define IST40XX_HIB_GESTURE_MSG		IST40XX_HA_ADDR(IST40XX_HIB_BASE | 0x1C)
+#define IST40XX_HIB_CRJIT_MSG		IST40XX_HA_ADDR(IST40XX_HIB_BASE | 0x30)
 #define IST40XX_HIB_SPONGE_RECT		IST40XX_HA_ADDR(IST40XX_HIB_BASE | 0x50)
 #define IST40XX_HIB_PROX_SENSITI	IST40XX_HA_ADDR(IST40XX_HIB_BASE | 0x58)
 #define IST40XX_HIB_CMD			IST40XX_HA_ADDR(IST40XX_HIB_BASE | 0x5C)
@@ -662,6 +664,7 @@ struct ist40xx_dt_data {
 	u32 cm_spec_gap;
 	bool enable_settings_aot;
 	bool support_fod;
+	bool enable_fpcb_noise_test;
 };
 
 struct ist40xx_data {
@@ -805,6 +808,8 @@ struct ist40xx_data {
 	u16 p_y[IST40XX_MAX_FINGER_ID];
 	u16 r_x[IST40XX_MAX_FINGER_ID];
 	u16 r_y[IST40XX_MAX_FINGER_ID];
+
+	u32 fpcb_noise_max_sum;
 
 	bool prox_power_off;
 };

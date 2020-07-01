@@ -29,12 +29,6 @@ config MST_SUPPORT_GPIO
 	help
 	This enables support gpio check code
 
-config MST_NONSECURE
-	bool "MST before TrustZone bringup"
-	default n
-	help
-	This enables the MST operation in Normal kernel
-
 config MFC_CHARGER
 	bool "MFC IC using model"
 	default n

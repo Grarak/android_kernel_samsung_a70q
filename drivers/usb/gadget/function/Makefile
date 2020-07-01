@@ -74,3 +74,5 @@ usb_f_gsi-y			:= f_gsi.o
 obj-$(CONFIG_USB_F_GSI)		+= usb_f_gsi.o
 usb_f_qdss-y			:= f_qdss.o u_qdss.o
 obj-$(CONFIG_USB_F_QDSS)	+= usb_f_qdss.o
+usb_f_conn_gadget-y             := f_conn_gadget.o
+obj-$(CONFIG_USB_F_CONN_GADGET) += usb_f_conn_gadget.o

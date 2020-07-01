@@ -302,7 +302,6 @@ static void sysrq_handle_showstate_blocked(int key)
 {
 	show_state_filter(TASK_UNINTERRUPTIBLE);
 	show_mem(0, NULL);
-	show_mem_extra_call_notifiers();
 	dump_tasks(NULL, NULL);
 }
 static struct sysrq_key_op sysrq_showstate_blocked_op = {

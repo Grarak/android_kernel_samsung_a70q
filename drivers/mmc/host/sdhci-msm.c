@@ -2577,6 +2577,7 @@ static int sdhci_msm_setup_vreg(struct sdhci_msm_pltfm_data *pdata,
 				ret = sdhci_msm_vreg_disable(vreg_table[i]);
 				if (gpio_is_valid(pdata->tflash_en_gpio)) {
 					if (gpio_get_value(pdata->tflash_en_gpio)) {
+						mdelay(2);
 						gpio_direction_output(pdata->tflash_en_gpio, 0);
 						pr_err("tflash is %sabled(%d).\n",
 								gpio_get_value(pdata->tflash_en_gpio) ? "en" : "dis",
@@ -3162,7 +3163,7 @@ static void sdhci_msm_registers_save(struct sdhci_host *host)
 	msm_host->regs_restore.hc_2c_2e =
 		sdhci_readl(host, SDHCI_CLOCK_CONTROL);
 	msm_host->regs_restore.hc_3c_3e =
-		sdhci_readl(host, SDHCI_ACMD12_ERR);
+		sdhci_readl(host, SDHCI_AUTO_CMD_STATUS);
 	msm_host->regs_restore.vendor_pwrctl_ctl =
 		readl_relaxed(host->ioaddr +
 		msm_host_offset->CORE_PWRCTL_CTL);
@@ -3225,7 +3226,7 @@ static void sdhci_msm_registers_restore(struct sdhci_host *host)
 	sdhci_writel(host, msm_host->regs_restore.hc_2c_2e,
 			SDHCI_CLOCK_CONTROL);
 	sdhci_writel(host, msm_host->regs_restore.hc_3c_3e,
-			SDHCI_ACMD12_ERR);
+			SDHCI_AUTO_CMD_STATUS);
 	sdhci_writel(host, msm_host->regs_restore.hc_38_3a,
 			SDHCI_SIGNAL_ENABLE);
 	sdhci_writel(host, msm_host->regs_restore.hc_34_36,
@@ -5153,6 +5154,42 @@ out:
 	return len;
 }
 
+static ssize_t sd_health_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct mmc_host *host = dev_get_drvdata(dev);
+	struct mmc_card *card = host->card;
+	struct mmc_card_error_log *err_log;
+	u64 total_c_cnt = 0;
+	u64 total_t_cnt = 0;
+	int len = 0;
+	int i = 0;
+
+	if (!card) {
+		//There should be no spaces in 'No Card'(Vold Team).
+		len = snprintf(buf, PAGE_SIZE, "NOCARD\n");
+		goto out;
+	}
+
+	err_log = card->err_log;
+
+	for (i = 0; i < 6; i++) {
+		if (err_log[i].err_type == -EILSEQ && total_c_cnt < MAX_CNT_U64)
+			total_c_cnt += err_log[i].count;
+		if (err_log[i].err_type == -ETIMEDOUT && total_t_cnt < MAX_CNT_U64)
+			total_t_cnt += err_log[i].count;
+	}
+
+	if(err_log[0].ge_cnt > 100 || err_log[0].ecc_cnt > 0 || err_log[0].wp_cnt > 0 ||
+			err_log[0].oor_cnt > 10 || total_t_cnt > 100 || total_c_cnt > 100)
+		len = snprintf(buf, PAGE_SIZE, "BAD\n");
+	else
+		len = snprintf(buf, PAGE_SIZE, "GOOD\n");
+
+out:
+	return len;
+}
+
 static DEVICE_ATTR(status, 0444, t_flash_detect_show, NULL);
 static DEVICE_ATTR(cd_cnt, 0444, sd_detect_cnt_show, NULL);
 static DEVICE_ATTR(max_mode, 0444, sd_detect_maxmode_show, NULL);
@@ -5164,6 +5201,7 @@ static DEVICE_ATTR(sdcard_summary, 0444, sdcard_summary_show, NULL);
 static DEVICE_ATTR(mmc_data, S_IRUGO, mmc_data_show, NULL);
 static DEVICE_ATTR(mmc_summary, S_IRUGO, mmc_summary_show, NULL);
 static DEVICE_ATTR(data, 0444, sd_cid_show, NULL);
+static DEVICE_ATTR(fc, 0444, sd_health_show, NULL);
 
 /* Callback function for SD Card IO Error */
 static int sdcard_uevent(struct mmc_card *card)
@@ -5720,6 +5758,11 @@ failed_sdcard:
 					&dev_attr_data) < 0)
 			pr_err("%s : Failed to create device file(%s)!\n",
 					__func__, dev_attr_data.attr.name);
+
+		if (device_create_file(sd_info_dev,
+					&dev_attr_fc) < 0)
+			pr_err("%s : Failed to create device file(%s)!\n",
+					__func__, dev_attr_fc.attr.name);
 
 		dev_set_drvdata(sd_info_dev, msm_host->mmc);
 	}

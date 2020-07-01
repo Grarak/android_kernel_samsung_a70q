@@ -444,6 +444,7 @@ static ssize_t supports_usb_power_delivery_show(struct device *dev,
 {
 	struct typec_partner *p = to_typec_partner(dev);
 
+	pr_info("%s p->usb_pd=%d\n", __func__, p->usb_pd);
 	return sprintf(buf, "%s\n", p->usb_pd ? "yes" : "no");
 }
 static DEVICE_ATTR_RO(supports_usb_power_delivery);
@@ -1252,7 +1253,6 @@ void typec_set_pwr_opmode(struct typec_port *port,
 
 	port->pwr_opmode = opmode;
 	sysfs_notify(&port->dev.kobj, NULL, "power_operation_mode");
-	kobject_uevent(&port->dev.kobj, KOBJ_CHANGE);
 
 	partner_dev = device_find_child(&port->dev, NULL, partner_match);
 	if (partner_dev) {
@@ -1265,6 +1265,7 @@ void typec_set_pwr_opmode(struct typec_port *port,
 		}
 		put_device(partner_dev);
 	}
+	kobject_uevent(&port->dev.kobj, KOBJ_CHANGE);
 }
 EXPORT_SYMBOL_GPL(typec_set_pwr_opmode);
 

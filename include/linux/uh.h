@@ -23,6 +23,11 @@
 
 int uh_call(u64 app_id, u64 command, u64 arg0, u64 arg1, u64 arg2, u64 arg3);
 
+struct test_case_struct {
+	int (* fn)(void); //test case func
+	char * describe;
+};
+
 #endif //LINKER_SCRIPT
 #endif //__ASSEMBLY__
 #endif //__UH_H__

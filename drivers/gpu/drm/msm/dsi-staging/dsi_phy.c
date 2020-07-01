@@ -1210,14 +1210,15 @@ int dsi_phy_dyn_refresh_cache_phy_timings(struct msm_dsi_phy *phy, u32 *dst,
 	if (!phy || !dst || !size)
 		return -EINVAL;
 
-	if (phy->hw.ops.dyn_refresh_ops.cache_phy_timings)
+	if (phy->hw.ops.dyn_refresh_ops.cache_phy_timings) {
 		rc = phy->hw.ops.dyn_refresh_ops.cache_phy_timings(
 				&phy->cfg.timing, dst, size);
 
 		if (rc)
 			pr_err("failed to cache phy timings %d\n", rc);
+	}
 
-		return rc;
+	return rc;
 }
 
 /**
@@ -1233,6 +1234,26 @@ void dsi_phy_dynamic_refresh_clear(struct msm_dsi_phy *phy)
 
 	if (phy->hw.ops.dyn_refresh_ops.dyn_refresh_helper)
 		phy->hw.ops.dyn_refresh_ops.dyn_refresh_helper(&phy->hw, 0);
+
+	mutex_unlock(&phy->phy_lock);
+}
+
+/**
+ * dsi_phy_set_continuous_clk() - set/unset force clock lane HS request
+ * @phy:	DSI PHY handle
+ * @enable:	variable to control continuous clock
+ */
+void dsi_phy_set_continuous_clk(struct msm_dsi_phy *phy, bool enable)
+{
+	if (!phy)
+		return;
+
+	mutex_lock(&phy->phy_lock);
+
+	if (phy->hw.ops.set_continuous_clk)
+		phy->hw.ops.set_continuous_clk(&phy->hw, enable);
+	else
+		pr_warn("set_continuous_clk ops not present\n");
 
 	mutex_unlock(&phy->phy_lock);
 }

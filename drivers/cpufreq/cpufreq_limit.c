@@ -503,7 +503,7 @@ static struct notifier_block notifier_policy_block = {
 
 /************************** sysfs begin ************************/
 static ssize_t show_cpufreq_limit_requests(struct kobject *kobj,
-		struct attribute *attr, char *buf)
+		struct kobj_attribute *attr, char *buf)
 {
 	struct cpufreq_limit_handle *handle;
 	ssize_t len = 0;
@@ -518,7 +518,7 @@ static ssize_t show_cpufreq_limit_requests(struct kobject *kobj,
 	return len;
 }
 
-static struct global_attr cpufreq_limit_requests_attr =
+static struct kobj_attribute cpufreq_limit_requests_attr =
 	__ATTR(cpufreq_limit_requests, 0444, show_cpufreq_limit_requests, NULL);
 
 #ifdef CONFIG_CPU_FREQ_LIMIT_HMP
@@ -526,21 +526,21 @@ static struct global_attr cpufreq_limit_requests_attr =
 
 #define show_one(file_name, object)						\
 static ssize_t show_##file_name							\
-(struct kobject *kobj, struct attribute *attr, char *buf)			\
+(struct kobject *kobj, struct kobj_attribute *attr, char *buf)			\
 {										\
 	return sprintf(buf, "%u\n", hmp_param.object);				\
 }
 
 #define show_one_ulong(file_name, object)					\
 static ssize_t show_##file_name							\
-(struct kobject *kobj, struct attribute *attr, char *buf)			\
+(struct kobject *kobj, struct kobj_attribute *attr, char *buf)			\
 {										\
 	return sprintf(buf, "%lu\n", hmp_param.object);			\
 }
 
 #define store_one(file_name, object)						\
 static ssize_t store_##file_name						\
-(struct kobject *a, struct attribute *b, const char *buf, size_t count)		\
+(struct kobject *a, struct kobj_attribute *b, const char *buf, size_t count)		\
 {										\
 	int ret;								\
 										\
@@ -551,12 +551,12 @@ static ssize_t store_##file_name						\
 	return count;								\
 }
 
-static ssize_t show_little_cpu_num(struct kobject *kobj, struct attribute *attr, char *buf)
+static ssize_t show_little_cpu_num(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
 	return sprintf(buf, "%u-%u\n", hmp_param.little_cpu_start, hmp_param.little_cpu_end);
 }
 
-static ssize_t show_big_cpu_num(struct kobject *kobj, struct attribute *attr, char *buf)
+static ssize_t show_big_cpu_num(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
 	return sprintf(buf, "%u-%u\n", hmp_param.big_cpu_start, hmp_param.big_cpu_end);
 }
@@ -570,7 +570,7 @@ show_one(little_divider, little_divider);
 show_one(hmp_boost_type, hmp_boost_type);
 show_one(hmp_prev_boost_type, hmp_prev_boost_type);
 
-static ssize_t store_little_cpu_num(struct kobject *a, struct attribute *b,
+static ssize_t store_little_cpu_num(struct kobject *a, struct kobj_attribute *b,
 				const char *buf, size_t count)
 {
 	unsigned int input, input2;
@@ -591,7 +591,7 @@ static ssize_t store_little_cpu_num(struct kobject *a, struct attribute *b,
 	return count;
 }
 
-static ssize_t store_big_cpu_num(struct kobject *a, struct attribute *b,
+static ssize_t store_big_cpu_num(struct kobject *a, struct kobj_attribute *b,
 				const char *buf, size_t count)
 {
 	unsigned int input, input2;
@@ -618,7 +618,7 @@ store_one(little_min_freq, little_min_freq);
 store_one(little_max_freq, little_max_freq);
 store_one(little_min_lock, little_min_lock);
 
-static ssize_t store_little_divider(struct kobject *a, struct attribute *b,
+static ssize_t store_little_divider(struct kobject *a, struct kobj_attribute *b,
 				const char *buf, size_t count)
 {
 	unsigned int input;
@@ -636,7 +636,7 @@ static ssize_t store_little_divider(struct kobject *a, struct attribute *b,
 	return count;
 }
 
-static ssize_t store_hmp_boost_type(struct kobject *a, struct attribute *b,
+static ssize_t store_hmp_boost_type(struct kobject *a, struct kobj_attribute *b,
 				const char *buf, size_t count)
 {
 	unsigned int input;

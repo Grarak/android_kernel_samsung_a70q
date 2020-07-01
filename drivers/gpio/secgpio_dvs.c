@@ -55,6 +55,11 @@ static ssize_t secgpio_ctrl_file_write(
 	const char *buf, size_t size);
 static ssize_t secgpio_checked_sleepgpio_read(
 	struct device *dev, struct device_attribute *attr, char *buf);
+static ssize_t secgpio_read_request_gpio(
+        struct device *dev, struct device_attribute *attr, char *buf);
+static ssize_t secgpio_write_request_gpio(
+        struct device *dev, struct device_attribute *attr,
+        const char *buf, size_t size);
 #ifdef SECGPIO_SLEEP_DEBUGGING
 static ssize_t secgpio_sleep_debug_write(
 	struct device *dev, struct device_attribute *attr,
@@ -69,11 +74,13 @@ static DEVICE_ATTR(check_init_detail, 0664,
 	checked_secgpio_init_read_details, NULL);
 static DEVICE_ATTR(check_sleep_detail, 0664,
 	checked_secgpio_sleep_read_details, NULL);
-static DEVICE_ATTR(secgpio_ctrl, 0664 , NULL, secgpio_ctrl_file_write);
+static DEVICE_ATTR(secgpio_ctrl, 0664, NULL, secgpio_ctrl_file_write);
 static DEVICE_ATTR(checked_sleepGPIO, 0664,
 	secgpio_checked_sleepgpio_read, NULL);
+static DEVICE_ATTR(check_requested_gpio, 0664,
+        secgpio_read_request_gpio, secgpio_write_request_gpio);
 #ifdef SECGPIO_SLEEP_DEBUGGING
-static DEVICE_ATTR(gpio_sleep_debug, 0220 , NULL, secgpio_sleep_debug_write);
+static DEVICE_ATTR(gpio_sleep_debug, 0220, NULL, secgpio_sleep_debug_write);
 #endif
 
 static struct attribute *secgpio_dvs_attributes[] = {
@@ -83,6 +90,7 @@ static struct attribute *secgpio_dvs_attributes[] = {
 		&dev_attr_check_sleep_detail.attr,
 		&dev_attr_secgpio_ctrl.attr,
 		&dev_attr_checked_sleepGPIO.attr,
+		&dev_attr_check_requested_gpio.attr,
 #ifdef SECGPIO_SLEEP_DEBUGGING
 		&dev_attr_gpio_sleep_debug.attr,
 #endif
@@ -97,6 +105,7 @@ static int atoi(const char *str)
 {
 	int result = 0;
 	int count = 0;
+
 	if (str == NULL)
 		return -EIO;
 	while (str[count] != 0	/* NULL */
@@ -114,9 +123,6 @@ strtok_r(char *s, const char *delim, char **last)
 	int c, sc;
 	char *tok;
 
-
-	/* if (s == NULL && (s = *last) == NULL)
-		return NULL;	 */
 	if (s == NULL) {
 		s = *last;
 		if (s == NULL)
@@ -217,6 +223,7 @@ static ssize_t checked_secgpio_init_read_details(
 
 	return strlen(buf);
 }
+
 static ssize_t checked_secgpio_sleep_read_details(
 	struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -252,13 +259,15 @@ static ssize_t secgpio_sleep_debug_write(
 	strlcpy(temp_buf, buf, 50);
 
 	/* Data Format example
-	  * Start Data : Cxxx (xxx : gpio count, ex : C12)
-	  * Data : Dxxx,y,z	(xxx :  gpio_num, y : In/Out, z : State H/L, ex : D112,2,0)
-	  *		refer to the standard document for value
-	  * End Data : D
-	*/
+	 * Start Data : Cxxx (xxx : gpio count, ex : C12)
+	 * Data : Dxxx,y,z
+	 *      (xxx :  gpio_num, y : In/Out, z : State H/L, ex : D112,2,0)
+	 *		refer to the standard document for value
+	 * End Data : D
+	 */
 	if (temp_buf[0] == 'C') { /* sleep data start */
 		int count = 0;
+
 		count =  atoi(&temp_buf[1]);
 
 		if (count <= gdvs->count) {
@@ -291,6 +300,7 @@ static ssize_t secgpio_sleep_debug_write(
 		char *token = NULL;
 		char comp[] = ",";
 		int num = 0;
+
 		token = strtok(&temp_buf[1], comp);
 
 		for (num = 0; num < 3; num++) {
@@ -305,16 +315,16 @@ static ssize_t secgpio_sleep_debug_write(
 		}
 
 		/*
-			gpio_ctrl[0] = GPIO NUMBER, gpio_ctrl[1] = IN/OUT,
-			gpio_ctrl[2] = L/H (OUT), PD/PU (IN)
-		*/
+		 *	gpio_ctrl[0] = GPIO NUMBER, gpio_ctrl[1] = IN/OUT,
+		 *	gpio_ctrl[2] = L/H (OUT), PD/PU (IN)
+		 */
 		gdvs->sdebugtable->gpioinfo[sleepdata_cur_pos].gpio_num = gpio_ctrl[0];
 		gdvs->sdebugtable->gpioinfo[sleepdata_cur_pos].io = gpio_ctrl[1];
 		if (gpio_ctrl[1] == 1)		/* IN */
 			gdvs->sdebugtable->gpioinfo[sleepdata_cur_pos].pupd = gpio_ctrl[2];
 		else if (gpio_ctrl[1] == 2)		/* OUT */
 			gdvs->sdebugtable->gpioinfo[sleepdata_cur_pos].lh = gpio_ctrl[2];
-		else		/* It should not be runned */
+		else
 			gdvs->sdebugtable->gpioinfo[sleepdata_cur_pos].pupd = gpio_ctrl[2];
 
 		sleepdata_cur_pos++;
@@ -326,8 +336,7 @@ static ssize_t secgpio_sleep_debug_write(
 		pr_info("[secgpio_dvs] GPIO debug On!!\n");
 		gdvs->sdebugtable->active = true;
 		sdata_phase = SLDATA_START;
-	}
-	else {
+	} else {
 		pr_err("[secgpio_dvs][%s] Phase Error!!(%d)\n", __func__, sdata_phase);
 	}
 
@@ -361,10 +370,10 @@ static ssize_t secgpio_ctrl_file_write(
 			num, gpio_ctrl[num]);
 	}
 	/*
-		gpio_ctrl[0] = IN/OUT, gpio_ctrl[1] = GPIO NUMBER,
-		gpio_ctrl[2] = L/H
-	*/
-	 if (gpio_ctrl[0] == 1) {
+	 *	gpio_ctrl[0] = IN/OUT, gpio_ctrl[1] = GPIO NUMBER,
+	 *	gpio_ctrl[2] = L/H
+	 */
+	if (gpio_ctrl[0] == 1) {
 		gpio_request(gpio_ctrl[1], "gpio_output_test_on");
 		gpio_direction_input(gpio_ctrl[1]);
 		gpio_free(gpio_ctrl[1]);
@@ -372,7 +381,6 @@ static ssize_t secgpio_ctrl_file_write(
 		gpio_request(gpio_ctrl[1], "gpio_output_test_on");
 		gpio_direction_output(gpio_ctrl[1], 1);
 		gpio_free(gpio_ctrl[1]);
-
 		if (gpio_ctrl[2] == 1) {
 			gpio_request(gpio_ctrl[1], "gpio_output_test_on");
 			gpio_set_value(gpio_ctrl[1], 1);
@@ -398,6 +406,56 @@ static ssize_t secgpio_checked_sleepgpio_read(
 		return snprintf(buf, PAGE_SIZE, "0");
 }
 
+static int requested_gpio=0;
+
+static ssize_t secgpio_read_request_gpio(
+		struct device *dev, struct device_attribute *attr, char *buf)
+{
+	int ret, val;
+	val = -1;
+
+	pr_err("%s: gpio[%d]\n",__func__,requested_gpio);
+
+	ret = gpio_request(requested_gpio, "gpio_request_read");
+	if(ret){
+		pr_err("%s: gpio_request failed\n",__func__);
+		goto gpio_request_failed;
+	}
+
+	ret = gpio_direction_input(requested_gpio);
+	if(ret){
+		pr_err("%s: gpio_direction_input failed\n",__func__);
+		goto gpio_read_failed;
+	}
+
+	val = gpio_get_value(requested_gpio);
+	if(val < 0){
+		pr_err("%s: gpio_get_value failed\n",__func__);
+	}
+
+gpio_read_failed:
+	gpio_free(requested_gpio);
+gpio_request_failed:
+	return snprintf(buf, PAGE_SIZE, "GPIO[%d] : [%d]", requested_gpio, val);
+}
+
+static ssize_t secgpio_write_request_gpio(
+		struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
+{
+        int gpionum, ret;
+
+	ret = sscanf(buf, "%d", &gpionum);
+	if(ret == 0){
+		pr_info("[secgpio_dvs]%s: fail to read input value\n", __func__);
+                return size;
+	}
+
+	requested_gpio = gpionum;
+
+	pr_info("[secgpio_dvs]%s: requested_gpio: [%d] \n", __func__,gpionum);
+	return size;
+}
+
 void gpio_dvs_check_initgpio(void)
 {
 	if (gdvs_info && gdvs_info->check_gpio_status)
@@ -420,8 +478,6 @@ void gpio_dvs_set_sleepgpio(void)
 		/* setting function */
 		gdvs_info->set_sleepgpio();
 	}
-
-	return;
 }
 
 void gpio_dvs_undo_sleepgpio(void)
@@ -478,7 +534,7 @@ static int secgpio_dvs_probe(struct platform_device *pdev)
 	return ret;
 
 fail2:
-	device_destroy(secgpio_dvs_class,0);
+	device_destroy(secgpio_dvs_class, 0);
 fail1:
 	class_destroy(secgpio_dvs_class);
 fail_out:
@@ -505,8 +561,9 @@ static struct platform_driver secgpio_dvs = {
 static int __init secgpio_dvs_init(void)
 {
 	int ret;
+
 	ret = platform_driver_register(&secgpio_dvs);
-	pr_info("[secgpio_dvs] secgpio_dvs_init has been initialized!!!\n");
+	pr_info("[secgpio_dvs] %s has been initialized!!!\n", __func__);
 	return ret;
 }
 

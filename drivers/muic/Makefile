@@ -8,11 +8,12 @@ ifeq ($(CONFIG_MUIC_S2MU004),y)
 	obj-y					+= muic_core.o s2mu004-muic.o s2mu004-muic-sysfs.o
 	obj-$(CONFIG_CCIC_NOTIFIER)		+= muic_manager.o
 	obj-$(CONFIG_USB_EXTERNAL_NOTIFY)	+= muic_usb_notification_manager.o
-else
-	obj-y				+= muic-core.o
 endif
-
+obj-y				+= muic_core.o
 obj-$(CONFIG_MUIC_NOTIFIER)		+= muic_notifier.o
+obj-$(CONFIG_MUIC_MANAGER)		+= muic_manager.o
+obj-$(CONFIG_MUIC_SYSFS)		+= muic_sysfs.o
+
 obj-$(CONFIG_MUIC_MAX77804)		+= max77804-muic.o
 obj-$(CONFIG_MUIC_MAX77804K)		+= max77804k-muic.o
 obj-$(CONFIG_MUIC_MAX77828)		+= max77828-muic.o
@@ -32,6 +33,12 @@ obj-$(CONFIG_MUIC_UNIVERSAL_MAX77854)	+= universal/muic_hv_max77854.o
 obj-$(CONFIG_MUIC_UNIVERSAL_SM5720)	+= universal/muic_sm5720_afc.o
 obj-$(CONFIG_MUIC_S2MU004)	+= s2mu004-muic-afc.o
 endif
+
+obj-$(CONFIG_MUIC_S2MU107)		+= s2mu107-muic.o
+obj-$(CONFIG_MUIC_S2MU107)		+= s2mu107-muic-afc.o
+obj-$(CONFIG_MUIC_S2MU106)		+= s2mu106-muic.o
+obj-$(CONFIG_MUIC_S2MU106)		+= s2mu106-muic-afc.o
+
 
 # MUIC SM5713
 obj-$(CONFIG_MUIC_SM5713)	+= sm5713-muic.o sm5713-muic-afc.o

@@ -54,6 +54,13 @@ config SAMSUNG_REAR_TOF
 	---help---
 	Enables support for rear tof camera.
 
+config SAMSUNG_REAR_QUAD
+	tristate "rear quad support"
+	depends on SPECTRA_CAMERA
+	default n
+	---help---
+	Enables support for rear quad camera.
+
 config CAMERA_SYSFS_V2
 	bool "CAMERA SYS"
 	depends on SPECTRA_CAMERA
@@ -129,3 +136,52 @@ config SAMSUNG_CAMERA_OTP
 	default n
 	---help---
 	Enables support for SENSOR OTP
+
+config SAMSUNG_OIS_RUMBA_S4
+        tristate "External RUMBA S4 OIS support"
+	depends on SPECTRA_CAMERA
+	default n
+	---help---
+	Enables support for external ois module.
+
+config SAMSUNG_HW_SOFTLANDING
+	tristate "Soft Landing support"
+	depends on SPECTRA_CAMERA
+	default n
+	---help---
+	Enables support for Samsung HW softlanding
+ 
+config SAMSUNG_ACTUATOR_DW9808
+	tristate "Soft Landing support"
+	depends on SPECTRA_CAMERA
+	default n
+	---help---
+	Enables support for actuator DW9808 Soft landing.
+ 
+config SAMSUNG_ACTUATOR_DW9817
+	tristate "Soft Landing support"
+	depends on SPECTRA_CAMERA
+	default n
+	---help---
+	Enables support for actuator DW9817 Soft landing.
+ 
+config SAMSUNG_ACTUATOR_FP5529
+	tristate "Soft Landing support"
+	depends on SPECTRA_CAMERA
+	default n
+	---help---
+	Enables support for actuator FP5529 Soft landing.
+
+config MCLK_I2C_DELAY
+	tristate "Delay in MCLK I2C Sequence for preventing Spec Out"
+	depends on SPECTRA_CAMERA
+	default n
+	---help---
+	Adds Delay in MCLK I2C Sequence for preventing Spec Out.
+	
+config MCLK_I2C_DELAY_FOR_CAM_POWERDOWN
+	tristate "Delay in MCLK I2C Sequence for preventing Spec Out during power off signal of cam"
+	depends on SPECTRA_CAMERA
+	default n
+	---help---
+	Adds Delay in MCLK I2C power down Sequence for preventing Spec Out.

@@ -24,21 +24,25 @@
 #define USE_IMMEDIATE_STOP
 #undef USE_SERIALIZED_START
 #define USE_EXCLUSIVE_SESSION
-#define USE_SKIP_NOMINAL_CALL
 #define USE_HAPTIC_WORKQUEUE
 
 static const char *haptic_feature_id_str[]
 	= {"wave", "sine", "silence", "illegal"};
 
 #define OFFSET_SET_INDEX	10
-#define MAX_NUM_SET_INDEX	13
+#define MAX_NUM_SET_INDEX	70
 #define DEFAULT_TONE_SET_INDEX	1
 #define SILENCE_SET_INDEX	6
 #define LOW_TEMP_INDEX	34 /* special index for low temperature */
 #define LOW_TEMP_SET_INDEX	11
 static const int set_index_tbl[MAX_NUM_SET_INDEX] = {
 	 2,  3, 14, 15, 16,  4, 18, 19, 20, 21,
-	22, 23, 24
+	22, 23, 24,  6,  6,  6,  6,  6,  6,  6,
+	 6,  2,  2,  2,  6,  2,  6,  6,  6,  6,
+	 6,  2,  2,  2,  6,  6,  2,  2,  2,  2,
+	 2,  2,  2,  2,  2, 16,  6,  6,  2,  2,
+	 2,  2,  6,  6,  6,  6,  6,  6,  6,  6,
+	 6,  6,  6,  6,  6,  6,  6,  6,  6,  6
 };
 
 static const char *haptic_feature_id(int id)
@@ -810,31 +814,11 @@ static ssize_t enable_store(struct device *dev,
 {
 	struct tfa9xxx *drv = dev_get_drvdata(dev);
 	u32 val;
-#if defined(USE_SKIP_NOMINAL_CALL)
-	static bool checked_nominal_call;
-#endif
 	int rc;
 
 	rc = kstrtouint(buf, 0, &val);
 	if (rc < 0)
 		return rc;
-
-#if defined(USE_SKIP_NOMINAL_CALL)
-	if (val == 0)
-		checked_nominal_call = false;
-
-	if ((!checked_nominal_call)
-		&& (drv->object_index == DEFAULT_TONE_SET_INDEX - 1)
-		&& (val == NOMINAL_DURATION)) {
-		/* default tone - SS service call */
-		dev_dbg(&drv->i2c->dev, "%s: skip nominal call (index=%d)\n",
-			__func__, drv->object_index);
-		checked_nominal_call = true;
-		return count;
-	}
-
-	checked_nominal_call = false;
-#endif /* USE_SKIP_NOMINAL_CALL */
 
 	vibrator_enable(drv, val);
 

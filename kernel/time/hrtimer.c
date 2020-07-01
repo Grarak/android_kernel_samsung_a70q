@@ -57,7 +57,6 @@
 #include <linux/uaccess.h>
 
 #include <linux/sec_debug.h>
-#include <linux/sec_debug_summary.h>
 
 #include <trace/events/timer.h>
 

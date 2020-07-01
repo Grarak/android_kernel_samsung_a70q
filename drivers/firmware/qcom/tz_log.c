@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -891,7 +891,7 @@ static void tzdbg_register_qsee_log_buf(struct platform_device *pdev)
 
 	if (desc.ret[0] != QSEOS_RESULT_SUCCESS) {
 		pr_err(
-		"%s: scm_call to register log buf failed, resp result =%d\n",
+		"%s: scm_call to register log buf failed, resp result =%llu\n",
 		__func__, desc.ret[0]);
 		goto err;
 	}

@@ -483,14 +483,17 @@ int ist40xx_cmcs_enable_and_wait(struct ist40xx_data *data, CMCS_PARAM param,
 	int cnt = CMCS_TIMEOUT / 100;
 	u32 waddr;
 
-	ret = ist40xx_set_cmcs_sensor(data, param, buf32, mode);
-	if (ret) {
-		tsp_info("Test not ready!!\n", mode);
-		return ret;
+	if ((mode != CMCS_FLAG_CRJIT) && (mode != CMCS_FLAG_CRJIT2)) {
+		ret = ist40xx_set_cmcs_sensor(data, param, buf32, mode);
+		if (ret) {
+			tsp_info("Test not ready!!\n", mode);
+			return ret;
+		}
 	}
 
 	if ((mode != CMCS_FLAG_CM) && (mode != CMCS_FLAG_CS) &&
-			(mode != CMCS_FLAG_CMJIT)) {
+			(mode != CMCS_FLAG_CMJIT) && (mode != CMCS_FLAG_CRJIT) &&
+			(mode != CMCS_FLAG_CRJIT2)) {
 		tsp_err("not support test item\n");
 		return -EPERM;
 	}
@@ -532,6 +535,22 @@ int ist40xx_cmcs_enable_and_wait(struct ist40xx_data *data, CMCS_PARAM param,
 						cmcs_buf->cm_jit_result = 0;
 					else
 						cmcs_buf->cm_jit_result = 1;
+					goto end;
+				}
+			} else if (mode == CMCS_FLAG_CRJIT) {
+				if (CMCS_MSG(data->status.cmcs) == CRJIT_MSG_VALID) {
+					if (data->status.cmcs_result == 0x10)
+						cmcs_buf->cr_variance_result = 0;
+					else
+						cmcs_buf->cr_variance_result = 1;
+					goto end;
+				}
+			} else if (mode == CMCS_FLAG_CRJIT2) {
+				if (CMCS_MSG(data->status.cmcs) == CRJIT2_MSG_VALID) {
+					if (data->status.cmcs_result == 0x10)
+						cmcs_buf->cr_variance2_result = 0;
+					else
+						cmcs_buf->cr_variance2_result = 1;
 					goto end;
 				}
 			}
@@ -694,6 +713,34 @@ int ist40xx_cmcs_test(struct ist40xx_data *data, u32 mode)
 	cmcs_next_step(ret);
 	if (chksum != ts_cmcs->param.cmcs_chksum)
 		goto end;
+
+	if (mode & CMCS_FLAG_CRJIT) {
+		tsp_info("CR variance test\n");
+		buf32 = NULL;
+		memset(cmcs_buf->cr_variance, 0, sizeof(cmcs_buf->cr_variance));
+		ret = ist40xx_cmcs_enable_and_wait(data, ts_cmcs->param, buf32,
+				CMCS_FLAG_CRJIT);
+		cmcs_next_step(ret);
+
+		tsp_info("read cr variance result\n");
+		ret = ist40xx_burst_read(data->client,
+		IST40XX_HIB_CRJIT_MSG, cmcs_buf->cr_variance, 3, true);
+		cmcs_next_step(ret);
+	}
+
+	if (mode & CMCS_FLAG_CRJIT2) {
+		tsp_info("CR variance2 test\n");
+		buf32 = NULL;
+		memset(cmcs_buf->cr_variance2, 0, sizeof(cmcs_buf->cr_variance2));
+		ret = ist40xx_cmcs_enable_and_wait(data, ts_cmcs->param, buf32,
+				CMCS_FLAG_CRJIT2);
+		cmcs_next_step(ret);
+
+		tsp_info("read cr variance2 result\n");
+		ret = ist40xx_burst_read(data->client,
+		IST40XX_HIB_CRJIT_MSG, cmcs_buf->cr_variance2, 3, true);
+		cmcs_next_step(ret);
+	}
 
 	if ((mode & CMCS_FLAG_CM) || (mode & CMCS_FLAG_SLOPE)) {
 		tsp_info("CM test\n");
@@ -945,12 +992,55 @@ err_file_open:
 	return sprintf(buf, (ret == 0 ? "OK\n" : "Fail\n"));
 }
 
+/* sysfs: /sys/class/touch/cmcs/cmcs_cms */
+ssize_t ist40xx_cmcs_cms_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	int ret;
+	int bin_size = 0;
+	u8 *bin = NULL;
+	const struct firmware *req_bin = NULL;
+	struct ist40xx_data *data = dev_get_drvdata(dev);
+
+	ret = request_firmware(&req_bin, IST40XX_CMCS_NAME, &data->client->dev);
+	if (ret)
+		return sprintf(buf, "File not found, %s\n", IST40XX_CMCS_NAME);
+
+	bin = (u8 *) req_bin->data;
+	bin_size = (u32) req_bin->size;
+
+	ret = ist40xx_get_cmcs_info(bin, bin_size);
+	if (ret)
+		goto cms_end;
+
+	mutex_lock(&data->lock);
+	ret = ist40xx_cmcs_test(data, CMCS_FLAG_CRJIT | CMCS_FLAG_CRJIT2);
+	mutex_unlock(&data->lock);
+
+cms_end:
+	release_firmware(req_bin);
+
+	return sprintf(buf, (ret == 0 ? "OK\n" : "Fail\n"));
+}
+
+/* sysfs: /sys/class/touch/cmcs/cmcs_cms_result */
+ssize_t ist40xx_cmcs_cms_result_show(struct device *dev,
+        struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%d,%d,%d,%d,%d,%d\n", cmcs_buf->cr_variance[0],
+			cmcs_buf->cr_variance[1], cmcs_buf->cr_variance[2],
+			cmcs_buf->cr_variance2[0], cmcs_buf->cr_variance2[1],
+			cmcs_buf->cr_variance2[2]);
+}
+
 /* sysfs : cmcs */
 #if defined(CONFIG_SEC_FACTORY)
 static DEVICE_ATTR(cmcs_binary, S_IRUGO, ist40xx_cmcs_binary_show, NULL);
 #endif
 static DEVICE_ATTR(cmcs_custom, S_IRUGO, ist40xx_cmcs_custom_show, NULL);
 static DEVICE_ATTR(cmcs_sdcard, S_IRUGO, ist40xx_cmcs_sdcard_show, NULL);
+static DEVICE_ATTR(cmcs_cms, S_IRUGO, ist40xx_cmcs_cms_show, NULL);
+static DEVICE_ATTR(cmcs_cms_result, S_IRUGO, ist40xx_cmcs_cms_result_show, NULL);
 
 static struct attribute *cmcs_attributes[] = {
 #if defined(CONFIG_SEC_FACTORY)
@@ -958,6 +1048,8 @@ static struct attribute *cmcs_attributes[] = {
 #endif
 	&dev_attr_cmcs_custom.attr,
 	&dev_attr_cmcs_sdcard.attr,
+	&dev_attr_cmcs_cms.attr,
+	&dev_attr_cmcs_cms_result.attr,
 	NULL,
 };
 

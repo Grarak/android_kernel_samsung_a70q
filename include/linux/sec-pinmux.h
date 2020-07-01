@@ -106,4 +106,5 @@ void msm_gp_get_cfg(struct gpio_chip *chip, uint pin_no,
 int msm_gp_get_value(struct gpio_chip *chip, uint pin_no, int in_out_type);
 #endif
 
+bool msm_gpio_is_valid(int gpionum);
 #endif

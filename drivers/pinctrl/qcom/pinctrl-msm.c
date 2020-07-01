@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2013, Sony Mobile Communications AB.
- * Copyright (c) 2013-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -30,6 +30,7 @@
 #include <linux/gpio.h>
 #include <linux/interrupt.h>
 #include <linux/spinlock.h>
+#include <linux/syscore_ops.h>
 #include <linux/reboot.h>
 #include <linux/pm.h>
 #include <linux/log2.h>
@@ -39,6 +40,10 @@
 #include "../pinconf.h"
 #include "pinctrl-msm.h"
 #include "../pinctrl-utils.h"
+#include <linux/suspend.h>
+#ifdef CONFIG_HIBERNATION
+#include <linux/notifier.h>
+#endif
 
 #ifdef CONFIG_SEC_PM_DEBUG
 #include <linux/sec-pinmux.h>
@@ -47,11 +52,24 @@
 #define MAX_NR_GPIO 300
 #define PS_HOLD_OFFSET 0x820
 
+#ifdef CONFIG_HIBERNATION
+struct msm_gpio_regs {
+	u32 ctl_reg;
+	u32 io_reg;
+	u32 intr_cfg_reg;
+	u32 intr_status_reg;
+};
+
+struct msm_tile {
+	u32 dir_con_regs[8];
+};
+#endif
+
 #ifdef CONFIG_MST_LDO
-#ifdef CONFIG_SEC_A70Q_PROJECT
+#if defined(CONFIG_SEC_A70Q_PROJECT) || defined(CONFIG_SEC_A70S_PROJECT)
 #define MST_GPIO_D_EN 38
 #define MST_GPIO_D_DATA 37
-#elif defined(CONFIG_SEC_A90Q_PROJECT)
+#elif defined(CONFIG_SEC_A90Q_PROJECT) || defined(CONFIG_SEC_A70SQ_PROJECT) || defined(CONFIG_SEC_A71_PROJECT)
 #define MST_GPIO_D_EN 84
 #define MST_GPIO_D_DATA 83
 #endif
@@ -93,9 +111,16 @@ struct msm_pinctrl {
 #endif
 	phys_addr_t spi_cfg_regs;
 	phys_addr_t spi_cfg_end;
+#ifdef CONFIG_HIBERNATION
+	struct msm_gpio_regs *gpio_regs;
+	struct msm_tile *msm_tile_regs;
+#endif
 };
 
 static struct msm_pinctrl *msm_pinctrl_data;
+
+static int total_pin_count=0;
+
 static void __iomem *reassign_pctrl_reg(
 		const struct msm_pinctrl_soc_data *soc,
 				u32 gpio_id)
@@ -168,20 +193,9 @@ static int msm_pinmux_request(struct pinctrl_dev *pctldev, unsigned offset)
 	struct msm_pinctrl *pctrl = pinctrl_dev_get_drvdata(pctldev);
 	struct gpio_chip *chip = &pctrl->chip;
 
-#ifdef CONFIG_ESE_SECURE
-	if (offset >= CONFIG_ESE_SPI_GPIO_START
-		&& offset <= CONFIG_ESE_SPI_GPIO_END)
+	if(!msm_gpio_is_valid(offset))
 		return 0;
-#endif
-#ifdef CONFIG_MST_LDO
-	if (offset == MST_GPIO_D_EN || offset == MST_GPIO_D_DATA)
-		return 0;
-#endif
-#ifdef ENABLE_SENSORS_FPRINT_SECURE
-	if (offset >= CONFIG_SENSORS_FP_SPI_GPIO_START
-		&& offset <= CONFIG_SENSORS_FP_SPI_GPIO_END)
-		return 0;
-#endif
+
 	return gpiochip_line_is_valid(chip, offset) ? 0 : -EINVAL;
 }
 
@@ -224,20 +238,9 @@ static int msm_pinmux_set_mux(struct pinctrl_dev *pctldev,
 	u32 val, mask;
 	int i;
 
-#ifdef CONFIG_ESE_SECURE
-	if (group >= CONFIG_ESE_SPI_GPIO_START
-		&& group <= CONFIG_ESE_SPI_GPIO_END)
+	if(!msm_gpio_is_valid(group))
 		return 0;
-#endif
-#ifdef CONFIG_MST_LDO
-	if (group == MST_GPIO_D_EN || group == MST_GPIO_D_DATA)
-		return 0;
-#endif
-#ifdef ENABLE_SENSORS_FPRINT_SECURE
-	if (group >= CONFIG_SENSORS_FP_SPI_GPIO_START
-		&& group <= CONFIG_SENSORS_FP_SPI_GPIO_END)
-		return 0;
-#endif
+
 
 	if (!gpiochip_line_is_valid(chip, group))
 		return -EINVAL;
@@ -334,20 +337,8 @@ static int msm_config_group_get(struct pinctrl_dev *pctldev,
 	int ret;
 	u32 val;
 
-#ifdef CONFIG_ESE_SECURE
-	if (group >= CONFIG_ESE_SPI_GPIO_START
-		&& group <= CONFIG_ESE_SPI_GPIO_END)
+	if(!msm_gpio_is_valid(group))
 		return 0;
-#endif
-#ifdef CONFIG_MST_LDO
-	if (group == MST_GPIO_D_EN || group == MST_GPIO_D_DATA)
-		return 0;
-#endif
-#ifdef ENABLE_SENSORS_FPRINT_SECURE
-	if (group >= CONFIG_SENSORS_FP_SPI_GPIO_START
-		&& group <= CONFIG_SENSORS_FP_SPI_GPIO_END)
-		return 0;
-#endif
 
 	if (group < chip->ngpio &&	/* FIXME: 124-130 of SM6150 are not assigned for gpio */
 	    !gpiochip_line_is_valid(chip, group))
@@ -435,20 +426,8 @@ static int msm_config_group_set(struct pinctrl_dev *pctldev,
 	u32 val;
 	int i;
 
-#ifdef CONFIG_ESE_SECURE
-	if (group >= CONFIG_ESE_SPI_GPIO_START
-		&& group <= CONFIG_ESE_SPI_GPIO_END)
+	if(!msm_gpio_is_valid(group))
 		return 0;
-#endif
-#ifdef CONFIG_MST_LDO
-	if (group == MST_GPIO_D_EN || group == MST_GPIO_D_DATA)
-		return 0;
-#endif
-#ifdef ENABLE_SENSORS_FPRINT_SECURE
-	if (group >= CONFIG_SENSORS_FP_SPI_GPIO_START
-		&& group <= CONFIG_SENSORS_FP_SPI_GPIO_END)
-		return 0;
-#endif
 
 	if (group < chip->ngpio &&	/* FIXME: 124-130 of SM6150 are not assigned for gpio */
 	    !gpiochip_line_is_valid(chip, group))
@@ -545,6 +524,39 @@ static struct pinctrl_desc msm_pinctrl_desc = {
 	.confops = &msm_pinconf_ops,
 	.owner = THIS_MODULE,
 };
+
+bool msm_gpio_is_valid(int gpionum)
+{
+	if (gpionum < 0 || gpionum >= total_pin_count)
+		return 0;
+
+#ifdef ENABLE_SENSORS_FPRINT_SECURE
+	if (gpionum >= CONFIG_SENSORS_FP_SPI_GPIO_START
+			&& gpionum <= CONFIG_SENSORS_FP_SPI_GPIO_END)
+		return 0;
+#endif
+#ifdef CONFIG_ESE_SECURE
+	if (gpionum >= CONFIG_ESE_SPI_GPIO_START
+			&& gpionum <= CONFIG_ESE_SPI_GPIO_END)
+		return 0;
+#endif
+#ifdef CONFIG_MST_LDO
+	if (gpionum == MST_GPIO_D_EN || gpionum == MST_GPIO_D_DATA)
+		return 0;
+#endif
+
+	return 1;
+}
+
+static int msm_gpio_request(struct gpio_chip *gc, unsigned off)
+{
+	pr_err("%s: off[%d]\n",__func__,off);
+	
+	if(!msm_gpio_is_valid(off))
+		return -1;
+
+	return gpiochip_generic_request(gc, off);
+}
 
 static int msm_gpio_direction_input(struct gpio_chip *chip, unsigned offset)
 {
@@ -658,20 +670,8 @@ int msm_set_gpio_status(struct gpio_chip *chip, uint pin_no, uint id, bool level
 	u32 cfg_val, inout_val;
 	u32 mask = 0, shft = 0, data;
 
-#ifdef CONFIG_ESE_SECURE
-	if (pin_no >= CONFIG_ESE_SPI_GPIO_START
-		&& pin_no <= CONFIG_ESE_SPI_GPIO_END)
+	if(!msm_gpio_is_valid(pin_no))
 		return 0;
-#endif
-#ifdef CONFIG_MST_LDO
-	if (pin_no == MST_GPIO_D_EN || pin_no == MST_GPIO_D_DATA)
-		return 0;
-#endif
-#ifdef ENABLE_SENSORS_FPRINT_SECURE
-	if (pin_no >= CONFIG_SENSORS_FP_SPI_GPIO_START
-		&& pin_no <= CONFIG_SENSORS_FP_SPI_GPIO_END)
-		return 0;
-#endif
 
 	if (!gpiochip_line_is_valid(chip, pin_no))
 		return -EINVAL;
@@ -731,15 +731,8 @@ void msm_gp_get_cfg(struct gpio_chip *chip, uint pin_no, struct gpiomux_setting 
 		return;
 	}
 #endif
-#ifdef CONFIG_MST_LDO
-	if (pin_no == MST_GPIO_D_EN || pin_no == MST_GPIO_D_DATA)
+	if(!msm_gpio_is_valid(pin_no))
 		return;
-#endif
-#ifdef ENABLE_SENSORS_FPRINT_SECURE
-	if (pin_no >= CONFIG_SENSORS_FP_SPI_GPIO_START
-		&& pin_no <= CONFIG_SENSORS_FP_SPI_GPIO_END)
-		return;
-#endif
 
 	if (!gpiochip_line_is_valid(chip, pin_no))
 		return;
@@ -761,20 +754,8 @@ int msm_gp_get_value(struct gpio_chip *chip, uint pin_no, int in_out_type)
 	struct msm_pinctrl *pctrl = container_of(chip, struct msm_pinctrl, chip);
 	u32 inout_val;
 
-#ifdef CONFIG_ESE_SECURE
-	if (pin_no >= CONFIG_ESE_SPI_GPIO_START
-		&& pin_no <= CONFIG_ESE_SPI_GPIO_END)
+	if(!msm_gpio_is_valid(pin_no))
 		return 0;
-#endif
-#ifdef CONFIG_MST_LDO
-	if (pin_no == MST_GPIO_D_EN || pin_no == MST_GPIO_D_DATA)
-		return 0;
-#endif
-#ifdef ENABLE_SENSORS_FPRINT_SECURE
-	if (pin_no >= CONFIG_SENSORS_FP_SPI_GPIO_START
-		&& pin_no <= CONFIG_SENSORS_FP_SPI_GPIO_END)
-		return 0;
-#endif
 
 	if (!gpiochip_line_is_valid(chip, pin_no))
 		return 0;
@@ -815,20 +796,8 @@ static void msm_gpio_dbg_show_one(struct seq_file *s,
 		"pull up"
 	};
 
-#ifdef CONFIG_ESE_SECURE
-	if (offset >= CONFIG_ESE_SPI_GPIO_START
-		&& offset <= CONFIG_ESE_SPI_GPIO_END)
+	if(!msm_gpio_is_valid(offset))
 		return;
-#endif
-#ifdef CONFIG_MST_LDO
-	if (offset == MST_GPIO_D_EN || offset == MST_GPIO_D_DATA)
-		return;
-#endif
-#ifdef ENABLE_SENSORS_FPRINT_SECURE
-	if (offset >= CONFIG_SENSORS_FP_SPI_GPIO_START
-		&& offset <= CONFIG_SENSORS_FP_SPI_GPIO_END)
-		return;
-#endif
 
 	if (!gpiochip_line_is_valid(chip, offset))
 		return;
@@ -868,7 +837,7 @@ static const struct gpio_chip msm_gpio_template = {
 	.get_direction    = msm_gpio_get_direction,
 	.get              = msm_gpio_get,
 	.set              = msm_gpio_set,
-	.request          = gpiochip_generic_request,
+	.request          = msm_gpio_request,
 	.free             = gpiochip_generic_free,
 	.dbg_show         = msm_gpio_dbg_show,
 };
@@ -1939,11 +1908,24 @@ static int msm_gpio_init(struct msm_pinctrl *pctrl)
 		return ret;
 	}
 
-	ret = gpiochip_add_pin_range(&pctrl->chip, dev_name(pctrl->dev), 0, 0, chip->ngpio);
-	if (ret) {
-		dev_err(pctrl->dev, "Failed to add pin range\n");
-		gpiochip_remove(&pctrl->chip);
-		return ret;
+	/*
+	 * For DeviceTree-supported systems, the gpio core checks the
+	 * pinctrl's device node for the "gpio-ranges" property.
+	 * If it is present, it takes care of adding the pin ranges
+	 * for the driver. In this case the driver can skip ahead.
+	 *
+	 * In order to remain compatible with older, existing DeviceTree
+	 * files which don't set the "gpio-ranges" property or systems that
+	 * utilize ACPI the driver has to call gpiochip_add_pin_range().
+	 */
+	if (!of_property_read_bool(pctrl->dev->of_node, "gpio-ranges")) {
+		ret = gpiochip_add_pin_range(&pctrl->chip,
+			dev_name(pctrl->dev), 0, 0, chip->ngpio);
+		if (ret) {
+			dev_err(pctrl->dev, "Failed to add pin range\n");
+			gpiochip_remove(&pctrl->chip);
+			return ret;
+		}
 	}
 
 	irq_parent = of_irq_find_parent(chip->of_node);
@@ -2025,6 +2007,194 @@ static void msm_pinctrl_setup_pm_reset(struct msm_pinctrl *pctrl)
 		}
 }
 
+#ifdef CONFIG_PM
+#ifdef CONFIG_HIBERNATION
+static bool hibernation;
+
+static int pinctrl_hibernation_notifier(struct notifier_block *nb,
+					unsigned long event, void *dummy)
+{
+	struct msm_pinctrl *pctrl = msm_pinctrl_data;
+	const struct msm_pinctrl_soc_data *soc = pctrl->soc;
+
+	if (event == PM_HIBERNATION_PREPARE) {
+		pctrl->gpio_regs = kcalloc(soc->ngroups,
+					sizeof(*pctrl->gpio_regs), GFP_KERNEL);
+		if (pctrl->gpio_regs == NULL)
+			return -ENOMEM;
+
+		if (soc->tile_count) {
+			pctrl->msm_tile_regs = kcalloc(soc->tile_count,
+				sizeof(*pctrl->msm_tile_regs), GFP_KERNEL);
+			if (pctrl->msm_tile_regs == NULL) {
+				kfree(pctrl->gpio_regs);
+				return -ENOMEM;
+			}
+		}
+		hibernation = true;
+	} else if (event == PM_POST_HIBERNATION) {
+		kfree(pctrl->gpio_regs);
+		kfree(pctrl->msm_tile_regs);
+		pctrl->gpio_regs = NULL;
+		pctrl->msm_tile_regs = NULL;
+		hibernation = false;
+	}
+	return NOTIFY_OK;
+}
+
+static struct notifier_block pinctrl_notif_block = {
+	.notifier_call = pinctrl_hibernation_notifier,
+};
+
+static int msm_pinctrl_hibernation_suspend(void)
+{
+	const struct msm_pingroup *pgroup;
+	struct msm_pinctrl *pctrl = msm_pinctrl_data;
+	const struct msm_pinctrl_soc_data *soc = pctrl->soc;
+	void __iomem *base = NULL;
+	void __iomem *tile_addr = NULL;
+	u32 i, j;
+
+	/* Save direction conn registers for hmss */
+	for (i = 0; i < soc->tile_count; i++) {
+		base = reassign_pctrl_reg(soc, i);
+		tile_addr = base + soc->dir_conn_addr[i];
+		for (j = 0; j < 8; j++)
+			pctrl->msm_tile_regs[i].dir_con_regs[j] =
+						readl_relaxed(tile_addr + j*4);
+	}
+
+	/* All normal gpios will have common registers, first save them */
+	for (i = 0; i < soc->ngpios; i++) {
+		pgroup = &soc->groups[i];
+		base = reassign_pctrl_reg(soc, i);
+		pctrl->gpio_regs[i].ctl_reg =
+				readl_relaxed(base + pgroup->ctl_reg);
+		pctrl->gpio_regs[i].io_reg =
+				readl_relaxed(base + pgroup->io_reg);
+		pctrl->gpio_regs[i].intr_cfg_reg =
+				readl_relaxed(base + pgroup->intr_cfg_reg);
+		pctrl->gpio_regs[i].intr_status_reg =
+				readl_relaxed(base + pgroup->intr_status_reg);
+	}
+
+	/* Save other special gpios. Variable i in fallthrough */
+	for ( ; i < soc->ngroups; i++) {
+		pgroup = &soc->groups[i];
+		base = reassign_pctrl_reg(soc, i);
+		if (pgroup->ctl_reg)
+			pctrl->gpio_regs[i].ctl_reg =
+				readl_relaxed(base + pgroup->ctl_reg);
+		if (pgroup->io_reg)
+			pctrl->gpio_regs[i].io_reg =
+				readl_relaxed(base + pgroup->io_reg);
+	}
+	return 0;
+}
+
+static void msm_pinctrl_hibernation_resume(void)
+{
+	u32 i, j;
+	const struct msm_pingroup *pgroup;
+	struct msm_pinctrl *pctrl = msm_pinctrl_data;
+	const struct msm_pinctrl_soc_data *soc = pctrl->soc;
+	void __iomem *base = NULL;
+	void __iomem *tile_addr = NULL;
+
+	if (!pctrl->gpio_regs || !pctrl->msm_tile_regs)
+		return;
+
+	for (i = 0; i < soc->tile_count; i++) {
+		base = reassign_pctrl_reg(soc, i);
+		tile_addr = base + soc->dir_conn_addr[i];
+		for (j = 0; j < 8; j++)
+			writel_relaxed(pctrl->msm_tile_regs[i].dir_con_regs[j],
+							tile_addr + j*4);
+	}
+
+	/* Restore normal gpios */
+	for (i = 0; i < soc->ngpios; i++) {
+		pgroup = &soc->groups[i];
+		base = reassign_pctrl_reg(soc, i);
+		writel_relaxed(pctrl->gpio_regs[i].ctl_reg,
+					base + pgroup->ctl_reg);
+		writel_relaxed(pctrl->gpio_regs[i].io_reg,
+					base + pgroup->io_reg);
+		writel_relaxed(pctrl->gpio_regs[i].intr_cfg_reg,
+					base + pgroup->intr_cfg_reg);
+		writel_relaxed(pctrl->gpio_regs[i].intr_status_reg,
+					base + pgroup->intr_status_reg);
+	}
+
+	/* Restore other special gpios. Variable i in fallthrough */
+	for ( ; i < soc->ngroups; i++) {
+		pgroup = &soc->groups[i];
+		base = reassign_pctrl_reg(soc, i);
+		if (pgroup->ctl_reg)
+			writel_relaxed(pctrl->gpio_regs[i].ctl_reg,
+						base + pgroup->ctl_reg);
+		if (pgroup->io_reg)
+			writel_relaxed(pctrl->gpio_regs[i].io_reg,
+						base + pgroup->io_reg);
+	}
+}
+#endif
+
+static int msm_pinctrl_suspend(void)
+{
+#ifdef CONFIG_HIBERNATION
+	if (unlikely(hibernation))
+		msm_pinctrl_hibernation_suspend();
+#endif
+	return 0;
+}
+
+static void msm_pinctrl_resume(void)
+{
+	int i, irq;
+	u32 val;
+	unsigned long flags;
+	struct irq_desc *desc;
+	const struct msm_pingroup *g;
+	const char *name = "null";
+	struct msm_pinctrl *pctrl = msm_pinctrl_data;
+#ifdef CONFIG_HIBERNATION
+	if (unlikely(hibernation)) {
+		msm_pinctrl_hibernation_resume();
+		return;
+	}
+#endif
+
+	if (!msm_show_resume_irq_mask)
+		return;
+
+	raw_spin_lock_irqsave(&pctrl->lock, flags);
+	for_each_set_bit(i, pctrl->enabled_irqs, pctrl->chip.ngpio) {
+		g = &pctrl->soc->groups[i];
+		val = readl_relaxed(pctrl->regs + g->intr_status_reg);
+		if (val & BIT(g->intr_status_bit)) {
+			irq = irq_find_mapping(pctrl->chip.irqdomain, i);
+			desc = irq_to_desc(irq);
+			if (desc == NULL)
+				name = "stray irq";
+			else if (desc->action && desc->action->name)
+				name = desc->action->name;
+
+			pr_warn("%s: %d triggered %s\n", __func__, irq, name);
+		}
+	}
+	raw_spin_unlock_irqrestore(&pctrl->lock, flags);
+}
+#else
+#define msm_pinctrl_suspend NULL
+#define msm_pinctrl_resume NULL
+#endif
+
+static struct syscore_ops msm_pinctrl_pm_ops = {
+	.suspend = msm_pinctrl_suspend,
+	.resume = msm_pinctrl_resume,
+};
+
 int msm_pinctrl_probe(struct platform_device *pdev,
 		      const struct msm_pinctrl_soc_data *soc_data)
 {
@@ -2087,6 +2257,7 @@ int msm_pinctrl_probe(struct platform_device *pdev,
 	msm_pinctrl_desc.name = dev_name(&pdev->dev);
 	msm_pinctrl_desc.pins = pctrl->soc->pins;
 	msm_pinctrl_desc.npins = pctrl->soc->npins;
+	total_pin_count = msm_pinctrl_desc.npins;
 	pctrl->pctrl = devm_pinctrl_register(&pdev->dev, &msm_pinctrl_desc,
 					     pctrl);
 	if (IS_ERR(pctrl->pctrl)) {
@@ -2100,6 +2271,12 @@ int msm_pinctrl_probe(struct platform_device *pdev,
 
 	platform_set_drvdata(pdev, pctrl);
 
+	register_syscore_ops(&msm_pinctrl_pm_ops);
+#ifdef CONFIG_HIBERNATION
+	ret = register_pm_notifier(&pinctrl_notif_block);
+	if (ret)
+		return ret;
+#endif
 	dev_dbg(&pdev->dev, "Probed Qualcomm pinctrl driver\n");
 
 	return 0;
@@ -2113,6 +2290,7 @@ int msm_pinctrl_remove(struct platform_device *pdev)
 	gpiochip_remove(&pctrl->chip);
 
 	unregister_restart_handler(&pctrl->restart_nb);
+	unregister_syscore_ops(&msm_pinctrl_pm_ops);
 
 	return 0;
 }

@@ -1960,8 +1960,8 @@ static int32_t q6asm_callback(struct apr_client_data *data, void *priv)
 	    (data->opcode != ASM_DATA_EVENT_EOS) &&
 	    (data->opcode != ASM_SESSION_EVENTX_OVERFLOW) &&
 	    (data->opcode != ASM_SESSION_EVENT_RX_UNDERFLOW)) {
-		if (payload == NULL || (data->payload_size < (2 * sizeof(uint32_t)))) {
-			pr_err("%s: payload is null or invalid size[%d]\n", __func__, data->payload_size);
+		if (payload == NULL) {
+			pr_err("%s: payload is null\n", __func__);
 			spin_unlock_irqrestore(
 				&(session[session_id].session_lock), flags);
 			return -EINVAL;
@@ -9721,16 +9721,17 @@ int q6asm_get_session_time(struct audio_client *ac, uint64_t *tstamp)
 		 ac->session, mtmx_params.hdr.opcode);
 	rc = apr_send_pkt(ac->apr, (uint32_t *) &mtmx_params);
 	if (rc < 0) {
-		pr_err("%s: Commmand 0x%x failed %d\n", __func__,
-		       mtmx_params.hdr.opcode, rc);
-		goto fail_cmd;
+		dev_err_ratelimited(ac->dev, "%s: Get Session Time failed %d\n",
+				    __func__, rc);
+		return rc;
 	}
+
 	rc = wait_event_timeout(ac->time_wait,
 			(atomic_read(&ac->time_flag) == 0),
 			msecs_to_jiffies(TIMEOUT_MS));
 	if (!rc) {
 		pr_err("%s: timeout in getting session time from DSP\n",
-				__func__);
+		       __func__);
 		goto fail_cmd;
 	}
 

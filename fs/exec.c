@@ -73,15 +73,25 @@
 
 #include <trace/events/sched.h>
 
-#ifdef CONFIG_RKP_NS_PROT
-#include <linux/sec_bsp.h>
-#endif
-
 #ifdef CONFIG_RKP_KDP
 #define rkp_is_nonroot(x) ((x->cred->type)>>1 & 1)
 #ifdef CONFIG_LOD_SEC
 #define rkp_is_lod(x) ((x->cred->type)>>3 & 1)
 #endif
+static unsigned int __is_boot_recovery;
+
+static int __init boot_recovery(char *str)
+{
+	int temp = 0;
+
+	if (get_option(&str, &temp)) {
+		__is_boot_recovery = temp;
+		return 0;
+	}
+
+	return -EINVAL;
+}
+early_param("androidboot.boot_recovery", boot_recovery);
 #endif
 
 #ifdef CONFIG_SECURITY_DEFEX
@@ -941,7 +951,7 @@ int kernel_read_file(struct file *file, void **buf, loff_t *size,
 		bytes = kernel_read(file, *buf + pos, i_size - pos, &pos);
 		if (bytes < 0) {
 			ret = bytes;
-			goto out;
+			goto out_free;
 		}
 
 		if (bytes == 0)
@@ -1265,15 +1275,17 @@ extern struct super_block *sys_sb;	/* pointer to superblock */
 extern struct super_block *odm_sb;	/* pointer to superblock */
 extern struct super_block *vendor_sb;	/* pointer to superblock */
 extern struct super_block *rootfs_sb;	/* pointer to superblock */
+extern struct super_block *art_sb;	/* pointer to superblock */
+extern int __check_verifiedboot;
 
 static int kdp_check_sb_mismatch(struct super_block *sb)
 {
-	if(is_boot_recovery()) {
+	if(__is_boot_recovery || __check_verifiedboot) {
 		return 0;
 	}
 
 	if ((sb != rootfs_sb) && (sb != sys_sb)
-		&& (sb != odm_sb) && (sb != vendor_sb)) {
+		&& (sb != odm_sb) && (sb != vendor_sb) && (sb != art_sb)) {
 		return 1;
 	}
 	return 0;
@@ -1292,9 +1304,9 @@ static int invalid_drive(struct linux_binprm * bprm)
 	}
 	sb = vfsmnt->mnt_sb;
 
-	if (kdp_check_sb_mismatch(sb)) {
-		printk("\nSuperblock Mismatch #%s# vfsmnt #%p#sb #%p:%p:%p:%p:%p#\n",
-					bprm->filename, vfsmnt, sb, rootfs_sb, sys_sb, odm_sb, vendor_sb);
+	if(kdp_check_sb_mismatch(sb)) {
+		printk("\n Superblock Mismatch #%s# vfsmnt #%p#sb #%p:%p:%p:%p:%p:%p#\n",
+					bprm->filename, vfsmnt, sb, rootfs_sb, sys_sb, odm_sb, vendor_sb, art_sb);
 		return 1;
 	}
 
@@ -1749,160 +1761,6 @@ int search_binary_handler(struct linux_binprm *bprm)
 }
 EXPORT_SYMBOL(search_binary_handler);
 
-#if defined CONFIG_SEC_RESTRICT_FORK
-#if defined CONFIG_SEC_RESTRICT_ROOTING_LOG
-#define PRINT_LOG(...)	printk(KERN_ERR __VA_ARGS__)
-#else
-#define PRINT_LOG(...)
-#endif	// End of CONFIG_SEC_RESTRICT_ROOTING_LOG
-
-#define CHECK_ROOT_UID(x) (x->cred->uid.val == 0 || x->cred->gid.val == 0 || \
-			x->cred->euid.val == 0 || x->cred->egid.val == 0 || \
-			x->cred->suid.val == 0 || x->cred->sgid.val == 0)
-
-/*  sec_check_execpath
-    return value : give task's exec path is matched or not
-*/
-int sec_check_execpath(struct mm_struct *mm, char *denypath)
-{
-	struct file *exe_file;
-	char *path, *pathbuf = NULL;
-	unsigned int path_length = 0, denypath_length = 0;
-	int ret = 0;
-
-	if (mm == NULL)
-		return 0;
-
-	if (!(exe_file = get_mm_exe_file(mm))) {
-		PRINT_LOG("Cannot get exe from task->mm.\n");
-		goto out_nofile;
-	}
-
-	if (!(pathbuf = kmalloc(PATH_MAX, GFP_KERNEL))) {
-		PRINT_LOG("failed to kmalloc for pathbuf\n");
-		goto out;
-	}
-
-	path = d_path(&exe_file->f_path, pathbuf, PATH_MAX);
-	if (IS_ERR(path)) {
-		PRINT_LOG("Error get path..\n");
-		goto out;
-	}
-
-	path_length = strlen(path);
-	denypath_length = strlen(denypath);
-
-	if (!strncmp(path, denypath, (path_length < denypath_length) ?
-				path_length : denypath_length)) {
-		ret = 1;
-	}
-out:
-	fput(exe_file);
-out_nofile:
-	if (pathbuf)
-		kfree(pathbuf);
-
-	return ret;
-}
-EXPORT_SYMBOL(sec_check_execpath);
-
-static int sec_restrict_fork(void)
-{
-	struct cred *shellcred;
-	int ret = 0;
-	struct task_struct *parent_tsk;
-	struct mm_struct *parent_mm = NULL;
-	const struct cred *parent_cred;
-
-	read_lock(&tasklist_lock);
-	parent_tsk = current->parent;
-	if (!parent_tsk) {
-		read_unlock(&tasklist_lock);
-		return 0;
-	}
-
-	get_task_struct(parent_tsk);
-	/* holding on to the task struct is enough so just release
-	 * the tasklist lock here */
-	read_unlock(&tasklist_lock);
-
-	if (current->pid == 1 || parent_tsk->pid == 1)
-		goto out;
-
-	/* get current->parent's mm struct to access it's mm
-	 * and to keep it alive */
-	parent_mm = get_task_mm(parent_tsk);
-
-	if (current->mm == NULL || parent_mm == NULL)
-		goto out;
-
-	if (sec_check_execpath(parent_mm, "/sbin/adbd")) {
-		shellcred = prepare_creds();
-		if (!shellcred) {
-			ret = 1;
-			goto out;
-		}
-
-		shellcred->uid.val = 2000;
-		shellcred->gid.val = 2000;
-		shellcred->euid.val = 2000;
-		shellcred->egid.val = 2000;
-		commit_creds(shellcred);
-		ret = 0;
-		goto out;
-	}
-
-	if (sec_check_execpath(current->mm, "/data/")) {
-		ret = 1;
-		goto out;
-	}
-
-	parent_cred = get_task_cred(parent_tsk);
-	if (!parent_cred)
-		goto out;
-	if (!CHECK_ROOT_UID(parent_tsk))
-	{
-		ret = 1;
-	}
-	put_cred(parent_cred);
-out:
-	if (parent_mm)
-		mmput(parent_mm);
-	put_task_struct(parent_tsk);
-
-	return ret;
-}
-#ifdef CONFIG_RKP_KDP
-static int rkp_restrict_fork(struct filename *path)
-{
-	struct cred *shellcred;
-
-	if (!strcmp(path->name, "/system/bin/patchoat")){
-		return 0;
-	}
-	/* If the Process is from Linux on Dex, 
-	then no need to reduce privilege */
-#ifdef CONFIG_LOD_SEC
-	if (rkp_is_lod(current))
-		return 0;
-#endif
-	if (rkp_is_nonroot(current)) {
-		shellcred = prepare_creds();
-		if (!shellcred) {
-			return 1;
-		}
-		shellcred->uid.val = 2000;
-		shellcred->gid.val = 2000;
-		shellcred->euid.val = 2000;
-		shellcred->egid.val = 2000;
-
-		commit_creds(shellcred);
-	}
-	return 0;
-}
-#endif /* CONFIG_RKP_KDP */
-#endif	/* End of CONFIG_SEC_RESTRICT_FORK */
-
 static int exec_binprm(struct linux_binprm *bprm)
 {
 	pid_t old_pid, old_vpid;
@@ -1921,7 +1779,7 @@ static int exec_binprm(struct linux_binprm *bprm)
 		ptrace_event(PTRACE_EVENT_EXEC, old_vpid);
 		proc_exec_connector(current);
 	} else {
-		task_integrity_delayed_reset(current);
+		task_integrity_delayed_reset(current, CAUSE_EXEC, bprm->file);
 	}
 
 	return ret;
@@ -2182,32 +2040,7 @@ SYSCALL_DEFINE3(execve,
 	if (rkp_cred_enable) {
 		uh_call(UH_APP_RKP, RKP_KDP_X4B, (u64)path->name, 0, 0, 0);
 	}
-#endif
-#if defined CONFIG_SEC_RESTRICT_FORK
-	if (CHECK_ROOT_UID(current) && sec_restrict_fork()) {
-		PRINT_LOG("Restricted making process. PID = %d(%s) "
-		"PPID = %d(%s)\n",
-		current->pid, current->comm,
-		current->parent->pid, current->parent->comm);
-#ifdef CONFIG_RKP_KDP
-		putname(path);
-#endif
-		return -EACCES;
-	}
-#ifdef CONFIG_RKP_KDP
-	if (CHECK_ROOT_UID(current) && rkp_cred_enable) {
-		if (rkp_restrict_fork(path)) {
-			pr_warn("RKP_KDP Restricted making process. PID = %d(%s) "
-							"PPID = %d(%s)\n",
-			current->pid, current->comm,
-			current->parent->pid, current->parent->comm);
-			putname(path);
-			return -EACCES;
-		}
-	}
-#endif
-#endif
-#ifdef CONFIG_RKP_KDP
+
 	putname(path);
 #endif
 

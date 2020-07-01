@@ -1288,5 +1288,17 @@ source "drivers/input/touchscreen/synaptics_dsx/Kconfig"
 source "drivers/input/touchscreen/zinitix/Kconfig"
 source "drivers/input/touchscreen/imagis_40xx/Kconfig"
 source "drivers/input/touchscreen/novatek/nt36672/Kconfig"
+source "drivers/input/touchscreen/melfas_mss100/Kconfig"
+source "drivers/input/touchscreen/sec_ts/y771/Kconfig"
+
+config TOUCHSCREEN_SYNAPTICS_TCM
+	bool "Synaptics TCM Touchscreen Driver"
+	depends on I2C
+	help
+	  Say Y here if you have a Synaptics Touchscreen.
+
+	  If unsure, say N.
+
+source "drivers/input/touchscreen/synaptics_tcm/Kconfig"
 
 endif

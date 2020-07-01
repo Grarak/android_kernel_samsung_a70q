@@ -2066,7 +2066,7 @@ static int sm5713_muic_probe(struct platform_device *pdev)
 	//wake_lock_init(&pmuic->wake_lock, WAKE_LOCK_SUSPEND, "muic_wake");
 
 	if (pmuic->pdata->init_gpio_cb)
-		ret = pmuic->pdata->init_gpio_cb(get_switch_sel());
+		ret = pmuic->pdata->init_gpio_cb(pmuic->pdata, get_switch_sel());
 	if (ret) {
 		pr_err("[%s:%s] failed to init gpio(%d)\n", MUIC_DEV_NAME, __func__, ret);
 		goto fail_init_gpio;

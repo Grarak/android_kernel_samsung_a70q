@@ -15,9 +15,9 @@
 #include <linux/notifier.h>
 #include <linux/spinlock.h>
 #include <linux/list_sort.h>
-#include <linux/sec_debug.h>
+#include <linux/sec_ts_common.h>
 
-#include "../debug/sec_key_notifier.h"
+#include "../samsung/debug/sec_key_notifier.h"
 
 #ifndef ARRAYSIZE
 #define ARRAYSIZE(a)		(sizeof(a) / sizeof(a[0]))
@@ -54,6 +54,13 @@ struct tsp_dump_key_state tsp_dump_key_states[] = {
 	{KEY_VOLUMEUP, KEY_STATE_UP},
 	{KEY_POWER, KEY_STATE_UP},
 	{KEY_HOMEPAGE, KEY_STATE_UP},
+};
+
+static unsigned int used_keys[] = {
+	KEY_POWER,
+	KEY_VOLUMEDOWN,
+	KEY_VOLUMEUP,
+	KEY_HOMEPAGE
 };
 
 static unsigned int hold_key = KEY_VOLUMEUP;
@@ -236,7 +243,8 @@ static int __init sec_tsp_dumpkey_init(void)
 {
 	/* only work for debug level is low */
 //	if (unlikely(!sec_debug_is_enabled()))
-		sec_kn_register_notifier(&nb_gpio_keys);
+		sec_kn_register_notifier(&nb_gpio_keys,
+				used_keys, ARRAY_SIZE(used_keys));
 	return 0;
 }
 

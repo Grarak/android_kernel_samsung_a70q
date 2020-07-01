@@ -1908,7 +1908,7 @@ static void cam_icp_mgr_process_dbg_buf(unsigned int debug_lvl)
 				| dbg_msg->timestamp_lo) >> 16);
 			trace_cam_icp_fw_dbg(dbg_buf, timestamp/2);
 			if (!debug_lvl)
-				CAM_INFO(CAM_ICP, "FW_DBG:%s", dbg_buf);
+				CAM_DBG(CAM_ICP, "FW_DBG:%s", dbg_buf);
 		}
 		size_processed += (pkt_ptr[ICP_PACKET_SIZE] >>
 			BYTE_WORD_SHIFT);
@@ -2225,6 +2225,25 @@ static int cam_icp_allocate_qdss_mem(void)
 	return rc;
 }
 
+static int cam_icp_get_io_mem_info(void)
+{
+	int rc;
+	size_t len;
+	dma_addr_t iova;
+
+	rc = cam_smmu_get_io_region_info(icp_hw_mgr.iommu_hdl,
+		&iova, &len);
+	if (rc)
+		return rc;
+
+	icp_hw_mgr.hfi_mem.io_mem.iova_len = len;
+	icp_hw_mgr.hfi_mem.io_mem.iova_start = iova;
+
+	CAM_DBG(CAM_ICP, "iova: %llx, len: %zu", iova, len);
+
+	return rc;
+}
+
 static int cam_icp_allocate_hfi_mem(void)
 {
 	int rc;
@@ -2285,7 +2304,15 @@ static int cam_icp_allocate_hfi_mem(void)
 		goto sec_heap_alloc_failed;
 	}
 
+	rc = cam_icp_get_io_mem_info();
+	if (rc) {
+		CAM_ERR(CAM_ICP, "Unable to get I/O region info");
+		goto get_io_mem_failed;
+	}
+
 	return rc;
+get_io_mem_failed:
+	cam_mem_mgr_free_memory_region(&icp_hw_mgr.hfi_mem.sec_heap);
 sec_heap_alloc_failed:
 	cam_mem_mgr_release_mem(&icp_hw_mgr.hfi_mem.sfr_buf);
 sfr_buf_alloc_failed:
@@ -2504,6 +2531,14 @@ static int cam_icp_mgr_hfi_resume(struct cam_icp_hw_mgr *hw_mgr)
 
 	hfi_mem.qdss.iova = icp_hw_mgr.hfi_mem.qdss_buf.iova;
 	hfi_mem.qdss.len = icp_hw_mgr.hfi_mem.qdss_buf.len;
+
+	hfi_mem.io_mem.iova = icp_hw_mgr.hfi_mem.io_mem.iova_start;
+	hfi_mem.io_mem.len = icp_hw_mgr.hfi_mem.io_mem.iova_len;
+
+	CAM_DBG(CAM_ICP, "IO region IOVA = %X length = %lld",
+			hfi_mem.io_mem.iova,
+			hfi_mem.io_mem.len);
+
 	return cam_hfi_resume(&hfi_mem,
 		a5_dev->soc_info.reg_map[A5_SIERRA_BASE].mem_base,
 		hw_mgr->a5_jtag_debug);
@@ -2883,6 +2918,9 @@ static int cam_icp_mgr_hfi_init(struct cam_icp_hw_mgr *hw_mgr)
 
 	hfi_mem.qdss.iova = icp_hw_mgr.hfi_mem.qdss_buf.iova;
 	hfi_mem.qdss.len = icp_hw_mgr.hfi_mem.qdss_buf.len;
+
+	hfi_mem.io_mem.iova = icp_hw_mgr.hfi_mem.io_mem.iova_start;
+	hfi_mem.io_mem.len = icp_hw_mgr.hfi_mem.io_mem.iova_len;
 
 	return cam_hfi_init(0, &hfi_mem,
 		a5_dev->soc_info.reg_map[A5_SIERRA_BASE].mem_base,
@@ -3441,6 +3479,13 @@ static int cam_icp_mgr_process_cmd_desc(struct cam_icp_hw_mgr *hw_mgr,
 				*fw_cmd_buf_iova_addr = 0;
 				num_cmd_buf = (num_cmd_buf > 0) ?
 					num_cmd_buf-- : 0;
+				goto rel_cmd_buf;
+			}
+			if ((len <= cmd_desc[i].offset) ||
+				(cmd_desc[i].size < cmd_desc[i].length) ||
+				((len - cmd_desc[i].offset) <
+				cmd_desc[i].length)) {
+				CAM_ERR(CAM_ICP, "Invalid offset or length");
 				goto rel_cmd_buf;
 			}
 			cpu_addr = cpu_addr + cmd_desc[i].offset;
@@ -4801,11 +4846,6 @@ static int cam_icp_mgr_alloc_devs(struct device_node *of_node)
 		goto num_bps_failed;
 	}
 
-	icp_hw_mgr.ipe_bps_pc_flag = of_property_read_bool(of_node,
-		"ipe_bps_pc_en");
-
-	icp_hw_mgr.icp_pc_flag = of_property_read_bool(of_node,
-		"icp_pc_en");
 
 	return 0;
 num_bps_failed:
@@ -4942,6 +4982,9 @@ static int cam_icp_mgr_create_wq(void)
 	rc = cam_icp_hw_mgr_create_debugfs_entry();
 	if (rc)
 		goto debugfs_create_failed;
+
+	icp_hw_mgr.icp_pc_flag = true;
+	icp_hw_mgr.ipe_bps_pc_flag = false;
 
 	for (i = 0; i < ICP_WORKQ_NUM_TASK; i++)
 		icp_hw_mgr.msg_work->task.pool[i].payload =

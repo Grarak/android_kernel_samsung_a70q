@@ -1,4 +1,4 @@
-/* Copyright (c) 2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -37,7 +37,7 @@
 /* Z floating defined in ohms */
 #define WCD937X_ZDET_FLOATING_IMPEDANCE 0x0FFFFFFE
 
-#define WCD937X_ZDET_NUM_MEASUREMENTS   250
+#define WCD937X_ZDET_NUM_MEASUREMENTS   1500
 #define WCD937X_MBHC_GET_C1(c)          ((c & 0xC000) >> 14)
 #define WCD937X_MBHC_GET_X1(x)          (x & 0x3FFF)
 /* Z value compared in milliOhm */
@@ -552,7 +552,14 @@ static void wcd937x_wcd_mbhc_calc_impedance(struct wcd_mbhc *mbhc, uint32_t *zl,
 	/* Turn off 100k pull down on HPHL */
 	regmap_update_bits(wcd937x->regmap,
 			   WCD937X_ANA_MBHC_MECH, 0x01, 0x00);
-
+	/*
+	* Disable surge protection before impedance detection.
+	* This is done to give correct value for high impedance.
+	*/
+	regmap_update_bits(wcd937x->regmap,
+	WCD937X_HPH_SURGE_HPHLR_SURGE_EN, 0xC0, 0x00);
+	/* 1ms delay needed after disable surge protection */
+	usleep_range(1000, 1010);
 	/* First get impedance on Left */
 	d1 = d1_a[1];
 	zdet_param_ptr = &zdet_param[1];
@@ -679,7 +686,9 @@ right_ch_impedance:
 			__func__);
 		mbhc->hph_type = WCD_MBHC_HPH_MONO;
 	}
-
+	/* Enable surge protection again after impedance detection */
+	regmap_update_bits(wcd937x->regmap,
+	WCD937X_HPH_SURGE_HPHLR_SURGE_EN, 0xC0, 0xC0);
 zdet_complete:
 	snd_soc_write(codec, WCD937X_ANA_MBHC_BTN5, reg0);
 	snd_soc_write(codec, WCD937X_ANA_MBHC_BTN6, reg1);

@@ -41,6 +41,7 @@ static void read_panel_data_work_fn(struct work_struct *work);
 struct samsung_display_driver_data vdd_data[MAX_DISPLAY_NDX];
 
 void __iomem *virt_mmss_gp_base;
+static DEFINE_MUTEX(dyn_mipi_clock);
 
 LIST_HEAD(vdds_list);
 
@@ -517,46 +518,48 @@ int ss_dsi_panel_event_handler(
 int ss_rf_info_notify_callback(struct notifier_block *nb,
 				unsigned long size, void *data)
 {
-	struct rf_info *rf_info = container_of(nb, struct rf_info, notifier);
-	struct rf_noti_info *info;
+	struct dyn_mipi_clk *dyn_mipi_clk = container_of(nb, struct dyn_mipi_clk, notifier);
+	struct samsung_display_driver_data *vdd =
+		container_of(dyn_mipi_clk, struct samsung_display_driver_data, dyn_mipi_clk);
 
-	LCD_INFO("RF Info Notifiy Callback, Size=%lu\n", size);
+	struct dev_ril_bridge_msg *msg;
 
-	if (size == sizeof(struct rf_noti_info)) {
-		info = (struct rf_noti_info *)data;
+	msg = (struct dev_ril_bridge_msg *)data;
+	LCD_INFO("RIL noti: ndx: %d, size: %lu, dev_id: %d, len: %d\n",
+			vdd->ndx, size, msg->dev_id, msg->data_len);
+	if (msg->dev_id == IPC_SYSTEM_CP_CHANNEL_INFO // #define IPC_SYSTEM_CP_CHANNEL_INFO	0x01
+			&& msg->data_len == sizeof(struct rf_info)) {
+		mutex_lock(&dyn_mipi_clk->dyn_mipi_lock);
+		memcpy(&dyn_mipi_clk->rf_info, msg->data, sizeof(struct rf_info));
+		mutex_unlock(&dyn_mipi_clk->dyn_mipi_lock);
 
-		if (info->main_cmd == 0x27 && info->sub_cmd == 0x01 &&
-			info->cmd_type == 0x03) {
-			mutex_lock(&rf_info->vdd_dyn_mipi_lock);
-			rf_info->rat = info->rat;
-			rf_info->band = info->band;
-			rf_info->arfcn = info->arfcn;
-			mutex_unlock(&rf_info->vdd_dyn_mipi_lock);
-		}
+		queue_work(dyn_mipi_clk->change_clk_wq, &dyn_mipi_clk->change_clk_work);
+
+		LCD_INFO("RIL noti: RAT(%d), BAND(%d), ARFCN(%d)\n",
+				dyn_mipi_clk->rf_info.rat,
+				dyn_mipi_clk->rf_info.band,
+				dyn_mipi_clk->rf_info.arfcn);
 	}
 
-	LCD_INFO("RF Info Notify RAT(%d), BAND(%d), ARFCN(%d)\n",
-		rf_info->rat, rf_info->band, rf_info->arfcn);
-
-	return 0;
+	return NOTIFY_DONE;
 }
 
 static int ss_find_dyn_mipi_clk_timing_idx(struct samsung_display_driver_data *vdd)
 {
-	int idx = 0;
+	int idx = -EINVAL;
 	int loop;
 	int rat, band, arfcn;
 	struct clk_sel_table sel_table = vdd->dyn_mipi_clk.clk_sel_table;
 
 	if (!sel_table.tab_size) {
 		LCD_ERR("Table is NULL");
-		return 0;
+		return -ENOENT;
 	}
 
-	rat = vdd->rf_info.rat;
-	band = vdd->rf_info.band;
-	arfcn = vdd->rf_info.arfcn;
-
+	rat = vdd->dyn_mipi_clk.rf_info.rat;
+	band = vdd->dyn_mipi_clk.rf_info.band;
+	arfcn = vdd->dyn_mipi_clk.rf_info.arfcn;
+	
 	for (loop = 0 ; loop < sel_table.tab_size ; loop++) {
 		if ((rat == sel_table.rat[loop]) && (band == sel_table.band[loop])) {
 			if ((arfcn >= sel_table.from[loop]) && (arfcn <= sel_table.end[loop])) {
@@ -573,161 +576,148 @@ static int ss_find_dyn_mipi_clk_timing_idx(struct samsung_display_driver_data *v
 
 }
 
+/* refer to sysfs_dynamic_dsi_clk_write() */
+extern ssize_t sysfs_dynamic_dsi_clk_write(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t count);
+static int _ss_change_dyn_mipi_clk_timing(struct samsung_display_driver_data *vdd, int clk_rate)
+{
+	struct dsi_display *display = GET_DSI_DISPLAY(vdd);
+	struct device *dev = &display->pdev->dev;
+	char clk_rate_buf[12];
+	const char *buf;
+	size_t count = 12;
+
+	LCD_INFO("+++: ndx: %d, clk_rate: %d, cached_clk_rate: %d\n",
+			vdd->ndx, clk_rate, display->cached_clk_rate);
+	sprintf(clk_rate_buf, "%d", clk_rate);
+	buf = clk_rate_buf;
+
+	sysfs_dynamic_dsi_clk_write(dev, NULL, buf, count);
+	LCD_INFO("---: ndx: %d, clk_rate: %d\n", vdd->ndx, clk_rate);
+
+	return 0;
+}
+
+
 int ss_change_dyn_mipi_clk_timing(struct samsung_display_driver_data *vdd)
 {
-	int ret = 0;
-	int idx = 0;
-	size_t loop;
-	u8 *ffc_pload = NULL;
-	u8 *ffc_set_pload = NULL;
-	struct dsi_panel_cmd_set *ffc_cmds = NULL;
-	struct dsi_panel_cmd_set *ffc_set_cmds = NULL;
 	struct clk_timing_table timing_table = vdd->dyn_mipi_clk.clk_timing_table;
-	struct dsi_display *dsi_disp = GET_DSI_DISPLAY(vdd);
-	struct dsi_mode_info *timing = &dsi_disp->config.video_timing;
+	int idx;
+	int clk_rate;
+	int timeout = 60; // 60 seconds
+	int ret = 0;
 
-	if (!vdd->dyn_mipi_clk.is_support)
-		LCD_DEBUG("Dynamic MIPI Clock does not support\n");
+	if (!vdd->dyn_mipi_clk.is_support) {
+		LCD_ERR("Dynamic MIPI Clock does not support\n");
+		return -ENODEV;
+	}
 
 	if (!timing_table.tab_size) {
 		LCD_ERR("Table is NULL");
 		return -ENODEV;
 	}
 
-	mutex_lock(&vdd->rf_info.vdd_dyn_mipi_lock);
+	mutex_lock(&dyn_mipi_clock);
 
+	LCD_INFO("+++: ndx=%d", vdd->ndx);
+
+	/*  wait for dispaly init done */
+	while (timeout-- && !vdd->display_status_dsi.disp_on_pre) {
+		msleep(1000);
+		LCD_INFO("wait time: %ds, disp_on_pre: %d\n",
+				timeout, vdd->display_status_dsi.disp_on_pre);
+
+		if (!timeout) {
+			LCD_ERR("err: display init timeout...\n");
+			goto err;
+		}
+	}
+
+	mutex_lock(&vdd->dyn_mipi_clk.dyn_mipi_lock);
 	idx = ss_find_dyn_mipi_clk_timing_idx(vdd);
-
-	LCD_DEBUG("Timing IDX = %d\n", idx);
-
-	if (!idx)
-		LCD_ERR("Failed to find MIPI clock timing, idx=0\n");
-
-	/* Timing Change */
-	timing->refresh_rate = timing_table.fps[idx];
-	timing->h_front_porch = timing_table.hfp[idx];
-	timing->h_back_porch = timing_table.hbp[idx];
-	timing->h_sync_width = timing_table.hsw[idx];
-	timing->h_skew = timing_table.hss[idx];
-	timing->v_front_porch = timing_table.vfp[idx];
-	timing->v_back_porch = timing_table.vbp[idx];
-	timing->v_sync_width = timing_table.vsw[idx];
-
-	/* FFC Command Change */
-	ffc_cmds = ss_get_cmds(vdd, TX_FFC);
-	if (SS_IS_CMDS_NULL(ffc_cmds)) {
-		LCD_ERR("No cmds for TX_FFC..\n");
-		ret = -EINVAL;
+	mutex_unlock(&vdd->dyn_mipi_clk.dyn_mipi_lock);
+	if (idx < 0 ) {
+		LCD_ERR("Failed to find MIPI clock timing (%d)\n", idx);
 		goto err;
 	}
 
-	ffc_set_cmds = ss_get_cmds(vdd, TX_DYNAMIC_FFC_SET);
-	if (SS_IS_CMDS_NULL(ffc_set_cmds)) {
-		LCD_ERR("No cmds for TX_DYNAMIC_FFC_SET..\n");
-		ret = -EINVAL;
+	clk_rate = timing_table.clk_rate[idx];
+	LCD_INFO("clk idx: %d, clk_rate: %d\n", idx, clk_rate);
+
+	/* update dynamic mipi clk */
+	ret = _ss_change_dyn_mipi_clk_timing(vdd, clk_rate);
+	if (ret) {
+		LCD_ERR("fail to change mipi clk(%d), ret:%d\n", clk_rate, ret);
 		goto err;
 	}
 
-	ffc_pload = ffc_cmds->cmds[1].msg.tx_buf;
-	ffc_set_pload = ffc_set_cmds->cmds[idx].msg.tx_buf;
-
-	for (loop = 0; loop < ffc_cmds->cmds[1].msg.tx_len ; loop++)
-		ffc_pload[loop] = ffc_set_pload[loop];
-
+	/* update mipi global timing: skip this.. not required...  */
 err:
-	mutex_unlock(&vdd->rf_info.vdd_dyn_mipi_lock);
+	LCD_INFO("---: ndx=%d", vdd->ndx);
+	mutex_unlock(&dyn_mipi_clock);
 
-	LCD_INFO("FPS(%d), HFP(%d), HBP(%d), HSW(%d), HSKEW(%d), VFP(%d), VBP(%d), VSW(%d)\n",
-		timing->refresh_rate, timing->h_front_porch,
-		timing->h_back_porch, timing->h_sync_width,
-		timing->h_skew, timing->v_front_porch,
-		timing->v_back_porch, timing->v_sync_width);
-
-	return ret;
+	return 0;
 }
 
-int ss_parse_dyn_mipi_clk_timing_table(struct device_node *np,
+int ss_dyn_mipi_clk_tx_ffc(struct samsung_display_driver_data *vdd)
+{
+	struct dsi_panel_cmd_set *ffc_set;
+	struct dsi_panel_cmd_set *dyn_ffc_set;
+	int idx;
+
+	mutex_lock(&vdd->dyn_mipi_clk.dyn_mipi_lock);
+	idx = ss_find_dyn_mipi_clk_timing_idx(vdd);
+	mutex_unlock(&vdd->dyn_mipi_clk.dyn_mipi_lock);
+	
+	if (idx < 0 ) {
+		LCD_ERR("Failed to find MIPI clock timing (%d)\n", idx);
+		return -EINVAL;
+	}
+
+	LCD_INFO("+++ clk idx: %d, tx FFC\n", idx);
+
+	ffc_set = ss_get_cmds(vdd, TX_FFC);
+	dyn_ffc_set = ss_get_cmds(vdd, TX_DYNAMIC_FFC_SET);
+	if (SS_IS_CMDS_NULL(ffc_set) || SS_IS_CMDS_NULL(dyn_ffc_set)) {
+		LCD_ERR("No cmds for TX_FFC..\n");
+		return -EINVAL;
+	}
+
+	memcpy(ffc_set->cmds[1].msg.tx_buf, dyn_ffc_set->cmds[idx].msg.tx_buf, ffc_set->cmds[1].msg.tx_len);
+	ss_send_cmd(vdd, TX_FFC);
+	LCD_INFO("--- clk idx: %d, tx FFC\n", idx);
+
+	return 0;
+}
+
+static int ss_parse_dyn_mipi_clk_timing_table(struct device_node *np,
 		void *tbl, char *keystring)
 {
 	struct clk_timing_table *table = (struct clk_timing_table *) tbl;
 	const __be32 *data;
 	int len = 0, i = 0, data_offset = 0;
-	int col_size = 0;
 
 	data = of_get_property(np, keystring, &len);
 
-	if (data)
-		LCD_INFO("Success to read table %s\n", keystring);
-	else {
+	if (!data) {
 		LCD_ERR("%d, Unable to read table %s ", __LINE__, keystring);
 		return -EINVAL;
 	}
 
-	col_size = 8;
-
-	if ((len % col_size) != 0) {
-		LCD_ERR("%d, Incorrect table entries for %s , len : %d",
-					__LINE__, keystring, len);
-		return -EINVAL;
-	}
-
-	table->tab_size = len / (sizeof(int) * col_size);
-
-	table->fps = kzalloc((sizeof(int) * table->tab_size), GFP_KERNEL);
-	if (!table->fps)
+	table->tab_size = len / sizeof(int);
+	table->clk_rate = kzalloc((sizeof(int) * table->tab_size), GFP_KERNEL);
+	if (!table->clk_rate)
 		return -ENOMEM;
-	table->hfp = kzalloc((sizeof(int) * table->tab_size), GFP_KERNEL);
-	if (!table->hfp)
-		goto error;
-	table->hbp = kzalloc((sizeof(int) * table->tab_size), GFP_KERNEL);
-	if (!table->hbp)
-		goto error;
-	table->hsw = kzalloc((sizeof(int) * table->tab_size), GFP_KERNEL);
-	if (!table->hsw)
-		goto error;
-	table->hss = kzalloc((sizeof(int) * table->tab_size), GFP_KERNEL);
-	if (!table->hss)
-		goto error;
-	table->vfp = kzalloc((sizeof(int) * table->tab_size), GFP_KERNEL);
-	if (!table->vfp)
-		goto error;
-	table->vbp = kzalloc((sizeof(int) * table->tab_size), GFP_KERNEL);
-	if (!table->vbp)
-		goto error;
-	table->vsw = kzalloc((sizeof(int) * table->tab_size), GFP_KERNEL);
-	if (!table->vsw)
-		goto error;
 
-	for (i = 0 ; i < table->tab_size; i++) {
-		table->fps[i] = be32_to_cpup(&data[data_offset++]);
-		table->hfp[i] = be32_to_cpup(&data[data_offset++]);
-		table->hbp[i] = be32_to_cpup(&data[data_offset++]);
-		table->hsw[i] = be32_to_cpup(&data[data_offset++]);
-		table->hss[i] = be32_to_cpup(&data[data_offset++]);
-		table->vfp[i] = be32_to_cpup(&data[data_offset++]);
-		table->vbp[i] = be32_to_cpup(&data[data_offset++]);
-		table->vsw[i] = be32_to_cpup(&data[data_offset++]);
-	}
+	for (i = 0 ; i < table->tab_size; i++)
+		table->clk_rate[i] = be32_to_cpup(&data[data_offset++]);
 
 	LCD_INFO("%s tab_size (%d)\n", keystring, table->tab_size);
 
 	return 0;
-
-error:
-	LCD_ERR("Allocation Fail\n");
-	kfree(table->fps);
-	kfree(table->hfp);
-	kfree(table->hbp);
-	kfree(table->hsw);
-	kfree(table->hss);
-	kfree(table->vfp);
-	kfree(table->vbp);
-	kfree(table->vsw);
-
-	return -ENOMEM;
 }
 
-int ss_parse_dyn_mipi_clk_sel_table(struct device_node *np,
+static int ss_parse_dyn_mipi_clk_sel_table(struct device_node *np,
 		void *tbl, char *keystring)
 {
 	struct clk_sel_table *table = (struct clk_sel_table *) tbl;
@@ -932,6 +922,74 @@ error:
 	return -ENOMEM;
 }
 
+int ss_parse_gamma_mode2_candella_mapping_table(struct device_node *np,
+		void *tbl, char *keystring)
+{
+	struct candela_map_table *table = (struct candela_map_table *) tbl;
+	const __be32 *data;
+	int len = 0, i = 0, data_offset = 0;
+	int col_size = 0;
+
+	data = of_get_property(np, keystring, &len);
+	if (!data) {
+		LCD_DEBUG("%d, Unable to read table %s ", __LINE__, keystring);
+		return -EINVAL;
+	} else
+		LCD_ERR("Success to read table %s\n", keystring);
+
+	col_size = 5;
+
+	if ((len % col_size) != 0) {
+		LCD_ERR("%d, Incorrect table entries for %s , len : %d",
+					__LINE__, keystring, len);
+		return -EINVAL;
+	}
+
+	table->tab_size = len / (sizeof(int) * col_size);
+
+	table->gamma_mode2_cd = kzalloc((sizeof(int) * table->tab_size), GFP_KERNEL);
+	if (!table->gamma_mode2_cd)
+		return -ENOMEM;
+
+	table->cd = kzalloc((sizeof(int) * table->tab_size), GFP_KERNEL);
+	if (!table->cd)
+		goto error;
+	table->idx = kzalloc((sizeof(int) * table->tab_size), GFP_KERNEL);
+	if (!table->idx)
+		goto error;
+	table->from = kzalloc((sizeof(int) * table->tab_size), GFP_KERNEL);
+	if (!table->from)
+		goto error;
+	table->end = kzalloc((sizeof(int) * table->tab_size), GFP_KERNEL);
+	if (!table->end)
+		goto error;
+
+	for (i = 0 ; i < table->tab_size; i++) {
+		table->idx[i] = be32_to_cpup(&data[data_offset++]);	/* field => <idx> */
+		table->from[i] = be32_to_cpup(&data[data_offset++]);	/* field => <from> */
+		table->end[i] = be32_to_cpup(&data[data_offset++]);	/* field => <end> */
+		table->cd[i] = be32_to_cpup(&data[data_offset++]);	/* field => <cd> */
+		table->gamma_mode2_cd[i] = be32_to_cpup(&data[data_offset++]);	/* field => <gamma_mode2_cd (panel_real_cd)> */
+		LCD_DEBUG("[%d] %d %d %d %d %d\n", i, table->idx[i], table->from[i], table->end[i], table->cd[i], table->gamma_mode2_cd[i]);
+	}
+
+	table->min_lv = table->from[0];
+	table->max_lv = table->end[table->tab_size-1];
+
+	LCD_INFO("tab_size (%d), hbm min/max lv (%d/%d)\n", table->tab_size, table->min_lv, table->max_lv);
+
+	return 0;
+
+error:
+	kfree(table->idx);
+	kfree(table->from);
+	kfree(table->end);
+	kfree(table->cd);
+	kfree(table->gamma_mode2_cd);
+
+	return -ENOMEM;
+}
+
 int ss_parse_hbm_candella_mapping_table(struct device_node *np,
 		void *tbl, char *keystring)
 {
@@ -1056,10 +1114,10 @@ int ss_send_cmd(struct samsung_display_driver_data *vdd,
 		return -ENODEV;
 	}
 
-	/* Make not to turn on the panel power when ub_con_det_gpio is high (ub is not connected) */
+	/* Make not to turn on the panel power when ub_con_det gpio is high (ub is not connected) */
 	if (unlikely(vdd->is_factory_mode)) {
-		if (gpio_is_valid(vdd->ub_con_det_gpio) && gpio_get_value(vdd->ub_con_det_gpio)) {
-			LCD_ERR("ub_con_det_gpio = %d\n", gpio_get_value(vdd->ub_con_det_gpio));
+		if (gpio_is_valid(vdd->ub_con_det.gpio) && gpio_get_value(vdd->ub_con_det.gpio)) {
+			LCD_ERR("ub_con_det.gpio = %d\n", gpio_get_value(vdd->ub_con_det.gpio));
 			return -EAGAIN;
 		}
 	}
@@ -2092,8 +2150,10 @@ int ss_panel_on_post(struct samsung_display_driver_data *vdd)
 			vdd->esd_recovery.esd_irq_enable(true, true, (void *)vdd);
 	}
 
-	if (vdd->dyn_mipi_clk.is_support)
+	if (vdd->dyn_mipi_clk.is_support){
+		LCD_INFO("FFC Setting for Dynamic MIPI Clock\n");
 		ss_send_cmd(vdd, TX_FFC);
+	}
 
 	if (vdd->copr.copr_on)
 		ss_send_cmd(vdd, TX_COPR_ENABLE);
@@ -2414,8 +2474,8 @@ static irqreturn_t esd_irq_handler(int irq, void *handle)
 	}
 
 	if (unlikely(vdd->is_factory_mode)) {
-		if (gpio_is_valid(vdd->ub_con_det_gpio)) {
-			pr_info("ub_con_det_gpio = %d\n", gpio_get_value(vdd->ub_con_det_gpio));
+		if (gpio_is_valid(vdd->ub_con_det.gpio)) {
+			pr_info("ub_con_det.gpio = %d\n", gpio_get_value(vdd->ub_con_det.gpio));
 		}
 	}
 
@@ -2584,6 +2644,75 @@ static void ss_panel_recovery(struct samsung_display_driver_data *vdd)
 
 	LCD_INFO("Panel Recovery --\n");
 
+}
+
+void ss_send_ub_uevent(struct samsung_display_driver_data *vdd)
+{
+	char *envp[3] = {"CONNECTOR_NAME=UB_CONNECT", "CONNECTOR_TYPE=HIGH_LEVEL", NULL};
+
+	LCD_INFO("send uvent \n");
+	kobject_uevent_env(&vdd->lcd_dev->dev.kobj, KOBJ_CHANGE, envp);
+
+	return;
+}
+
+static irqreturn_t ss_ub_con_det_handler(int irq, void *handle)
+{
+	struct samsung_display_driver_data *vdd =
+		(struct samsung_display_driver_data *) handle;
+
+	LCD_INFO("ub_con_det for ndx%d is [%s] \n", vdd->ndx, vdd->ub_con_det.enabled ? "enabled" : "disabled");
+
+	/* check gpio status one more */
+	if (!gpio_get_value(vdd->ub_con_det.gpio))
+		LCD_INFO("interrupt happens but panel is attached.\n");
+	else {
+		if (vdd->ub_con_det.enabled)
+			ss_send_ub_uevent(vdd);
+		vdd->ub_con_det.ub_con_cnt++;
+	}
+
+	LCD_ERR("-- cnt for ndx%d : %d\n", vdd->ndx, vdd->ub_con_det.ub_con_cnt);
+
+	return IRQ_HANDLED;
+}
+
+static void ss_panel_parse_dt_ub_con(struct device_node *np,
+		struct samsung_display_driver_data *vdd)
+{
+	struct ub_con_detect *ub_con_det;
+	int ret;
+
+	ub_con_det = &vdd->ub_con_det;
+
+	ub_con_det->gpio = of_get_named_gpio(np,
+			"samsung,ub-con-det", 0);
+	
+	LCD_INFO("request ub_con_det irq for ndx%d\n", vdd->ndx);
+
+	if (gpio_is_valid(ub_con_det->gpio)) {
+		ret = gpio_request(ub_con_det->gpio, "UB_CON_DET");
+		if (ret)
+			LCD_INFO("[ub_con_det ndx%d] fail to gpio_request.. %d\n", vdd->ndx, ret);
+		else
+			LCD_INFO("[ub_con_det ndx%d] gpio : %d, irq : %d\n",
+					vdd->ndx, ub_con_det->gpio, gpio_to_irq(ub_con_det->gpio));
+	} else {
+		LCD_ERR("fail to gpio_request\n");
+		return;
+	}
+
+	ret = request_threaded_irq(
+				gpio_to_irq(ub_con_det->gpio),
+				NULL,
+				ss_ub_con_det_handler,
+				IRQF_TRIGGER_RISING | IRQF_ONESHOT,
+				"UB_CON_DET",
+				(void *) vdd);
+	if (ret)
+		LCD_ERR("Failed to request_irq, ret=%d\n", ret);
+
+	return;
 }
 
 /*************************************************************
@@ -2884,6 +3013,11 @@ static void ss_panel_parse_dt_bright_tables(struct device_node *np,
 				"samsung,pac_hbm_candela_map_table_rev", panel_rev,
 				ss_parse_hbm_candella_mapping_table);
 
+		parse_dt_data(np, &dtsi_data->candela_map_table[GAMMA_MODE2_NORMAL][panel_rev],
+				sizeof(struct candela_map_table),
+				"samsung,gamma_mode2_candela_map_table_rev", panel_rev,
+				ss_parse_gamma_mode2_candella_mapping_table);
+
 		/* ACL */
 		parse_dt_data(np, &dtsi_data->acl_map_table[panel_rev],
 				sizeof(struct cmd_map),
@@ -2990,6 +3124,17 @@ static void ss_panel_pbaboot_config(struct device_node *np,
 		vdd->dtsi_data.samsung_osc_te_fitting = false;
 	}
 #endif
+}
+
+static void ss_dynamic_mipi_clk_work(struct work_struct *work)
+{
+	struct samsung_display_driver_data *vdd = NULL;
+	struct dyn_mipi_clk *dyn;
+
+	dyn = container_of(work, struct dyn_mipi_clk, change_clk_work);
+	vdd = container_of(dyn, struct samsung_display_driver_data, dyn_mipi_clk);
+
+	ss_change_dyn_mipi_clk_timing(vdd);
 }
 
 static void ss_panel_parse_dt(struct samsung_display_driver_data *vdd)
@@ -3207,6 +3352,10 @@ static void ss_panel_parse_dt(struct samsung_display_driver_data *vdd)
 	vdd->br.pac = of_property_read_bool(np, "samsung,support_pac");
 	LCD_INFO("vdd->br.pac = %d\n", vdd->br.pac);
 
+	/* Gamma Mode 2 */
+	vdd->br.gamma_mode2_support = of_property_read_bool(np, "samsung,support_gamma_mode2");
+	LCD_INFO("vdd->br.gamma_mode2_support = %d\n", vdd->br.gamma_mode2_support);
+
 	/* Global Para */
 	vdd->gpara = of_property_read_bool(np, "samsung,support_gpara");
 	LCD_INFO("vdd->support_gpara = %d\n", vdd->gpara);
@@ -3214,6 +3363,26 @@ static void ss_panel_parse_dt(struct samsung_display_driver_data *vdd)
 	/* Self Display */
 	vdd->self_disp.is_support = of_property_read_bool(np, "samsung,support_self_display");
 	LCD_INFO("vdd->self_disp.is_support = %d\n", vdd->self_disp.is_support);
+
+	if (vdd->self_disp.is_support) {
+		/* Self Mask Check CRC data */	
+		data = of_get_property(np, "samsung,mask_crc_pass_data", &len);
+		if (!data)
+			LCD_ERR("fail to get samsung,mask_crc_pass_data .. \n");
+		else {
+			vdd->self_disp.mask_crc_pass_data = kzalloc(len, GFP_KERNEL);
+			vdd->self_disp.mask_crc_read_data = kzalloc(len, GFP_KERNEL);
+			vdd->self_disp.mask_crc_size = len;
+			if (!vdd->self_disp.mask_crc_pass_data || !vdd->self_disp.mask_crc_read_data)
+				LCD_ERR("fail to alloc for mask_crc_data \n");
+			else {
+				for (i = 0; i < len; i++) {
+					vdd->self_disp.mask_crc_pass_data[i] = data[i];
+					LCD_ERR("crc_data[%d] = %02x\n", i, vdd->self_disp.mask_crc_pass_data[i]);
+				}
+			}
+		}
+	}
 
 	/* DDI SPI */
 	vdd->samsung_support_ddi_spi = of_property_read_bool(np, "samsung,support_ddi_spi");
@@ -3337,10 +3506,17 @@ static void ss_panel_parse_dt(struct samsung_display_driver_data *vdd)
 					"samsung,dynamic_mipi_clk_sel_table");
 		ss_parse_dyn_mipi_clk_timing_table(np, &vdd->dyn_mipi_clk.clk_timing_table,
 					"samsung,dynamic_mipi_clk_timing_table");
-		vdd->rf_info.notifier.priority = 0;
-		vdd->rf_info.notifier.notifier_call = ss_rf_info_notify_callback;
-	// KR : no dev_ril_bridge.h
-	//	register_dev_ril_bridge_event_notifier(&vdd->rf_info.notifier);
+
+		vdd->dyn_mipi_clk.change_clk_wq = create_singlethread_workqueue("dyna_mipi_clk_wq");
+		if (!vdd->dyn_mipi_clk.change_clk_wq) {
+			LCD_ERR("failed to create read copr workqueue..\n");
+			return;
+		}
+		INIT_WORK(&vdd->dyn_mipi_clk.change_clk_work, ss_dynamic_mipi_clk_work);
+
+		vdd->dyn_mipi_clk.notifier.priority = 0;
+		vdd->dyn_mipi_clk.notifier.notifier_call = ss_rf_info_notify_callback;
+		register_dev_ril_bridge_event_notifier(&vdd->dyn_mipi_clk.notifier);
 	}
 
 	ss_panel_parse_dt_bright_tables(np, vdd);
@@ -3364,13 +3540,6 @@ static void ss_panel_parse_dt(struct samsung_display_driver_data *vdd)
 	if (gpio_is_valid(vdd->select_panel_gpio))
 		gpio_request(vdd->select_panel_gpio, "lcd_sel_gpio");
 
-	// UB_CON_DET
-	vdd->ub_con_det_gpio = of_get_named_gpio(np,
-			"samsung,ub-con-det", 0);
-
-	if (gpio_is_valid(vdd->ub_con_det_gpio))
-		gpio_request(vdd->ub_con_det_gpio, "ub_con_det_gpio");
-
 	vdd->select_panel_use_expander_gpio = of_property_read_bool(np, "samsung,mdss_dsi_lcd_sel_use_expander_gpio");
 
 	/* Panel LPM */
@@ -3380,6 +3549,7 @@ static void ss_panel_parse_dt(struct samsung_display_driver_data *vdd)
 	rc = of_property_read_u32(np, "samsung,delayed-display-on", tmp);
 	vdd->dtsi_data.samsung_delayed_display_on = (!rc ? tmp[0] : 0);
 
+	ss_panel_parse_dt_ub_con(np, vdd);
 	ss_panel_parse_dt_esd(np, vdd);
 	ss_panel_pbaboot_config(np, vdd);
 
@@ -3914,6 +4084,8 @@ int ss_panel_lpm_power_ctrl(struct samsung_display_driver_data *vdd, int enable)
 		} else
 			LCD_DEBUG("enable=%d, previous voltage : %d\n", enable, get_voltage);
 	}
+	if(elvss)
+		regulator_put(elvss);
 
 	mutex_unlock(&vdd->panel_lpm.lpm_lock);
 	LCD_DEBUG("[Panel LPM] --\n");
@@ -4227,11 +4399,14 @@ static void set_normal_br_values(struct samsung_display_driver_data *vdd)
 	int loop = 0;
 	struct candela_map_table *table;
 
-
 	if (vdd->br.pac)
 		table = &vdd->dtsi_data.candela_map_table[PAC_NORMAL][vdd->panel_revision];
-	else
-		table = &vdd->dtsi_data.candela_map_table[NORMAL][vdd->panel_revision];
+	else {
+		if (vdd->br.gamma_mode2_support)
+			table = &vdd->dtsi_data.candela_map_table[GAMMA_MODE2_NORMAL][vdd->panel_revision];
+		else
+			table = &vdd->dtsi_data.candela_map_table[NORMAL][vdd->panel_revision];
+	}
 
 	if (IS_ERR_OR_NULL(table->cd)) {
 		LCD_ERR("No candela_map_table.. \n");
@@ -4278,9 +4453,16 @@ static void set_normal_br_values(struct samsung_display_driver_data *vdd)
 
 		LCD_INFO("[%d] pac_cd_idx (%d) cd_idx (%d) cd (%d) interpolation_cd (%d)\n",
 			p, vdd->br.pac_cd_idx, vdd->br.cd_idx, vdd->br.cd_level, vdd->br.interpolation_cd);
-	} else
-		LCD_INFO("[%d] cd_idx (%d) cd (%d) interpolation_cd (%d)\n",
-			p, vdd->br.cd_idx, vdd->br.cd_level, vdd->br.interpolation_cd);
+	} else { 
+		if (vdd->br.gamma_mode2_support) {
+			vdd->br.gamma_mode2_cd = table->gamma_mode2_cd[p];
+			LCD_INFO("[%d] cd_idx (%d) cd (%d) panel_real_cd (%d)\n",
+				p, vdd->br.cd_idx, vdd->br.cd_level, vdd->br.gamma_mode2_cd);
+		} else {
+			LCD_INFO("[%d] cd_idx (%d) cd (%d) interpolation_cd (%d)\n",
+				p, vdd->br.cd_idx, vdd->br.cd_level, vdd->br.interpolation_cd);
+		}
+	}
 	return;
 }
 
@@ -4682,6 +4864,16 @@ static int ss_normal_brightness_packet_set(
 			update_packet_level_key_enable(vdd, packet, &cmd_cnt, level_key);
 			ss_update_brightness_packet(packet, &cmd_cnt, tx_cmd);
 			update_packet_level_key_disable(vdd, packet, &cmd_cnt, level_key);
+
+			/* vint */
+			if (!IS_ERR_OR_NULL(vdd->panel_func.samsung_brightness_vint)) {
+				level_key = false;
+				tx_cmd = vdd->panel_func.samsung_brightness_vint(vdd, &level_key);
+
+				update_packet_level_key_enable(vdd, packet, &cmd_cnt, level_key);
+				ss_update_brightness_packet(packet, &cmd_cnt, tx_cmd);
+				update_packet_level_key_disable(vdd, packet, &cmd_cnt, level_key);
+			}
 		}
 
 	}
@@ -5302,7 +5494,7 @@ void ss_panel_init(struct dsi_panel *panel)
 	mutex_init(&vdd->panel_lpm.lpm_lock);
 
 	/* To guarantee dynamic MIPI clock change*/
-	mutex_init(&vdd->rf_info.vdd_dyn_mipi_lock);
+	mutex_init(&vdd->dyn_mipi_clk.dyn_mipi_lock);
 
 	if (ss_is_cmd_mode(vdd)) {
 		vdd->panel_func.ss_event_osc_te_fitting =

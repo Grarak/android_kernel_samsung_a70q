@@ -208,6 +208,8 @@ enum msm_camera_power_seq_type {
 	SENSOR_VAF_PWDM,
 	SENSOR_CUSTOM_REG1,
 	SENSOR_CUSTOM_REG2,
+        SENSOR_CUSTOM_REG3,
+        SENSOR_CUSTOM_REG4,
 	SENSOR_RESET,
 	SENSOR_STANDBY,
 	SENSOR_CUSTOM_GPIO1,
@@ -385,6 +387,7 @@ struct cam_camera_slave_info {
 	uint16_t sensor_id_reg_addr;
 	uint16_t sensor_id;
 	uint16_t sensor_id_mask;
+	uint16_t version_id;
 };
 
 struct msm_sensor_init_params {
@@ -446,6 +449,8 @@ enum msm_camera_vreg_name_t {
 	CAM_VAF,
 	CAM_V_CUSTOM1,
 	CAM_V_CUSTOM2,
+        CAM_V_CUSTOM3,
+        CAM_V_CUSTOM4,
 	CAM_VREG_MAX,
 };
 

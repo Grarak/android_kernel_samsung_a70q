@@ -29,7 +29,6 @@
 #include <asm/sections.h>
 
 #include <linux/sec_debug.h>
-#include <linux/sec_debug_summary.h>
 
 #ifdef CONFIG_KALLSYMS_ALL
 #define all_var 1

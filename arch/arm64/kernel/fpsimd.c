@@ -31,6 +31,8 @@
 #include <asm/cputype.h>
 #include <asm/simd.h>
 
+#include <linux/sec_debug.h>
+
 #define FPEXC_IOF	(1 << 0)
 #define FPEXC_DZF	(1 << 1)
 #define FPEXC_OFF	(1 << 2)
@@ -134,26 +136,6 @@ void do_fpsimd_exc(unsigned int esr, struct pt_regs *regs)
 
 	send_sig_info(SIGFPE, &info, current);
 }
-
-#ifdef CONFIG_KERNEL_MODE_NEON_DEBUG 
-void fpsimd_context_check(struct task_struct *next)
-{
-	int simd_reg_index;
-	struct fpsimd_state current_st, *saved_st;
-	saved_st = &next->thread.fpsimd_state;
-	fpsimd_save_state(&current_st);
-	
-	for (simd_reg_index = 0; simd_reg_index < 32; simd_reg_index++)
-	{
-		if(current_st.vregs[simd_reg_index] != saved_st->vregs[simd_reg_index])
-			BUG();
-	}
-
-	if((current_st.fpsr != saved_st->fpsr) || (current_st.fpcr != saved_st->fpcr))
-		BUG();
-
-}
-#endif
 
 void fpsimd_thread_switch(struct task_struct *next)
 {

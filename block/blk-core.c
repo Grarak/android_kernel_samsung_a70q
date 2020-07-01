@@ -1431,7 +1431,7 @@ static struct request *blk_old_get_request(struct request_queue *q,
 	/* q->queue_lock is unlocked at this point */
 	rq->__data_len = 0;
 	rq->__sector = (sector_t) -1;
-#ifdef CONFIG_PFK
+#ifdef CONFIG_BLK_DEV_CRYPT_DUN
 	rq->__dun = 0;
 #endif
 	rq->bio = rq->biotail = NULL;
@@ -1657,7 +1657,7 @@ bool bio_attempt_front_merge(struct request_queue *q, struct request *req,
 	bio->bi_next = req->bio;
 	req->bio = bio;
 
-#ifdef CONFIG_PFK
+#ifdef CONFIG_BLK_DEV_CRYPT_DUN
 	req->__dun = bio->bi_iter.bi_dun;
 #endif
 	req->__sector = bio->bi_iter.bi_sector;
@@ -1802,6 +1802,9 @@ void blk_init_request_from_bio(struct request *req, struct bio *bio)
 		req->cmd_flags |= REQ_FAILFAST_MASK;
 
 	req->__sector = bio->bi_iter.bi_sector;
+#ifdef CONFIG_BLK_DEV_CRYPT_DUN
+	req->__dun = bio->bi_iter.bi_dun;
+#endif
 	if (ioprio_valid(bio_prio(bio)))
 		req->ioprio = bio_prio(bio);
 	else if (ioc)
@@ -1809,9 +1812,6 @@ void blk_init_request_from_bio(struct request *req, struct bio *bio)
 	else
 		req->ioprio = IOPRIO_PRIO_VALUE(IOPRIO_CLASS_NONE, 0);
 	req->write_hint = bio->bi_write_hint;
-#ifdef CONFIG_PFK
-	req->__dun = bio->bi_iter.bi_dun;
-#endif
 	blk_rq_bio_prep(req->q, req, bio);
 }
 EXPORT_SYMBOL_GPL(blk_init_request_from_bio);
@@ -2813,7 +2813,7 @@ bool blk_update_request(struct request *req, blk_status_t error,
 	/* update sector only for requests with clear definition of sector */
 	if (!blk_rq_is_passthrough(req)) {
 		req->__sector += total_bytes >> 9;
-#ifdef CONFIG_PFK
+#ifdef CONFIG_BLK_DEV_CRYPT_DUN
 		if (req->__dun)
 			req->__dun += total_bytes >> 12;
 #endif
@@ -3180,7 +3180,7 @@ static void __blk_rq_prep_clone(struct request *dst, struct request *src)
 {
 	dst->cpu = src->cpu;
 	dst->__sector = blk_rq_pos(src);
-#ifdef CONFIG_PFK
+#ifdef CONFIG_BLK_DEV_CRYPT_DUN
 	dst->__dun = blk_rq_dun(src);
 #endif
 	dst->__data_len = blk_rq_bytes(src);
@@ -3656,6 +3656,7 @@ void blk_set_runtime_active(struct request_queue *q)
 EXPORT_SYMBOL(blk_set_runtime_active);
 #endif
 
+/* IOPP-sio-v1.0.4.4 */
 #if !defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
 /*********************************
  * debugfs functions

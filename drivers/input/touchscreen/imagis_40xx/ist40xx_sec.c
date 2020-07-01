@@ -170,6 +170,15 @@ static void fw_update(void *dev_data)
 	struct ist40xx_data *data = container_of(sec, struct ist40xx_data, sec);
 
 	sec_cmd_set_default_result(sec);
+#if defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
+	if (sec->cmd_param[0] == UMS) {
+		input_err(true, &data->client->dev, "%s: user_ship, skip\n", __func__);
+		snprintf(buf, sizeof(buf), "OK");
+		sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
+		sec->cmd_state = SEC_CMD_STATUS_OK;
+		return;
+	}
+#endif
 
 	if (data->status.sys_mode != STATE_POWER_ON) {
 		input_err(true, &data->client->dev,
@@ -1805,6 +1814,107 @@ out:
 		   (int)strnlen(buf, sizeof(buf)));
 }
 
+#define FPCB_NOISE_FRAME_CNT	30
+#define GROUP_CH_CNT	9
+static void get_fpcb_noise(void *dev_data)
+{
+	int i, w, h, ret = 0;
+	int idx = 0;
+	u32 result_sum = 0;
+	u32 max_peak = 0;
+	u32 addr;
+	u32 *cdc = NULL;
+	s16 diff;
+	s16 max_diff = 0;
+	s16 min_diff = 0;
+	s16 *sum = NULL;
+	s16 peak = 0;
+	char buf[16] = { 0 };
+	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
+	struct ist40xx_data *data = container_of(sec, struct ist40xx_data, sec);
+	TSP_INFO *tsp = &data->tsp_info;
+
+	if (sec->cmd_all_factory_state == SEC_CMD_STATUS_RUNNING) {
+		snprintf(buf, sizeof(buf), "0,%d", data->fpcb_noise_max_sum);
+		sec_cmd_set_cmd_result_all(sec, buf, strnlen(buf, sizeof(buf)), "JITTER");
+		input_info(true, &data->client->dev, "%s: fpcb_noise_max_sum %d\n", __func__, data->fpcb_noise_max_sum);
+		return;
+	}
+
+	data->ignore_delay = true;
+
+	cdc = kmalloc(tsp->node.len * sizeof(u32), GFP_KERNEL);
+	if (!cdc) {
+		input_info(true, &data->client->dev, "%s couldn't allocate cdc memory\n", __func__);
+		goto err;
+	}
+
+	sum = kmalloc(tsp->ch_num.tx * sizeof(s16), GFP_KERNEL);
+	if (!sum) {
+		input_info(true, &data->client->dev, "%s couldn't allocate sum memory\n", __func__);
+		kfree(cdc);
+		goto err;
+	}
+
+	memset(sum, 0, tsp->ch_num.tx * sizeof(s16));
+
+	for (i = 0; i < FPCB_NOISE_FRAME_CNT; i++) {
+		ist40xx_write_cmd(data, IST40XX_HIB_CMD,
+					(eHCOM_FW_HOLD << 16) | (IST40XX_ENABLE & 0xFFFF));
+		ist40xx_delay(20);
+
+		// Read CDC Data
+		for (h = 0; h < tsp->ch_num.tx; h++) {
+			idx = h * tsp->ch_num.rx + tsp->ch_num.rx - GROUP_CH_CNT;
+			addr = IST40XX_DA_ADDR(data->cdc_addr) + (IST40XX_ADDR_LEN * idx);
+			ret = ist40xx_burst_read(data->client, addr, cdc + idx,
+							GROUP_CH_CNT, true);
+			if (ret) {
+				input_info(true, &data->client->dev, "%s: read fail\n", __func__);
+				kfree(sum);
+				kfree(cdc);
+				goto err;
+			}
+		}
+
+		ist40xx_write_cmd(data, IST40XX_HIB_CMD,
+					(eHCOM_FW_HOLD << 16) | (IST40XX_DISABLE & 0xFFFF));
+		ist40xx_delay(20);
+
+		peak = 0;
+		for (h = 0; h < tsp->ch_num.tx; h++) {
+			for (w = (tsp->ch_num.rx - GROUP_CH_CNT); w < tsp->ch_num.rx; w++) {
+				idx = h * tsp->ch_num.rx + w;
+				diff = (cdc[idx] & 0xFFF) - ((cdc[idx] >> 16) & 0xFFF);
+				if (w == (tsp->ch_num.rx - GROUP_CH_CNT)) {
+					max_diff = diff;
+					min_diff = diff;
+				} else if (diff > max_diff) {
+					max_diff = diff;
+				} else if (diff < min_diff) {
+					min_diff = diff;
+				}
+			}
+			peak = max_diff - min_diff;
+			sum[h] += peak;
+
+			if (peak > max_peak)
+				max_peak = peak;
+		}
+	}
+
+	for (h = 0; h < tsp->ch_num.tx; h++)
+		result_sum += (sum[h] / FPCB_NOISE_FRAME_CNT);
+
+	data->fpcb_noise_max_sum = result_sum;
+
+	kfree(sum);
+	kfree(cdc);
+err:
+	data->ignore_delay = false;
+	input_info(true, &data->client->dev, "%s: result_sum %d max_peak %d\n", __func__, result_sum, max_peak);
+}
+
 static u16 node_value[IST40XX_MAX_NODE_NUM];
 static u16 self_node_value[IST40XX_MAX_SELF_NODE_NUM];
 static u16 prox_node_value[IST40XX_MAX_SELF_NODE_NUM];
@@ -3110,12 +3220,14 @@ void run_cm_test(void *dev_data)
 			idx = i * tsp->ch_num.rx + j;
 			next_idx = idx + tsp->ch_num.rx;
 
-			if (cmcs_buf->cm[idx])
-				tx_cm_gap_value[idx] = 100 *
-					(s16)abs(cmcs_buf->cm[idx] - cmcs_buf->cm[next_idx]) /
-					cmcs_buf->cm[idx];
-			else
+			if (cmcs_buf->cm[idx]) {
+				tx_cm_gap_value[idx] = 100 -
+					DIV_ROUND_CLOSEST(100 *
+					min(cmcs_buf->cm[idx], cmcs_buf->cm[next_idx]),
+					max(cmcs_buf->cm[idx], cmcs_buf->cm[next_idx]));
+			} else {
 				tx_cm_gap_value[idx] = 9999; /* the value is out of spec */
+			}
 		}
 	}
 	/*rx gap = abs(x-y)/x * 100   with x=Rx0,Tx0, y=Rx1,Tx0, ... */
@@ -3128,12 +3240,14 @@ void run_cm_test(void *dev_data)
 
 			next_idx = idx + 1;
 
-			if (cmcs_buf->cm[idx])
-				rx_cm_gap_value[idx] = 100 *
-					(s16)abs(cmcs_buf->cm[idx] - cmcs_buf->cm[next_idx]) /
-					cmcs_buf->cm[idx];
-			else
-				rx_cm_gap_value[idx] = 9999;
+			if (cmcs_buf->cm[idx]) {
+				rx_cm_gap_value[idx] = 100 -
+					DIV_ROUND_CLOSEST(100 *
+					min(cmcs_buf->cm[idx], cmcs_buf->cm[next_idx]),
+					max(cmcs_buf->cm[idx], cmcs_buf->cm[next_idx]));
+			} else {
+				rx_cm_gap_value[idx] = 9999; /* the value is out of spec */
+			}
 		}
 	}
 
@@ -3911,6 +4025,73 @@ out:
 	sec_cmd_send_event_to_user(sec, test, "RESULT=FAIL");
 }
 
+void run_cr_variance_read(void *dev_data)
+{
+	int ret = 0;
+	char buf[64] = { 0 };
+	struct sec_cmd_data *sec = (struct sec_cmd_data *)dev_data;
+	struct ist40xx_data *data = container_of(sec, struct ist40xx_data, sec);
+
+	sec_cmd_set_default_result(sec);
+	memset(cmcs_buf->cr_variance, 0, sizeof(cmcs_buf->cr_variance));
+
+	if (data->status.sys_mode != STATE_POWER_ON) {
+		input_err(true, &data->client->dev,
+				"%s: now sys_mode status is not STATE_POWER_ON!\n",
+				__func__);
+		goto out;
+	}
+
+	ret = ist40xx_get_cmcs_info(ts_cmcs_bin, ts_cmcs_bin_size);
+	if (ret) {
+		input_err(true, &data->client->dev, "%s: get cmcs info read fail!\n",
+				__func__);
+		goto out;
+	}
+
+	mutex_lock(&data->lock);
+
+	ret = ist40xx_cmcs_test(data, CMCS_FLAG_CRJIT2);
+	if (ret) {
+		mutex_unlock(&data->lock);
+		input_err(true, &data->client->dev, "%s: tsp cmcs test fail!\n",
+				__func__);
+
+		goto out;
+	}
+
+	mutex_unlock(&data->lock);
+
+	/* check spec (temp) */
+	if ((cmcs_buf->cr_variance2[0] > 10000) || (cmcs_buf->cr_variance2[1] > 10000) ||
+			(cmcs_buf->cr_variance2[2] > 10000)) {
+		input_info(true, &data->client->dev, "%s: spec fail\n", __func__);
+		goto out;
+	}
+
+	// Result : Variance, MaxSum, MaxPeak
+	snprintf(buf, sizeof(buf), "OK,%d,%d,%d", cmcs_buf->cr_variance2[0],
+			cmcs_buf->cr_variance2[1], cmcs_buf->cr_variance2[2]);
+
+	sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
+	sec->cmd_state = SEC_CMD_STATUS_OK;
+
+	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__, buf,
+			strnlen(buf, sizeof(buf)));
+
+    return;
+
+out:
+	snprintf(buf, sizeof(buf), "NG,%d,%d,%d", cmcs_buf->cr_variance2[0],
+			cmcs_buf->cr_variance2[1], cmcs_buf->cr_variance2[2]);
+
+	sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
+	sec->cmd_state = SEC_CMD_STATUS_FAIL;
+	
+	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__, buf,
+			strnlen(buf, sizeof(buf)));
+}
+
 int ist40xx_execute_force_calibration(struct i2c_client *client, int cal_mode)
 {
 	struct ist40xx_data *data = i2c_get_clientdata(client);
@@ -4009,6 +4190,12 @@ void run_force_calibration(void *dev_data)
 	sec_cmd_set_cmd_result(sec, buf, strnlen(buf, sizeof(buf)));
 	input_info(true, &data->client->dev, "%s: %s(%d)\n", __func__, buf,
 		   (int)strnlen(buf, sizeof(buf)));
+
+	if (data->dt_data->enable_fpcb_noise_test) {
+		ist40xx_delay(300);
+		get_fpcb_noise(sec);
+	}
+
 	return;
 
 out:
@@ -4806,6 +4993,9 @@ static void factory_cmd_result_all(void *dev_data)
 	run_cm_test(sec);
 	get_cm_maxgap_value(sec);
 	run_miscalibration(sec);
+	if (data->dt_data->enable_fpcb_noise_test) {
+		get_fpcb_noise(sec);
+	}
 
 	sec->cmd_all_factory_state = SEC_CMD_STATUS_OK;
 out:
@@ -4902,6 +5092,7 @@ struct sec_cmd sec_cmds[] = {
 	{SEC_CMD("get_mis_cal_info", get_mis_cal_info), },
 	{SEC_CMD("check_connection", check_connection),},
 	{SEC_CMD("run_prox_intensity_read_all", run_prox_intensity_read_all),},
+	{SEC_CMD("run_cr_variance_read", run_cr_variance_read),},
 #ifdef TCLM_CONCEPT
 	{SEC_CMD("set_external_factory", set_external_factory),},
 	{SEC_CMD("get_pat_information", get_pat_information),},

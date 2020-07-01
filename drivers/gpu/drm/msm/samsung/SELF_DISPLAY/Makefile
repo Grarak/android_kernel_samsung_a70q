@@ -8,6 +8,7 @@ ccflags-y += -Idrivers/gpu/drm/msm/sde
 ccflags-y += -Idrivers/gpu/drm/msm/samsung
 
 obj-y += self_display_FA7.o
+obj-y += self_display_FA9.o
 obj-y += self_display_HA8.o
 obj-y += self_display_HA9.o
 obj-y += self_display_XA0.o

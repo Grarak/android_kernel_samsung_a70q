@@ -21,15 +21,15 @@
 
 /* max size of each sensor's msg_buf */
 #define MSG_TYPE_SIZE_ZERO	0
-#define MSG_ACCEL_MAX	16
+#define MSG_ACCEL_MAX	128
 #define MSG_GYRO_MAX	16
-#define MSG_MAG_MAX	10
+#define MSG_MAG_MAX	13
 #define MSG_LIGHT_MAX	13
 #define MSG_PROX_MAX	12
 #define MSG_MOBEAM_MAX	1
 #define MSG_GYRO_TEMP_MAX	3
 #define MSG_PRESSURE_TEMP_MAX	1
-#define MSG_PRESSURE_MAX	3
+#define MSG_PRESSURE_MAX	20
 
 enum {
 	MSG_ACCEL,

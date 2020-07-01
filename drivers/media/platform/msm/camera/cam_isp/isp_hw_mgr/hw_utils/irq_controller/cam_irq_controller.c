@@ -701,7 +701,7 @@ irqreturn_t cam_irq_controller_handle_irq(int irq_num, void *priv)
 		cam_io_w_vfe_mb(controller->irq_status_arr[i],
 			controller->mem_base +
 			controller->irq_register_arr[i].clear_reg_offset);
-		CAM_DBG(CAM_IRQ_CTRL, "Read irq status%d (0x%x) = 0x%x", i,
+		trace_printk("Read irq status%d (0x%x) = 0x%x\n", i,
 			controller->irq_register_arr[i].status_reg_offset,
 			controller->irq_status_arr[i]);
 		for (j = 0; j < CAM_IRQ_PRIORITY_MAX; j++) {

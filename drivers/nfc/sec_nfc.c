@@ -824,7 +824,7 @@ out:
 	return ret;
 }
 
-static ssize_t sec_nfc_test_show(struct class *class,
+static ssize_t test_show(struct class *class,
 					struct class_attribute *attr, char *buf)
 {
 	char cmd[8] = {0x0, 0x1, 0x0, 0x0,}; /*bootloader fw check*/
@@ -864,15 +864,24 @@ exit:
 
 	return size;
 }
-static ssize_t sec_nfc_test_store(struct class *dev,
+static ssize_t test_store(struct class *dev,
 					struct class_attribute *attr,
 					const char *buf, size_t size)
 {
 	return size;
 }
 
-static CLASS_ATTR(test, 0664, sec_nfc_test_show, sec_nfc_test_store);
+static CLASS_ATTR_RW(test);
 #endif
+
+static ssize_t nfc_support_show(struct class *class,
+		struct class_attribute *attr, char *buf)
+{
+	NFC_LOG_INFO("\n");
+	return 0;
+}
+
+static CLASS_ATTR_RO(nfc_support);
 
 static int __sec_nfc_probe(struct device *dev)
 {
@@ -971,13 +980,21 @@ static int __sec_nfc_probe(struct device *dev)
 	g_nfc_info = info;
 	nfc_class = class_create(THIS_MODULE, "nfc_test");
 	if (IS_ERR(&nfc_class))
-		NFC_LOG_ERR("NFC: failed to create nfc class\n");
+		NFC_LOG_ERR("NFC: failed to create nfc_test class\n");
 	else {
 		ret = class_create_file(nfc_class, &class_attr_test);
 		if (ret)
 			NFC_LOG_ERR("NFC: failed to create attr_test\n");
 	}
 #endif
+	nfc_class = class_create(THIS_MODULE, "nfc");
+	if (IS_ERR(&nfc_class))
+		NFC_LOG_ERR("NFC: failed to create nfc class\n");
+	else {
+		ret = class_create_file(nfc_class, &class_attr_nfc_support);
+		if (ret)
+			NFC_LOG_ERR("NFC: failed to create attr_nfc_support\n");
+	}
 	NFC_LOG_INFO("success info: %pK, pdata %pK\n", info, pdata);
 
 	return 0;

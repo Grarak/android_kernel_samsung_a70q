@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2018 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -85,9 +85,6 @@ struct step_chg_info {
 	struct power_supply	*batt_psy;
 	struct power_supply	*bms_psy;
 	struct power_supply	*usb_psy;
-#if !defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
-	struct power_supply	*main_psy;
-#endif
 	struct power_supply	*dc_psy;
 	struct delayed_work	status_change_work;
 	struct delayed_work	get_config_work;
@@ -199,7 +196,7 @@ static bool is_input_present(struct step_chg_info *chip)
 
 int read_range_data_from_node(struct device_node *node,
 		const char *prop_str, struct range_data *ranges,
-		u32 max_threshold, u32 max_value)
+		int max_threshold, u32 max_value)
 {
 	int rc = 0, i, length, per_tuple_length, tuples;
 
@@ -495,6 +492,7 @@ static int get_val(struct range_data *range, int hysteresis, int current_index,
 		int *new_index, int *val)
 {
 #if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
+	struct sec_battery_info *battery = get_sec_battery();
 	union power_supply_propval pval = {0, };
 	int rc = 0;
 	int rechg_vbat_cool;
@@ -547,34 +545,34 @@ static int get_val(struct range_data *range, int hysteresis, int current_index,
 	 * newfound value. There is no hysterisis from out of range
 	 * to in range transition
 	 */
-	if (current_index == -EINVAL)
-		return 0;
+	if (current_index != -EINVAL) {
 
 	/*
 	 * Check for hysteresis if it in the neighbourhood
 	 * of our current index.
 	 */
-	if (*new_index == current_index + 1) {
-		if (threshold < range[*new_index].low_threshold + hysteresis) {
-			/*
-			 * Stay in the current index, threshold is not higher
-			 * by hysteresis amount
-			 */
-			*new_index = current_index;
-			*val = range[current_index].value;
-		}
-	} else if (*new_index == current_index - 1) {
+		if (*new_index == current_index + 1) {
+			if (threshold < range[*new_index].low_threshold + hysteresis) {
+				/*
+			 	 * Stay in the current index, threshold is not higher
+			 	 * by hysteresis amount
+				*/
+				*new_index = current_index;
+				*val = range[current_index].value;
+			}
+		} else if (*new_index == current_index - 1) {
 #if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
-		if (hysteresis == 0) 		/* Hysteresis 0 is only for step-chg */
-			hysteresis = 100000;
+			if (hysteresis == 0) 		/* Hysteresis 0 is only for step-chg */
+				hysteresis = 100000;
 #endif
-		if (threshold > range[*new_index].high_threshold - hysteresis) {
-			/*
-			 * stay in the current index, threshold is not lower
-			 * by hysteresis amount
-			 */
-			*new_index = current_index;
-			*val = range[current_index].value;
+			if (threshold > range[*new_index].high_threshold - hysteresis) {
+				/*
+				 * stay in the current index, threshold is not lower
+			 	 * by hysteresis amount
+			 	 */
+				*new_index = current_index;
+				*val = range[current_index].value;
+			}
 		}
 	}
 #if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
@@ -645,6 +643,11 @@ static int get_val(struct range_data *range, int hysteresis, int current_index,
 				POWER_SUPPLY_PROP_RECHARGE_VBAT, &pval);
 		if (rc < 0)
 			pr_err("Set recharge Vbat failed, rc=%d\n", rc);
+		if (!battery) {
+			pr_info("%s: return index = %d -> %d\n",
+				__func__, *new_index, current_index);
+			*new_index = current_index;
+		}
 	}
 #endif
 	return 0;
@@ -745,6 +748,7 @@ static int handle_step_chg_config(struct step_chg_info *chip)
 	}
 #endif
 	elapsed_us = ktime_us_delta(ktime_get(), chip->step_last_update_time);
+	/* skip processing, event too early */
 	if (elapsed_us < STEP_CHG_HYSTERISIS_DELAY_US)
 #if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 		return 0;
@@ -845,10 +849,12 @@ static int handle_step_chg_config(struct step_chg_info *chip)
 	if (!chip->fcc_votable)
 		return -EINVAL;
 
-	if (chip->taper_fcc)
+	if (chip->taper_fcc) {
 		taper_fcc_step_chg(chip, chip->step_index, pval.intval);
-	else
+	} else {
+		fcc_ua = chip->step_chg_config->fcc_cfg[chip->step_index].value;
 		vote(chip->fcc_votable, STEP_CHG_VOTER, true, fcc_ua);
+	}
 
 	pr_debug("%s = %d Step-FCC = %duA taper-fcc: %d\n",
 		chip->step_chg_config->param.prop_name, pval.intval,
@@ -858,11 +864,6 @@ static int handle_step_chg_config(struct step_chg_info *chip)
 update_time:
 	chip->step_last_update_time = ktime_get();
 	return 0;
-#if !defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
-reschedule:
-	/* reschedule 1000uS after the remaining time */
-	return (STEP_CHG_HYSTERISIS_DELAY_US - elapsed_us + 1000);
-#endif
 }
 
 #define JEITA_SUSPEND_HYST_UV		50000
@@ -893,12 +894,9 @@ static int handle_jeita(struct step_chg_info *chip)
 	}
 
 	elapsed_us = ktime_us_delta(ktime_get(), chip->jeita_last_update_time);
+	/* skip processing, event too early */
 	if (elapsed_us < STEP_CHG_HYSTERISIS_DELAY_US)
-#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 		return 0;
-#else
-		goto reschedule;
-#endif
 
 	if (chip->jeita_fcc_config->param.use_bms)
 		rc = power_supply_get_property(chip->bms_psy,
@@ -1005,21 +1003,7 @@ set_jeita_fv:
 #endif
 update_time:
 	chip->jeita_last_update_time = ktime_get();
-#if !defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
-	if (!chip->main_psy)
-		chip->main_psy = power_supply_get_by_name("main");
-	if (chip->main_psy)
-		power_supply_changed(chip->main_psy);
-#endif
-
 	return 0;
-
-#if !defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
-reschedule:
-	/* reschedule 1000uS after the remaining time */
-	return (STEP_CHG_HYSTERISIS_DELAY_US - elapsed_us + 1000);
-#endif
-
 }
 
 static int handle_battery_insertion(struct step_chg_info *chip)
@@ -1060,34 +1044,22 @@ static void status_change_work(struct work_struct *work)
 	struct step_chg_info *chip = container_of(work,
 			struct step_chg_info, status_change_work.work);
 	int rc = 0;
-#if !defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
-	int reschedule_us;
-	int reschedule_jeita_work_us = 0;
-	int reschedule_step_work_us = 0;
-#endif
 	union power_supply_propval prop = {0, };
 
 	if (!is_batt_available(chip) || !is_bms_available(chip))
 		goto exit_work;
 
 	handle_battery_insertion(chip);
-
-	/* skip elapsed_us debounce for handling battery temperature */
-	rc = handle_jeita(chip);
-#if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
-	if (rc < 0)
-#else
-	if (rc > 0)
-		reschedule_jeita_work_us = rc;
-	else if (rc < 0)
-#endif
-		pr_err("Couldn't handle sw jeita rc = %d\n", rc);
+	if (!is_input_present(chip)) {
+		chip->jeita_fcc_index = -EINVAL;
+	} else {
+		/* skip elapsed_us debounce for handling battery temperature */
+		rc = handle_jeita(chip);
+		if (rc < 0)
+			pr_err("Couldn't handle sw jeita rc = %d\n", rc);
+	}
 
 	rc = handle_step_chg_config(chip);
-#if !defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
-	if (rc > 0)
-		reschedule_step_work_us = rc;
-#endif
 	if (rc < 0)
 		pr_err("Couldn't handle step rc = %d\n", rc);
 
@@ -1102,16 +1074,6 @@ static void status_change_work(struct work_struct *work)
 						false, 0);
 		}
 	}
-#if !defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
-	reschedule_us = min(reschedule_jeita_work_us, reschedule_step_work_us);
-	if (reschedule_us == 0)
-		goto exit_work;
-	else
-		schedule_delayed_work(&chip->status_change_work,
-				usecs_to_jiffies(reschedule_us));
-	return;
-#endif
-
 exit_work:
 	__pm_relax(chip->step_chg_ws);
 }

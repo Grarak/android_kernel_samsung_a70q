@@ -457,8 +457,8 @@ static int cam_vfe_irq_top_half(uint32_t    evt_id,
 
 	handler_priv = th_payload->handler_priv;
 
-	CAM_DBG(CAM_ISP, "IRQ status_0 = %x", th_payload->evt_status_arr[0]);
-	CAM_DBG(CAM_ISP, "IRQ status_1 = %x", th_payload->evt_status_arr[1]);
+	CAM_QCLOGMINIMAL(CAM_ISP, "IRQ status_0 = %x", th_payload->evt_status_arr[0]);
+	CAM_QCLOGMINIMAL(CAM_ISP, "IRQ status_1 = %x", th_payload->evt_status_arr[1]);
 
 	rc  = cam_vfe_get_evt_payload(handler_priv->core_info, &evt_payload);
 	if (rc) {
@@ -469,6 +469,8 @@ static int cam_vfe_irq_top_half(uint32_t    evt_id,
 			th_payload->evt_status_arr[1]);
 		return rc;
 	}
+	trace_printk("core %d, IRQ status_0 = %x\n",handler_priv->core_index,
+		th_payload->evt_status_arr[0]);
 
 	core_info =  handler_priv->core_info;
 	cam_isp_hw_get_timestamp(&evt_payload->ts);
@@ -485,6 +487,7 @@ static int cam_vfe_irq_top_half(uint32_t    evt_id,
 			irq_reg_offset[i]);
 	}
 	CAM_DBG(CAM_ISP, "Violation status = %x", evt_payload->irq_reg_val[2]);
+	trace_printk("core %d, Violation status = %x\n", handler_priv->core_index, evt_payload->irq_reg_val[2]);
 
 	th_payload->evt_payload_priv = evt_payload;
 

@@ -669,7 +669,23 @@ void ss_set_copr_sum(struct samsung_display_driver_data *vdd, enum COPR_CD_INDEX
 	vdd->copr.copr_cd[idx].cur_t = ktime_get();
 	delta = ktime_ms_delta(vdd->copr.copr_cd[idx].cur_t, vdd->copr.copr_cd[idx].last_t);
 	vdd->copr.copr_cd[idx].total_t += delta;
-	vdd->copr.copr_cd[idx].cd_sum += (vdd->br.interpolation_cd * delta);
+	if (vdd->br.pac) {
+		vdd->copr.copr_cd[idx].cd_sum += (vdd->br.interpolation_cd * delta);
+		LCD_DEBUG("[%d ]cd(%d) delta (%lld) cd_sum (%lld) total_t (%lld)\n", idx,
+				vdd->br.interpolation_cd, delta, vdd->copr.copr_cd[idx].cd_sum, vdd->copr.copr_cd[idx].total_t);
+	} else {
+		if (vdd->br.gamma_mode2_support) {
+			vdd->copr.copr_cd[idx].cd_sum += (vdd->br.gamma_mode2_cd * delta);
+			LCD_INFO("gamma_mode2 [%d]cd(%d) delta (%lld) cd_sum (%lld) total_t (%lld)\n", idx,
+				vdd->br.gamma_mode2_cd, delta, vdd->copr.copr_cd[idx].cd_sum, vdd->copr.copr_cd[idx].total_t);
+		}
+		else {
+			vdd->copr.copr_cd[idx].cd_sum += (vdd->br.cd_level * delta);		
+			LCD_DEBUG("[%d ]cd(%d) delta (%lld) cd_sum (%lld) total_t (%lld)\n", idx,
+					vdd->br.cd_level, delta, vdd->copr.copr_cd[idx].cd_sum, vdd->copr.copr_cd[idx].total_t);
+		}
+	}
+
 	mutex_unlock(&vdd->copr.copr_val_lock);
 
 	LCD_DEBUG("[%d ]cd(%d) delta (%lld) cd_sum (%lld) total_t (%lld)\n", idx,

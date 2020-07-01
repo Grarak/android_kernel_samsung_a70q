@@ -357,7 +357,7 @@ static int32_t cam_sensor_i2c_modes_util(
 				rc);
 			return rc;
 		}
-#if defined(CONFIG_SEC_A90Q_PROJECT)
+#if defined(CONFIG_SEC_A90Q_PROJECT) || defined(CONFIG_SEC_A70S_PROJECT) || defined(CONFIG_SEC_A71_PROJECT)
 		if ((i2c_list->i2c_settings.size > 0)
 			&& (i2c_list->i2c_settings.reg_setting[0].reg_addr == STREAM_ON_ADDR_IMX586_S5K4HA || i2c_list->i2c_settings.reg_setting[0].reg_addr == STREAM_ON_ADDR_IMX316)
 			&& (i2c_list->i2c_settings.reg_setting[0].reg_data == 0x0)) {
@@ -370,7 +370,7 @@ static int32_t cam_sensor_i2c_modes_util(
 					CAMERA_SENSOR_I2C_TYPE_WORD, CAMERA_SENSOR_I2C_TYPE_BYTE);
 				CAM_DBG(CAM_SENSOR, "retry cnt : %d, Stream off, frame_cnt : %x", retry_cnt, frame_cnt);
 				if (frame_cnt != 0xFF)
-					usleep_range(2000, 3000);
+				usleep_range(2000, 3000);
 				retry_cnt--;
 			} while (frame_cnt != 0xFF && retry_cnt > 0);
 			CAM_INFO(CAM_SENSOR, "Stream off end retry_cnt = %d", retry_cnt);
@@ -459,6 +459,8 @@ int32_t cam_sensor_update_slave_info(struct cam_cmd_probe *probe_info,
 		probe_info->expected_data;
 	s_ctrl->sensordata->slave_info.sensor_id_mask =
 		probe_info->data_mask;
+	s_ctrl->sensordata->slave_info.version_id =
+		probe_info->version_id;
 	/* Userspace passes the pipeline delay in reserved field */
 	s_ctrl->pipeline_delay =
 		probe_info->reserved;
@@ -733,7 +735,7 @@ int cam_sensor_match_id(struct cam_sensor_ctrl_t *s_ctrl)
             chipid >>= 4;
         }
 #endif
-#if defined(CONFIG_SEC_A60Q_PROJECT)
+#if defined(CONFIG_SEC_A60Q_PROJECT) || defined(CONFIG_SEC_M40_PROJECT)
 	usleep_range(200, 300);
 #endif
 	CAM_ERR(CAM_SENSOR, "read id: 0x%x expected id 0x%x:",
@@ -757,6 +759,13 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 #if defined(CONFIG_USE_CAMERA_HW_BIG_DATA)
 	struct cam_hw_param *hw_param = NULL;
 #endif
+
+#if defined(CONFIG_SEC_A71_PROJECT) || defined(CONFIG_SEC_A70S_PROJECT)
+	uint32_t version_id = 0;
+	uint16_t sensor_id = 0;
+	uint16_t expected_version_id = 0;
+#endif
+
 
 	if (!s_ctrl || !arg) {
 		CAM_ERR(CAM_SENSOR, "s_ctrl is NULL");
@@ -828,6 +837,37 @@ int32_t cam_sensor_driver_cmd(struct cam_sensor_ctrl_t *s_ctrl,
 			CAM_ERR(CAM_SENSOR, "power up failed");
 			goto free_power_settings;
 		}
+
+#if defined(CONFIG_SEC_A71_PROJECT) || defined(CONFIG_SEC_A70S_PROJECT)
+		if (s_ctrl->soc_info.index == 0) { // check Rear GW1
+			sensor_id = s_ctrl->sensordata->slave_info.sensor_id;
+			expected_version_id = s_ctrl->sensordata->slave_info.version_id;
+			rc = camera_io_dev_read(
+				&(s_ctrl->io_master_info),
+				0x0002, &version_id,
+				CAMERA_SENSOR_I2C_TYPE_WORD,
+				CAMERA_SENSOR_I2C_TYPE_WORD);
+			version_id>>=8;
+			if (rc < 0) {
+				CAM_ERR(CAM_SENSOR, "Read version id fail %d", rc);
+			} else {
+				CAM_INFO(CAM_SENSOR,
+					"Read version id 0x%x,expected_version_id 0x%x", version_id, expected_version_id);
+					if (version_id == expected_version_id && version_id == 0XA0)
+						CAM_INFO(CAM_SENSOR, "Found A0 Sensor");
+					else if (version_id == expected_version_id && version_id == 0XA1)
+						CAM_INFO(CAM_SENSOR, "Found A1 Sensor");
+					else if (version_id == expected_version_id && version_id == 0XA2)
+						CAM_INFO(CAM_SENSOR, "Found A2 Sensor");
+					else {
+						CAM_INFO(CAM_SENSOR, "Not matched");
+						rc = -EINVAL;
+						cam_sensor_power_down(s_ctrl);
+						goto release_mutex;
+				}
+			}
+		}
+#endif
 
 		/* Match sensor ID */
 		rc = cam_sensor_match_id(s_ctrl);
@@ -1484,7 +1524,9 @@ int cam_sensor_power_up(struct cam_sensor_ctrl_t *s_ctrl)
 		CAM_ERR(CAM_SENSOR, "power up the core is failed:%d", rc);
 		return rc;
 	}
-
+#if defined(CONFIG_MCLK_I2C_DELAY)
+    msleep(5); //Add delay for MCLK - I2C TIMING SPEC OUT issue in A71
+#endif
 	rc = camera_io_init(&(s_ctrl->io_master_info));
 	if (rc < 0)
 		CAM_ERR(CAM_SENSOR, "cci_init failed: rc: %d", rc);
@@ -1646,7 +1688,17 @@ int cam_sensor_power_down(struct cam_sensor_ctrl_t *s_ctrl)
 		CAM_ERR(CAM_SENSOR, "failed: power_info %pK", power_info);
 		return -EINVAL;
 	}
+
+// Add 200us delay to meet the power off specification iT3 (End of MIPI transfer to MCLK disable and I2C shutdown)
+#if defined(CONFIG_MCLK_I2C_DELAY)
+    usleep_range(200, 300);
+#endif
 	rc = cam_sensor_util_power_down(power_info, soc_info);
+	
+#if defined(CONFIG_MCLK_I2C_DELAY_FOR_CAM_POWERDOWN)
+    msleep(6);
+#endif
+
 	if (rc < 0) {
 		CAM_ERR(CAM_SENSOR, "power down the core is failed:%d", rc);
 		return rc;

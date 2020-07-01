@@ -256,13 +256,22 @@ static int process_received_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 #ifdef CONFIG_GP2AP110S_FACTORY
 		prox_gp2ap110s_init_settings(data);
 #endif
+#ifndef CONFIG_SUPPORT_PROX_DUALIZATION
 		prox_factory_init_work();
+#endif
 		return 0;
 	}
 
 	memcpy(data->msg_buf[sensor_type],
 		(int32_t *)NLMSG_DATA(nlh),
 		nlh->nlmsg_len - (int32_t)sizeof(struct nlmsghdr));
+#ifdef CONFIG_SUPPORT_PROX_DUALIZATION
+	if (sensor_type == MSG_PROX && msg_type == MSG_TYPE_ST_SHOW_DATA)
+	{
+		prox_set_name_vendor(data->msg_buf[MSG_PROX][0]);
+		prox_factory_init_work();
+	}
+#endif
 	data->ready_flag[msg_type] |= 1 << sensor_type;
 
 	return 0;

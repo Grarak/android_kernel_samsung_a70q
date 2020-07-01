@@ -60,6 +60,8 @@ char CCIC_NOTI_ID_Print[CCIC_NOTI_ID_NUM][20] = {
 	{"ID_POWER_STATUS"},
 	{"ID_WATER"},
 	{"ID_VCONN"},
+	{"ID_OTG"},
+	{"ID_TA"},
 	{"ID_DP_CONNECT"},
 	{"ID_DP_HPD"},
 	{"ID_DP_LINK_CONF"},

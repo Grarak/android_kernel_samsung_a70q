@@ -60,6 +60,8 @@
 #define REG_LED_CTRL_ON		0x60
 #define REG_LED_CTRL_OFF	0x70
 #define REG_STOP_MODE		0x80
+#define REG_GRIP_ALWAYS_ACTIVE		0x20
+#define GRIP_ALWAYS_ACTIVE_READY	0x21
 
 /* command */
 #define CMD_ON			0x20
@@ -72,8 +74,9 @@
 #define FLASH_MODE		0x18
 
 #define TK_FW_PATH_BIN 		"abov/abov_noble.fw"
-#define TK_FW_PATH_SDCARD 	"/sdcard/Firmware/Grip/abov_fw.bin"
+#define TK_FW_PATH_SDCARD	"/sdcard/Firmware/Grip/abov_fw.bin"
 #define HALL_PATH		"/sys/class/sec/sec_key/hall_detect"
+#define HALLIC_CERT_PATH	"/sys/class/sec/sec_key/certify_hall_detect"
 #define HALL_CLOSE_STATE        1
 
 #define I2C_M_WR 0		/* for i2c */

@@ -1,5 +1,5 @@
 ifeq ($(CONFIG_BATTERY_SAMSUNG_MHS), y)
-obj-$(CONFIG_BATTERY_SAMSUNG)	+= sec_battery_mhs.o
+obj-$(CONFIG_BATTERY_SAMSUNG)	+= sec_battery_mhs.o 
 else
 obj-$(CONFIG_BATTERY_SAMSUNG)	+= sec_battery.o
 endif
@@ -9,11 +9,12 @@ obj-$(CONFIG_OF)				+= sec_adc.o
 obj-$(CONFIG_MULTI_CHARGING)	+= sec_multi_charger.o
 obj-$(CONFIG_DUAL_BATTERY)	+= sec_dual_battery.o
 obj-$(CONFIG_STEP_CHARGING)	+= sec_step_charging.o
-obj-$(CONFIG_DIRECT_CHARGING)	+= sec_direct_charger.o
 obj-$(CONFIG_BATTERY_CISD)	+= sec_cisd.o
+obj-$(CONFIG_WIRELESS_AUTH)	+= sec_battery_misc.o
+obj-$(CONFIG_DIRECT_CHARGING)	+= sec_direct_charger.o
 obj-$(CONFIG_UPDATE_BATTERY_DATA)	+= sec_battery_data.o
 obj-$(CONFIG_BATTERY_NOTIFIER)	+= battery_notifier.o
-obj-$(CONFIG_CCIC_NOTIFIER)		+= sec_pd.o
+obj-$(CONFIG_CCIC_NOTIFIER)     += sec_pd.o
 
 obj-$(CONFIG_FUELGAUGE_MAX17042)	+= max17042_fuelgauge.o sec_fuelgauge.o
 obj-$(CONFIG_FUELGAUGE_MAX17048)	+= max17048_fuelgauge.o sec_fuelgauge.o
@@ -27,8 +28,12 @@ obj-$(CONFIG_FUELGAUGE_STC3117)         += stc3117_fuelgauge.o sec_fuelgauge.o
 obj-$(CONFIG_FUELGAUGE_RT5033)		+= rt5033_fuelgauge.o
 obj-$(CONFIG_FUELGAUGE_S2MU003)		+= s2mu003_fuelgauge.o
 obj-$(CONFIG_FUELGAUGE_SM5703)		+= sm5703_fuelgauge.o
+obj-$(CONFIG_FUELGAUGE_SM5703)		+= sm5703_fuelgauge.o
+obj-$(CONFIG_FUELGAUGE_SM5705)		+= sm5705_fuelgauge.o
 obj-$(CONFIG_FUELGAUGE_SM5713)		+= sm5713_fuelgauge.o
 obj-$(CONFIG_FUELGAUGE_SM5720)		+= sm5720_fuelgauge.o
+obj-$(CONFIG_FUELGAUGE_S2MU106)		+= s2mu106_fuelgauge.o
+obj-$(CONFIG_FUELGAUGE_S2MU107)		+= s2mu107_fuelgauge.o
 obj-$(CONFIG_FUELGAUGE_MAX77705)	+= max77705_fuelgauge.o
 
 obj-$(CONFIG_CHARGER_MAX8903)	+= max8903_charger.o
@@ -52,17 +57,25 @@ obj-$(CONFIG_CHARGER_MAX77888)  += max77888_charger.o
 obj-$(CONFIG_CHARGER_SM5701)    += sm5701_charger.o
 obj-$(CONFIG_CHARGER_RT5033)    += rt5033_charger.o
 obj-$(CONFIG_CHARGER_SM5703)    += sm5703_charger.o
+obj-$(CONFIG_CHARGER_SM5705)	+= sm5705_charger.o sm5705_charger_oper.o
 obj-$(CONFIG_CHARGER_SM5713)    += sm5713_charger.o sm5713_charger_oper.o
-obj-$(CONFIG_CHARGER_PCA9468)	+= pca9468_charger.o
 obj-$(CONFIG_CHARGER_SM5720)    += sm5720_charger.o sm5720_charger_oper.o
+obj-$(CONFIG_CHARGER_PCA9468)	+= pca9468_charger.o
 obj-$(CONFIG_CHARGER_MAX77705)	+= max77705_charger.o
 obj-$(CONFIG_CHARGER_S2MU003)   += s2mu003_charger.o
 obj-$(CONFIG_CHARGER_SM5418)    += sm5418_charger.o
 obj-$(CONFIG_CHARGER_DA9155)    += da9155_charger.o
 obj-$(CONFIG_CHARGER_SMB1351)   += smb1351_charger.o
+obj-$(CONFIG_CHARGER_S2MU106)   += s2mu106_charger.o
+obj-$(CONFIG_CHARGER_S2MU107)   += s2mu107_switching_charger.o
+obj-$(CONFIG_CHARGER_S2MU107_DIRECT)   += s2mu107_direct_charger.o
+
+
 
 obj-$(CONFIG_WIRELESS_CHARGER_BQ51221)	+= bq51221_charger.o
 obj-$(CONFIG_WIRELESS_CHARGER_P9220)	+= p9220_charger.o
 obj-$(CONFIG_WIRELESS_CHARGER_MFC)	+= mfc_charger.o
 
 obj-$(CONFIG_SWITCHING_S2ASL01)   += s2asl01_switching.o
+obj-$(CONFIG_PM_S2MU106)  		+= s2mu106_pmeter.o
+obj-$(CONFIG_PM_S2MU107)  		+= s2mu107_pmeter.o

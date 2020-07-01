@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -98,7 +98,7 @@ static int mem_share_configure_ramdump(int client)
 		clnt = "DIAG";
 		break;
 	default:
-		pr_err("memshare: no memshare clients registered\n");
+		dev_err(memsh_child->dev, "memshare: no memshare clients registered\n");
 		return -EINVAL;
 	}
 
@@ -109,12 +109,13 @@ static int mem_share_configure_ramdump(int client)
 			create_ramdump_device(client_name,
 				memshare_dev[client]);
 	} else {
-		pr_err("memshare:%s: invalid memshare device\n", __func__);
+		dev_err(memsh_child->dev,
+			"memshare: invalid memshare device for creating ramdump device\n");
 		return -ENODEV;
 	}
 	if (IS_ERR_OR_NULL(memshare_ramdump_dev[client])) {
-		pr_err("memshare: %s: Unable to create memshare ramdump device\n",
-				__func__);
+		dev_err(memsh_child->dev,
+			"memshare: unable to create memshare ramdump device\n");
 		memshare_ramdump_dev[client] = NULL;
 		return -ENOMEM;
 	}
@@ -316,7 +317,9 @@ static int check_client(int client_id, int proc, int request)
 		}
 	}
 	if ((found == DHMS_MEM_CLIENT_INVALID) && !request) {
-		pr_debug("memshare: No registered client, adding a new client\n");
+		dev_dbg(memsh_child->dev,
+			"memshare: No registered client for the client_id: %d, adding a new client\n",
+			client_id);
 		/* Add a new client */
 		for (i = 0; i < MAX_CLIENTS; i++) {
 			if (memblock[i].client_id == DHMS_MEM_CLIENT_INVALID) {
@@ -329,8 +332,9 @@ static int check_client(int client_id, int proc, int request)
 				if (!memblock[i].file_created) {
 					rc = mem_share_configure_ramdump(i);
 					if (rc)
-						pr_err("memshare: %s, Cannot create ramdump for client: %d\n",
-							__func__, client_id);
+						dev_err(memsh_child->dev,
+							"memshare_check_client: cannot create ramdump for client with id: %d\n",
+							client_id);
 					else
 						memblock[i].file_created = 1;
 				}
@@ -428,12 +432,14 @@ static int mem_share_do_ramdump(void)
 			client_name = "DIAG";
 			break;
 		default:
-			pr_err("memshare: no memshare clients registered\n");
+			dev_err(memsh_child->dev,
+				"memshare: no memshare clients registered for client_id: %d\n",
+				i);
 			return -EINVAL;
 		}
 
 		if (!memblock[i].allotted) {
-			pr_err("memshare:%s memblock is not allotted\n",
+			dev_err(memsh_child->dev, "memshare: %s: memblock is not allotted\n",
 			client_name);
 			continue;
 		}
@@ -441,8 +447,9 @@ static int mem_share_do_ramdump(void)
 		if (memblock[i].hyp_mapping &&
 			memblock[i].peripheral ==
 			DHMS_MEM_PROC_MPSS_V01) {
-			pr_debug("memshare: hypervisor unmapping  for client id: %d\n",
-				memblock[i].client_id);
+			dev_dbg(memsh_child->dev,
+				"memshare: %s: hypervisor unmapping for client before elf dump\n",
+				client_name);
 			if (memblock[i].alloc_request)
 				continue;
 			ret = hyp_assign_phys(
@@ -458,8 +465,9 @@ static int mem_share_do_ramdump(void)
 				 * earlier but during unmap
 				 * it lead to failure.
 				 */
-				pr_err("memshare: %s, failed to map the region to APPS\n",
-					__func__);
+				dev_err(memsh_child->dev,
+					"memshare: %s: failed to map the memory region to APPS\n",
+					client_name);
 			} else {
 				memblock[i].hyp_mapping = 0;
 			}
@@ -474,14 +482,16 @@ static int mem_share_do_ramdump(void)
 		ramdump_segments_tmp[0].size = memblock[i].size;
 		ramdump_segments_tmp[0].address = memblock[i].phy_addr;
 
-		pr_debug("memshare: %s:%s client:id: %d:size = %d\n",
-		__func__, client_name, i, memblock[i].size);
+		dev_dbg(memsh_child->dev, "memshare: %s: Begin elf dump for size = %d\n",
+			client_name, memblock[i].size);
 
 		ret = do_elf_ramdump(memshare_ramdump_dev[i],
 					ramdump_segments_tmp, 1);
 		kfree(ramdump_segments_tmp);
 		if (ret < 0) {
-			pr_err("memshare: Unable to dump: %d\n", ret);
+			dev_err(memsh_child->dev,
+				"memshare: %s: Unable to elf dump with failure: %d\n",
+				client_name, ret);
 			return ret;
 		}
 	}
@@ -520,23 +530,22 @@ static int modem_notifier_cb(struct notifier_block *this, unsigned long code,
 		}
 
 		if (notifdata->enable_ramdump && ramdump_event) {
-			pr_info("memshare: %s, Ramdump collection is enabled\n",
-					__func__);
+			dev_info(memsh_child->dev, "memshare: Ramdump collection is enabled\n");
 			ret = mem_share_do_ramdump();
 			if (ret)
-				pr_err("memshare: Ramdump collection failed\n");
+				dev_err(memsh_child->dev, "memshare: Ramdump collection failed\n");
 			ramdump_event = 0;
 		}
 		break;
 
 	case SUBSYS_AFTER_POWERUP:
-		pr_debug("memshare: Modem has booted up\n");
+		dev_dbg(memsh_child->dev, "memshare: Modem has booted up\n");
 		for (i = 0; i < MAX_CLIENTS; i++) {
 			size = memblock[i].size;
 			if (memblock[i].free_memory > 0 &&
 					bootup_request >= 2) {
 				memblock[i].free_memory -= 1;
-				pr_debug("memshare: free_memory count: %d for client id: %d\n",
+				dev_dbg(memsh_child->dev, "memshare: free_memory count: %d for client id: %d\n",
 					memblock[i].free_memory,
 					memblock[i].client_id);
 			}
@@ -548,7 +557,8 @@ static int modem_notifier_cb(struct notifier_block *this, unsigned long code,
 				!memblock[i].client_request &&
 				memblock[i].allotted &&
 				!memblock[i].alloc_request) {
-				pr_debug("memshare: hypervisor unmapping  for client id: %d\n",
+				dev_info(memsh_child->dev,
+					"memshare: hypervisor unmapping for allocated memory with client id: %d\n",
 					memblock[i].client_id);
 				if (memblock[i].hyp_mapping) {
 					ret = hyp_assign_phys(
@@ -565,8 +575,9 @@ static int modem_notifier_cb(struct notifier_block *this, unsigned long code,
 						 * earlier but during unmap
 						 * it lead to failure.
 						 */
-						pr_err("memshare: %s, failed to unmap the region\n",
-							__func__);
+						dev_err(memsh_child->dev,
+							"memshare: failed to hypervisor unmap the memory region for client id: %d\n",
+							memblock[i].client_id);
 					} else {
 						memblock[i].hyp_mapping = 0;
 					}
@@ -619,7 +630,8 @@ static void shared_hyp_mapping(int client_id)
 				PERM_READ|PERM_WRITE};
 
 	if (client_id == DHMS_MEM_CLIENT_INVALID) {
-		pr_err("memshare: %s, Invalid Client\n", __func__);
+		dev_err(memsh_child->dev,
+			"memshare: hypervisor mapping failure for invalid client\n");
 		return;
 	}
 
@@ -629,7 +641,7 @@ static void shared_hyp_mapping(int client_id)
 			dest_perms, 2);
 
 	if (ret != 0) {
-		pr_err("memshare: hyp_assign_phys failed size=%u err=%d\n",
+		dev_err(memsh_child->dev, "memshare: hyp_assign_phys failed size=%u err=%d\n",
 				memblock[client_id].size, ret);
 		return;
 	}
@@ -647,8 +659,9 @@ static void handle_alloc_generic_req(struct qmi_handle *handle,
 
 	mutex_lock(&memsh_drv->mem_share);
 	alloc_req = (struct mem_alloc_generic_req_msg_v01 *)decoded_msg;
-	pr_debug("memshare: alloc request client id: %d proc _id: %d\n",
-			alloc_req->client_id, alloc_req->proc_id);
+	dev_info(memsh_child->dev,
+		"memshare_alloc: memory alloc request received for client id: %d, proc_id: %d, request size: %d\n",
+		alloc_req->client_id, alloc_req->proc_id, alloc_req->num_bytes);
 	alloc_resp = kzalloc(sizeof(*alloc_resp),
 					GFP_KERNEL);
 	if (!alloc_resp) {
@@ -661,9 +674,9 @@ static void handle_alloc_generic_req(struct qmi_handle *handle,
 								CHECK);
 
 	if (client_id >= MAX_CLIENTS) {
-		pr_err("memshare: %s client not found, requested client: %d, proc_id: %d\n",
-				__func__, alloc_req->client_id,
-				alloc_req->proc_id);
+		dev_err(memsh_child->dev,
+			"memshare_alloc: client not found, requested client: %d, proc_id: %d\n",
+			alloc_req->client_id, alloc_req->proc_id);
 		kfree(alloc_resp);
 		alloc_resp = NULL;
 		mutex_unlock(&memsh_drv->mem_share);
@@ -678,8 +691,9 @@ static void handle_alloc_generic_req(struct qmi_handle *handle,
 		rc = memshare_alloc(memsh_drv->dev, size,
 					&memblock[client_id]);
 		if (rc) {
-			pr_err("memshare: %s,Unable to allocate memory for requested client\n",
-							__func__);
+			dev_err(memsh_child->dev,
+				"memshare_alloc: unable to allocate memory of size: %d for requested client\n",
+				size);
 			resp = 1;
 		}
 	} else {
@@ -699,9 +713,9 @@ static void handle_alloc_generic_req(struct qmi_handle *handle,
 				alloc_req->num_bytes, memblock[client_id].virtual_addr);
 #endif
 	}
-	pr_debug("memshare: In %s, free memory count for client id: %d = %d",
-		__func__, memblock[client_id].client_id,
-		memblock[client_id].free_memory);
+		dev_dbg(memsh_child->dev,
+		"memshare_alloc: free memory count for client id: %d = %d\n",
+		memblock[client_id].client_id, memblock[client_id].free_memory);
 
 	memblock[client_id].sequence_id = alloc_req->sequence_id;
 	memblock[client_id].alloc_request = 1;
@@ -715,17 +729,20 @@ static void handle_alloc_generic_req(struct qmi_handle *handle,
 		memblock[client_id].allotted)
 		shared_hyp_mapping(client_id);
 	mutex_unlock(&memsh_drv->mem_share);
-	pr_info("memshare: client-id:%d alloc_resp.num_bytes :%d, alloc_resp.resp.result :%lx\n",
-			  client_id, alloc_resp->dhms_mem_alloc_addr_info[0].num_bytes,
-			  (unsigned long int)alloc_resp->resp.result);
+	dev_info(memsh_child->dev,
+		"memshare_alloc: client_id: %d, alloc_resp.num_bytes: %d, alloc_resp.resp.result: %lx\n",
+		alloc_req->client_id,
+		alloc_resp->dhms_mem_alloc_addr_info[0].num_bytes,
+		(unsigned long int)alloc_resp->resp.result);
 
 	rc = qmi_send_response(mem_share_svc_handle, sq, txn,
 			  MEM_ALLOC_GENERIC_RESP_MSG_V01,
 			  sizeof(struct mem_alloc_generic_resp_msg_v01),
 			  mem_alloc_generic_resp_msg_data_v01_ei, alloc_resp);
 	if (rc < 0)
-		pr_err("memshare: %s, Error sending the alloc response: %d\n",
-							__func__, rc);
+		dev_err(memsh_child->dev,
+		"memshare_alloc: Error sending the alloc response: %d\n",
+		rc);
 
 	kfree(alloc_resp);
 	alloc_resp = NULL;
@@ -745,22 +762,22 @@ static void handle_free_generic_req(struct qmi_handle *handle,
 
 	mutex_lock(&memsh_drv->mem_free);
 	free_req = (struct mem_free_generic_req_msg_v01 *)decoded_msg;
-	pr_debug("memshare: %s: Received Free Request\n", __func__);
 	memset(&free_resp, 0, sizeof(free_resp));
 	free_resp.resp.error = QMI_ERR_INTERNAL_V01;
 	free_resp.resp.result = QMI_RESULT_FAILURE_V01;
-	pr_debug("memshare: Client id: %d proc id: %d\n", free_req->client_id,
-				free_req->proc_id);
+	dev_info(memsh_child->dev,
+		"memshare_free: handling memory free request with client id: %d, proc_id: %d\n",
+		free_req->client_id, free_req->proc_id);
 	client_id = check_client(free_req->client_id, free_req->proc_id, FREE);
 	if (client_id >= MAX_CLIENTS) {
-		pr_err("memshare: %s, Invalid client request to free memory\n",
-					__func__);
+		dev_err(memsh_child->dev, "memshare_free: invalid client request to free memory\n");
 		flag = 1;
 	} else if (!memblock[client_id].guarantee &&
 				!memblock[client_id].client_request &&
 				memblock[client_id].allotted) {
-		pr_debug("memshare: %s:client_id:%d - size: %d",
-				__func__, client_id, memblock[client_id].size);
+		dev_dbg(memsh_child->dev,
+			"memshare_free: hypervisor unmapping for client_id:%d - size: %d\n",
+			client_id, memblock[client_id].size);
 		ret = hyp_assign_phys(memblock[client_id].phy_addr,
 				memblock[client_id].size, source_vmlist, 1,
 				dest_vmids, dest_perms, 1);
@@ -769,8 +786,9 @@ static void handle_free_generic_req(struct qmi_handle *handle,
 		 * This is an error case as hyp mapping was successful
 		 * earlier but during unmap it lead to failure.
 		 */
-			pr_err("memshare: %s, failed to unmap the region for client id:%d\n",
-				__func__, client_id);
+			dev_err(memsh_child->dev,
+				"memshare_free: failed to unmap the region for client id:%d\n",
+				client_id);
 		}
 		size = memblock[client_id].size;
 		if (memblock[client_id].guard_band) {
@@ -787,8 +805,9 @@ static void handle_free_generic_req(struct qmi_handle *handle,
 			attrs);
 		free_client(client_id);
 	} else {
-		pr_err("memshare: %s, Request came for a guaranteed client (client_id: %d) cannot free up the memory\n",
-						__func__, client_id);
+		dev_err(memsh_child->dev,
+			"memshare_free: cannot free the memory for a guaranteed client (client_id: %d)\n",
+			client_id);
 	}
 
 	if (flag) {
@@ -808,11 +827,11 @@ static void handle_free_generic_req(struct qmi_handle *handle,
 	mutex_unlock(&memsh_drv->mem_free);
 	rc = qmi_send_response(mem_share_svc_handle, sq, txn,
 			  MEM_FREE_GENERIC_RESP_MSG_V01,
-			  sizeof(struct mem_free_generic_resp_msg_v01),
+			  MEM_FREE_REQ_MAX_MSG_LEN_V01,
 			  mem_free_generic_resp_msg_data_v01_ei, &free_resp);
 	if (rc < 0)
-		pr_err("memshare: %s, Error sending the free response: %d\n",
-					__func__, rc);
+		dev_err(memsh_child->dev,
+		"memshare_free: error sending the free response: %d\n", rc);
 
 	return;
 }
@@ -832,15 +851,16 @@ static void handle_query_size_req(struct qmi_handle *handle,
 		mutex_unlock(&memsh_drv->mem_share);
 		return;
 	}
-	pr_debug("memshare: query request client id: %d proc _id: %d\n",
+	dev_dbg(memsh_child->dev,
+		"memshare_query: query on availalbe memory size for client id: %d, proc_id: %d\n",
 		query_req->client_id, query_req->proc_id);
 	client_id = check_client(query_req->client_id, query_req->proc_id,
 								CHECK);
 
 	if (client_id >= MAX_CLIENTS) {
-		pr_err("memshare: %s client not found, requested client: %d, proc_id: %d\n",
-				__func__, query_req->client_id,
-				query_req->proc_id);
+		dev_err(memsh_child->dev,
+			"memshare_query: client not found, requested client: %d, proc_id: %d\n",
+			query_req->client_id, query_req->proc_id);
 		kfree(query_resp);
 		query_resp = NULL;
 		mutex_unlock(&memsh_drv->mem_share);
@@ -858,16 +878,17 @@ static void handle_query_size_req(struct qmi_handle *handle,
 	query_resp->resp.error = QMI_ERR_NONE_V01;
 	mutex_unlock(&memsh_drv->mem_share);
 
-	pr_debug("memshare: query_resp.size :%d, query_resp.resp.result :%lx\n",
-			  query_resp->size,
-			  (unsigned long int)query_resp->resp.result);
+	dev_info(memsh_child->dev,
+		"memshare_query: client_id : %d, query_resp.size :%d, query_resp.resp.result :%lx\n",
+		query_req->client_id, query_resp->size,
+		(unsigned long int)query_resp->resp.result);
 	rc = qmi_send_response(mem_share_svc_handle, sq, txn,
 			  MEM_QUERY_SIZE_RESP_MSG_V01,
 			  MEM_QUERY_MAX_MSG_LEN_V01,
 			  mem_query_size_resp_msg_data_v01_ei, query_resp);
 	if (rc < 0)
-		pr_err("memshare: %s, Error sending the query response: %d\n",
-							__func__, rc);
+		dev_err(memsh_child->dev,
+		"memshare_query: Error sending the query response: %d\n", rc);
 
 	kfree(query_resp);
 	query_resp = NULL;
@@ -912,11 +933,12 @@ int memshare_alloc(struct device *dev,
 					unsigned int block_size,
 					struct mem_blocks *pblk)
 {
-	pr_debug("memshare: %s", __func__);
+	dev_dbg(memsh_child->dev,
+		"memshare: allocation request for size: %d", block_size);
 
 	if (!pblk) {
-		pr_err("memshare: %s: Failed memory block allocation\n",
-			__func__);
+		dev_err(memsh_child->dev,
+			"memshare: Failed memory block allocation\n");
 		return -ENOMEM;
 	}
 
@@ -949,8 +971,8 @@ static void memshare_init_worker(struct work_struct *work)
 		sizeof(struct qmi_elem_info),
 		&server_ops, qmi_memshare_handlers);
 	if (rc < 0) {
-		pr_err("memshare: %s: Creating mem_share_svc qmi handle failed\n",
-			__func__);
+		dev_err(memsh_child->dev,
+			"memshare: Creating mem_share_svc qmi handle failed\n");
 		kfree(mem_share_svc_handle);
 		destroy_workqueue(mem_share_svc_workqueue);
 		return;
@@ -958,14 +980,14 @@ static void memshare_init_worker(struct work_struct *work)
 	rc = qmi_add_server(mem_share_svc_handle, MEM_SHARE_SERVICE_SVC_ID,
 		MEM_SHARE_SERVICE_VERS, MEM_SHARE_SERVICE_INS_ID);
 	if (rc < 0) {
-		pr_err("memshare: %s: Registering mem share svc failed %d\n",
-			__func__, rc);
+		dev_err(memsh_child->dev,
+			"memshare: Registering mem share svc failed %d\n", rc);
 		qmi_handle_release(mem_share_svc_handle);
 		kfree(mem_share_svc_handle);
 		destroy_workqueue(mem_share_svc_workqueue);
 		return;
 	}
-	pr_debug("memshare: memshare_init successful\n");
+	dev_dbg(memsh_child->dev, "memshare: memshare_init successful\n");
 }
 
 static int memshare_child_probe(struct platform_device *pdev)
@@ -992,16 +1014,16 @@ static int memshare_child_probe(struct platform_device *pdev)
 	rc = of_property_read_u32(pdev->dev.of_node, "qcom,peripheral-size",
 						&size);
 	if (rc) {
-		pr_err("memshare: %s, Error reading size of clients, rc: %d\n",
-				__func__, rc);
+		dev_err(memsh_child->dev, "memshare: Error reading size of clients, rc: %d\n",
+				rc);
 		return rc;
 	}
 
 	rc = of_property_read_u32(pdev->dev.of_node, "qcom,client-id",
 						&client_id);
 	if (rc) {
-		pr_err("memshare: %s, Error reading client id, rc: %d\n",
-				__func__, rc);
+		dev_err(memsh_child->dev, "memshare: Error reading client id, rc: %d\n",
+				rc);
 		return rc;
 	}
 
@@ -1020,8 +1042,8 @@ static int memshare_child_probe(struct platform_device *pdev)
 	rc = of_property_read_string(pdev->dev.of_node, "label",
 						&name);
 	if (rc) {
-		pr_err("memshare: %s, Error reading peripheral info for client, rc: %d\n",
-					__func__, rc);
+		dev_err(memsh_child->dev, "memshare: Error reading peripheral info for client, rc: %d\n",
+					rc);
 		return rc;
 	}
 
@@ -1041,8 +1063,7 @@ static int memshare_child_probe(struct platform_device *pdev)
 
 				size += reserved_size;
 			} else if (!(reserve_mem_region & RESERVE_MEM_LEVEL2_MASK)) {
-				pr_err("memshare: client_id %d reserve_mem_region is %u, return \n", client_id, reserve_mem_region);
-				return -ENODEV;
+				size = 0;
 			}
 			pr_err("memshare: client_id %d / size %x\n", client_id, size);
 		}
@@ -1065,8 +1086,9 @@ static int memshare_child_probe(struct platform_device *pdev)
 				size,
 				&memblock[num_clients]);
 		if (rc) {
-			pr_err("memshare: %s, Unable to allocate memory for guaranteed clients, rc: %d\n",
-							__func__, rc);
+			dev_err(memsh_child->dev,
+				"memshare_child: Unable to allocate memory for guaranteed clients, rc: %d\n",
+				rc);
 			return rc;
 		}
 		memblock[num_clients].allotted = 1;
@@ -1083,9 +1105,9 @@ static int memshare_child_probe(struct platform_device *pdev)
 	if (!memblock[num_clients].file_created) {
 		rc = mem_share_configure_ramdump(num_clients);
 		if (rc)
-			pr_err("memshare: %s, cannot collect dumps for client id: %d\n",
-					__func__,
-					memblock[num_clients].client_id);
+			dev_err(memsh_child->dev,
+			"memshare_child: cannot create ramdump for client with id: %d\n",
+			memblock[num_clients].client_id);
 		else
 			memblock[num_clients].file_created = 1;
 	}
@@ -1123,13 +1145,13 @@ static int memshare_probe(struct platform_device *pdev)
 				&pdev->dev);
 
 	if (rc) {
-		pr_err("memshare: %s, error populating the devices\n",
-			__func__);
+		dev_err(memsh_child->dev,
+			"memshare: error populating the devices\n");
 		return rc;
 	}
 
 	subsys_notif_register_notifier("modem", &nb);
-	pr_debug("memshare: %s, Memshare inited\n", __func__);
+	dev_dbg(memsh_child->dev, "memshare: Memshare inited\n");
 
 #ifdef CONFIG_SEC_BSP
 	drv->memshare_rd_dev = create_memshare_rd_device(MEMSHARE_DEV_NAME,

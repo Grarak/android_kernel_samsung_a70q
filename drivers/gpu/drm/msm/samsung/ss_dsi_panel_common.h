@@ -53,8 +53,9 @@ Copyright (C) 2012, Samsung Electronics. All rights reserved.
 #include <linux/debugfs.h>
 #include <linux/wakelock.h>
 #include <linux/miscdevice.h>
+#include <linux/reboot.h>
 #include <video/mipi_display.h>
-//#include <linux/dev_ril_bridge.h>
+#include <linux/dev_ril_bridge.h>
 #include <linux/regulator/consumer.h>
 #include <linux/self_display/self_display.h>
 
@@ -282,14 +283,7 @@ struct lpm_info {
 
 struct clk_timing_table {
 	int tab_size;
-	int *fps;
-	int *hfp;
-	int *hbp;
-	int *hsw;
-	int *hss;
-	int *vfp;
-	int *vbp;
-	int *vsw;
+	int *clk_rate;
 };
 
 struct clk_sel_table {
@@ -301,10 +295,22 @@ struct clk_sel_table {
 	int *target_clk_idx;
 };
 
+struct rf_info {
+	u8 rat;
+	u32 band;
+	u32 arfcn;
+} __packed;
+
 struct dyn_mipi_clk {
-	int is_support;
+	struct notifier_block notifier;
+	struct mutex dyn_mipi_lock; /* protect rf_info's rat, band, and arfcn */
+	struct workqueue_struct *change_clk_wq;
+	struct work_struct change_clk_work;
 	struct clk_sel_table clk_sel_table;
 	struct clk_timing_table clk_timing_table;
+	struct rf_info rf_info;
+	int is_support;
+	int force_idx;
 };
 
 struct cmd_map {
@@ -320,6 +326,7 @@ enum CD_MAP_TABLE_LIST {
 	PAC_HBM,
 	AOD,
 	HMT,
+	GAMMA_MODE2_NORMAL,
 	CD_MAP_TABLE_MAX,
 };
 
@@ -341,6 +348,7 @@ struct candela_map_table {
 		This is real measured brightness on panel.
 	*/
 	int *interpolation_cd;
+	int *gamma_mode2_cd;
 
 	int min_lv;
 	int max_lv;
@@ -477,7 +485,7 @@ struct display_status {
 	int wait_actual_disp_on;
 	int aod_delay;
 	int hbm_mode;
-	int disp_on_pre;
+	int disp_on_pre;  /* set to 1 at first ss_panel_on_pre(). it  means that kernel initialized display */
 };
 
 struct hmt_status {
@@ -731,6 +739,10 @@ struct self_display {
 
 	struct self_display_debug debug;
 
+	u8 *mask_crc_pass_data; // implemented in dtsi
+	u8 *mask_crc_read_data;
+	int mask_crc_size;
+
 	/* Self display Function */
 	int (*init)(struct samsung_display_driver_data *vdd);
 	int (*data_init)(struct samsung_display_driver_data *vdd);
@@ -738,6 +750,7 @@ struct self_display {
 	int (*aod_exit)(struct samsung_display_driver_data *vdd);
 	void (*self_mask_img_write)(struct samsung_display_driver_data *vdd);
 	void (*self_mask_on)(struct samsung_display_driver_data *vdd, int enable);
+	int (*self_mask_check)(struct samsung_display_driver_data *vdd);
 	void (*self_blinking_on)(struct samsung_display_driver_data *vdd, int enable);
 	int (*self_display_debug)(struct samsung_display_driver_data *vdd);
 	void (*self_move_set)(struct samsung_display_driver_data *vdd, int ctrl);
@@ -747,26 +760,6 @@ struct self_display {
 	int (*self_dclock_set)(struct samsung_display_driver_data *vdd);
 	int (*self_time_set)(struct samsung_display_driver_data *vdd, int from_self_move);
 	int (*self_partial_hlpm_scan_set)(struct samsung_display_driver_data *vdd);
-};
-
-struct rf_noti_info {
-	u16 len;
-	u8 msg_seq;
-	u8 ack_seq;
-	u8 main_cmd;
-	u8 sub_cmd;
-	u8 cmd_type;
-	u8 rat;
-	u32 band;
-	u32 arfcn;
-};
-
-struct rf_info {
-	struct mutex vdd_dyn_mipi_lock;
-	int rat;
-	int band;
-	int arfcn;
-	struct notifier_block notifier;
 };
 
 enum mdss_cpufreq_cluster {
@@ -952,6 +945,8 @@ struct brightness_info {
 
 	int cd_level;
 	int interpolation_cd;
+	int gamma_mode2_cd;
+	int gamma_mode2_support;
 
 	/* SAMSUNG_FINGERPRINT */
 	int finger_mask_bl_level;
@@ -1011,6 +1006,14 @@ struct STM {
 	int stm_on;
 	struct STM_CMD orig_cmd;
 	struct STM_CMD cur_cmd;
+};
+
+struct ub_con_detect {
+	spinlock_t irq_lock;
+	int gpio;
+	unsigned long irqflag;
+	bool enabled;
+	int ub_con_cnt;
 };
 
 /*
@@ -1110,9 +1113,6 @@ struct samsung_display_driver_data {
 
 	int select_panel_gpio;
 	bool select_panel_use_expander_gpio;
-
-	/* UB_CON_DET */
-	int ub_con_det_gpio;
 
 	/* X-Talk */
 	int xtalk_mode;
@@ -1237,7 +1237,7 @@ struct samsung_display_driver_data {
 	/*
 	 *  Dynamic MIPI Clock
 	 */
-	struct rf_info rf_info;
+	//struct rf_info rf_info;
 	struct dyn_mipi_clk dyn_mipi_clk;
 
 	/*
@@ -1318,6 +1318,9 @@ struct samsung_display_driver_data {
 	* reading mode
 	*/
 	struct reading_mode_info reading_mode;
+
+	/* UB CON DETECT */
+	struct ub_con_detect ub_con_det;
 };
 
 extern struct list_head vdds_list;
@@ -1395,6 +1398,7 @@ int ss_panel_lpm_power_ctrl(struct samsung_display_driver_data *vdd, int enable)
 
 /* Dynamic MIPI Clock FUNCTION */
 int ss_change_dyn_mipi_clk_timing(struct samsung_display_driver_data *vdd);
+int ss_dyn_mipi_clk_tx_ffc(struct samsung_display_driver_data *vdd);
 
 /* read mtp */
 void ss_read_mtp(struct samsung_display_driver_data *vdd, int addr, int len, int pos, u8 *buf);
@@ -1411,6 +1415,9 @@ void ss_stm_set_cmd(struct samsung_display_driver_data *vdd, struct STM_CMD *cmd
 
 /* reading mode */
 int ss_reading_mode_dcs(struct samsung_display_driver_data *vdd);
+
+/* uevent for UB con */
+void ss_send_ub_uevent(struct samsung_display_driver_data *vdd);
 
 
 /***************************************************************************************************
@@ -1852,7 +1859,7 @@ static inline bool ss_is_panel_lpm(
 static inline int ss_is_read_cmd(enum dsi_cmd_set_type type)
 {
 	if ((type > RX_CMD_START && type < RX_CMD_END) ||
-			type == RX_SELF_DISP_DEBUG) {
+			type == RX_SELF_DISP_DEBUG || type == RX_SELF_MASK_CHECK) {
 		return 1;
 	}
 

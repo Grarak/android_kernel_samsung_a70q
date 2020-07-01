@@ -1164,6 +1164,8 @@ static int ubifs_symlink(struct inode *dir, struct dentry *dentry,
 	if (err)
 		goto out_budg;
 
+	sz_change = CALC_DENT_SIZE(fname_len(&nm));
+
 	inode = ubifs_new_inode(c, dir, S_IFLNK | S_IRWXUGO);
 	if (IS_ERR(inode)) {
 		err = PTR_ERR(inode);

@@ -124,9 +124,7 @@ static ssize_t light_brightness_store(struct device *dev,
 	brightness = ASCII_TO_DEC(buf[0]) * 100 + ASCII_TO_DEC(buf[1]) * 10 + ASCII_TO_DEC(buf[2]);
 	pr_info("[FACTORY] %s: %d\n", __func__, brightness);
 
-	mutex_lock(&data->light_factory_mutex);
 	adsp_unicast(&brightness, sizeof(brightness), light_idx, 0, MSG_TYPE_SET_CAL_DATA);
-	mutex_unlock(&data->light_factory_mutex);
 
 	pr_info("[FACTORY] %s: done\n", __func__);
 
@@ -295,7 +293,7 @@ static ssize_t light_ddi_spi_check_show(struct device *dev,
 
 	return snprintf(buf, PAGE_SIZE, "%d\n", data->msg_buf[light_idx][0]);
 }
-*/
+
 static ssize_t light_boled_enable_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size)
 {
@@ -322,7 +320,7 @@ static ssize_t light_boled_enable_store(struct device *dev,
 
 	return size;
 }
-
+*/
 static ssize_t light_lcd_onoff_store(struct device *dev,
 	struct device_attribute *attr, const char *buf, size_t size)
 {
@@ -342,10 +340,8 @@ static ssize_t light_lcd_onoff_store(struct device *dev,
 	msg_buf[0] = OPTION_TYPE_LCD_ONOFF;
 	msg_buf[1] = new_value;
 
-	mutex_lock(&data->light_factory_mutex);
 	adsp_unicast(msg_buf, sizeof(msg_buf),
 		light_idx, 0, MSG_TYPE_OPTION_DEFINE);
-	mutex_unlock(&data->light_factory_mutex);
 
 	pr_info("[FACTORY] %s: done\n", __func__);
 
@@ -355,10 +351,12 @@ static ssize_t light_lcd_onoff_store(struct device *dev,
 static ssize_t light_circle_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-#if defined(CONFIG_SEC_A70Q_PROJECT)
+#if defined(CONFIG_SEC_A70Q_PROJECT) || defined(CONFIG_SEC_A70S_PROJECT)
 	return snprintf(buf, PAGE_SIZE, "53.34 2.89 1.8\n");
 #elif defined(CONFIG_SEC_A90Q_PROJECT)
 	return snprintf(buf, PAGE_SIZE, "24.16 36.36 1.8\n");
+#elif defined(CONFIG_SEC_A70SQ_PROJECT) || defined(CONFIG_SEC_A71_PROJECT)
+	return snprintf(buf, PAGE_SIZE, "53.20 2.41 1.8\n");
 #else
 	return snprintf(buf, PAGE_SIZE, "0 0 0\n");
 #endif
@@ -459,8 +457,8 @@ static DEVICE_ATTR(read_copr, 0664, light_read_copr_show, light_read_copr_store)
 static DEVICE_ATTR(test_copr, 0444, light_test_copr_show, NULL);
 static DEVICE_ATTR(copr_roix, 0444, light_copr_roix_show, NULL);
 static DEVICE_ATTR(sensorhub_ddi_spi_check, 0444, light_ddi_spi_check_show, NULL);
-*/
 static DEVICE_ATTR(boled_enable, 0220, NULL, light_boled_enable_store);
+*/
 static DEVICE_ATTR(light_circle, 0444, light_circle_show, NULL);
 static DEVICE_ATTR(register_write, 0220, NULL, light_register_write_store);
 static DEVICE_ATTR(register_read, 0664,
@@ -488,8 +486,8 @@ static struct device_attribute *light_attrs[] = {
 	&dev_attr_test_copr,
 	&dev_attr_copr_roix,
 	&dev_attr_sensorhub_ddi_spi_check,
-*/
 	&dev_attr_boled_enable,
+*/
 	&dev_attr_light_circle,
 	&dev_attr_register_write,
 	&dev_attr_register_read,

@@ -39,6 +39,10 @@ typedef enum {
 	MUIC_NOTIFY_CMD_ATTACH,
 	MUIC_NOTIFY_CMD_LOGICALLY_DETACH,
 	MUIC_NOTIFY_CMD_LOGICALLY_ATTACH,
+	MUIC_PDIC_NOTIFY_CMD_ATTACH,
+	MUIC_PDIC_NOTIFY_CMD_DETACH,
+	PDIC_MUIC_NOTIFY_CMD_JIG_ATTACH,
+	PDIC_MUIC_NOTIFY_CMD_JIG_DETACH,
 } muic_notifier_cmd_t;
 
 /* MUIC notifier call sequence,
@@ -54,6 +58,7 @@ typedef enum {
 	MUIC_NOTIFY_DEV_MANAGER,
 	MUIC_NOTIFY_DEV_HSUART,
 	MUIC_NOTIFY_DEV_CABLE_DATA,
+	MUIC_NOTIFY_DEV_PDIC,
 } muic_notifier_device_t;
 
 struct muic_notifier_struct {
@@ -74,9 +79,17 @@ struct muic_notifier_struct {
  */
 extern void muic_notifier_attach_attached_dev(muic_attached_dev_t new_dev);
 extern void muic_notifier_detach_attached_dev(muic_attached_dev_t cur_dev);
+extern void muic_pdic_notifier_attach_attached_dev(muic_attached_dev_t new_dev);
+extern void muic_pdic_notifier_detach_attached_dev(muic_attached_dev_t new_dev);
 extern void muic_notifier_logically_attach_attached_dev(muic_attached_dev_t new_dev);
 extern void muic_notifier_logically_detach_attached_dev(muic_attached_dev_t cur_dev);
+extern void muic_notifier_chg_off(muic_attached_dev_t new_dev);
 
+#ifdef CONFIG_USE_CCIC
+extern int muic_ccic_notifier_register(struct notifier_block *nb,
+		notifier_fn_t notifier, muic_notifier_device_t listener);
+extern int muic_ccic_notifier_unregister(struct notifier_block *nb);
+#endif
 /* muic notifier register/unregister API
  * for used any where want to receive muic attached device attach/detach. */
 extern int muic_notifier_register(struct notifier_block *nb,

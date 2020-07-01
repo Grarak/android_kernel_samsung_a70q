@@ -130,27 +130,3 @@ void fscrypt_set_ice_skip(struct bio *bio, int bi_crypt_skip)
 #endif
 }
 EXPORT_SYMBOL(fscrypt_set_ice_skip);
-
-/*
- * This function will be used for filesystem when deciding to merge bios.
- * Basic assumption is, if inline_encryption is set, single bio has to
- * guarantee consecutive LBAs as well as ino|pg->index.
- */
-bool fscrypt_mergeable_bio(struct bio *bio, u64 dun, bool bio_encrypted,
-						int bi_crypt_skip)
-{
-	if (!bio)
-		return true;
-
-#ifdef CONFIG_DM_DEFAULT_KEY
-	if (bi_crypt_skip != bio->bi_crypt_skip)
-		return false;
-#endif
-	/* if both of them are not encrypted, no further check is needed */
-	if (!bio_dun(bio) && !bio_encrypted)
-		return true;
-
-	/* ICE allows only consecutive iv_key stream. */
-	return bio_end_dun(bio) == dun;
-}
-EXPORT_SYMBOL(fscrypt_mergeable_bio);

@@ -159,7 +159,9 @@ struct request {
 	unsigned int __data_len;	/* total data len */
 	int tag;
 	sector_t __sector;		/* sector cursor */
+#ifdef CONFIG_BLK_DEV_CRYPT_DUN
 	u64 __dun;			/* dun for UFS */
+#endif
 
 	struct bio *bio;
 	struct bio *biotail;
@@ -1045,10 +1047,12 @@ static inline sector_t blk_rq_pos(const struct request *rq)
 	return rq->__sector;
 }
 
+#ifdef CONFIG_BLK_DEV_CRYPT_DUN
 static inline sector_t blk_rq_dun(const struct request *rq)
 {
 	return rq->__dun;
 }
+#endif
 
 static inline unsigned int blk_rq_bytes(const struct request *rq)
 {
@@ -1416,7 +1420,7 @@ extern int blk_verify_command(unsigned char *cmd, fmode_t has_write_perm);
 enum blk_default_limits {
 	BLK_MAX_SEGMENTS	= 128,
 	BLK_SAFE_MAX_SECTORS	= 255,
-	BLK_DEF_MAX_SECTORS	= 2560,
+	BLK_DEF_MAX_SECTORS	= 1024,
 	BLK_MAX_SEGMENT_SIZE	= 65536,
 	BLK_SEG_BOUNDARY_MASK	= 0xFFFFFFFFUL,
 };

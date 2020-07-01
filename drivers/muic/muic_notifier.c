@@ -18,7 +18,8 @@
   *     b'0010 : MUIC
   *     b'1111 : Broadcasting
   */
-#define NOTI_ADDR_SRC (1 << 1)
+ 
+#define NOTI_ADDR_SRC CCIC_NOTIFY_DEV_MUIC
 #define NOTI_ADDR_DST (0xf)
 
 /* ATTACH Noti. ID */
@@ -33,30 +34,26 @@
 		SET_MUIC_NOTIFIER_BLOCK(nb, NULL, -1)
 
 static struct muic_notifier_struct muic_notifier;
-#if defined(CONFIG_CCIC_S2MU004)
+#if defined(CONFIG_CCIC_S2MU004) || defined(CONFIG_MUIC_S2MU107) || defined(CONFIG_MUIC_S2MU106)//TEMP CCIC_S2MU107
 static struct muic_notifier_struct muic_ccic_notifier;
 #endif
-
 struct device *switch_device;
-
 static int notifier_head_init;
 static int muic_uses_new_noti;
-#if defined(CONFIG_CCIC_S2MU004)
+#if defined(CONFIG_CCIC_S2MU004) || defined(CONFIG_MUIC_S2MU107) || defined(CONFIG_MUIC_S2MU106)//TEMP CCIC_S2MU107
 static int muic_ccic_uses_new_noti;
 #endif
 
 void muic_notifier_set_new_noti(bool flag)
 {
-	muic_uses_new_noti = flag ? 1 : 0;
+	muic_uses_new_noti = flag ? 1: 0;
 }
 
 static void __set_noti_cxt(int attach, int type)
 {
 	if (type < 0) {
 		muic_notifier.cmd = attach;
-#if defined(CONFIG_MUIC_SUPPORT_CCIC)
 		muic_notifier.cxt.attach = attach;
-#endif
 
 		return;
 	}
@@ -65,25 +62,21 @@ static void __set_noti_cxt(int attach, int type)
 	muic_notifier.cmd = attach;
 	muic_notifier.attached_dev = type;
 
-#if defined(CONFIG_MUIC_SUPPORT_CCIC)
 	/* New Interface */
 	muic_notifier.cxt.src = NOTI_ADDR_SRC;
+	muic_notifier.cxt.cable_type = type;
 	muic_notifier.cxt.dest = NOTI_ADDR_DST;
 	muic_notifier.cxt.id = NOTI_ID_ATTACH;
 	muic_notifier.cxt.attach = attach;
-	muic_notifier.cxt.cable_type = type;
 	muic_notifier.cxt.rprd = 0;
-#endif
 }
 
-#if defined(CONFIG_CCIC_S2MU004)
+#if defined(CONFIG_CCIC_S2MU004) || defined(CONFIG_MUIC_S2MU107) || defined(CONFIG_MUIC_S2MU106)//TEMP CCIC_S2MU107
 static void __set_ccic_noti_cxt(int attach, int type)
 {
 	if (type < 0) {
 		muic_ccic_notifier.cmd = attach;
-#if defined(CONFIG_CCIC_NOTIFIER)
 		muic_ccic_notifier.cxt.attach = attach;
-#endif
 		return;
 	}
 
@@ -91,7 +84,6 @@ static void __set_ccic_noti_cxt(int attach, int type)
 	muic_ccic_notifier.cmd = attach;
 	muic_ccic_notifier.attached_dev = type;
 
-#if defined(CONFIG_CCIC_NOTIFIER)
 	/* New Interface */
 	muic_ccic_notifier.cxt.src = NOTI_ADDR_SRC;
 	muic_ccic_notifier.cxt.dest = NOTI_ADDR_DST;
@@ -99,7 +91,6 @@ static void __set_ccic_noti_cxt(int attach, int type)
 	muic_ccic_notifier.cxt.attach = attach;
 	muic_ccic_notifier.cxt.cable_type = type;
 	muic_ccic_notifier.cxt.rprd = 0;
-#endif
 }
 #endif
 
@@ -122,18 +113,11 @@ int muic_notifier_register(struct notifier_block *nb, notifier_fn_t notifier,
 		pr_err("%s: blocking_notifier_chain_register error(%d)\n",
 				__func__, ret);
 
-#if defined(CONFIG_MUIC_SUPPORT_CCIC)
 	pcxt = muic_uses_new_noti ? &(muic_notifier.cxt) : \
 			(void *)&(muic_notifier.attached_dev);
 
 	/* current muic's attached_device status notify */
 	nb->notifier_call(nb, muic_notifier.cxt.attach, pcxt);
-#else
-	pcxt = (void *)&(muic_notifier.attached_dev);
-
-	/* current muic's attached_device status notify */
-	nb->notifier_call(nb, muic_notifier.cmd, pcxt);
-#endif
 
 	return ret;
 }
@@ -158,13 +142,8 @@ static int muic_notifier_notify(void)
 	int ret = 0;
 	void *pcxt;
 
-#if defined(CONFIG_MUIC_SUPPORT_CCIC)
 	pr_info("%s: CMD=%d, DATA=%d\n", __func__, muic_notifier.cxt.attach,
 			muic_notifier.cxt.cable_type);
-#else
-	pr_info("%s: CMD=%d, DATA=%d\n", __func__, muic_notifier.cmd,
-			muic_notifier.attached_dev);
-#endif
 
 #if defined(CONFIG_SEC_FACTORY)
 	if (muic_notifier.cxt.attach != 0)
@@ -173,18 +152,11 @@ static int muic_notifier_notify(void)
 		muic_send_attached_muic_cable_intent(0);
 #endif
 
-#if defined(CONFIG_MUIC_SUPPORT_CCIC)
 	pcxt = muic_uses_new_noti ? &(muic_notifier.cxt) : \
 			(void *)&(muic_notifier.attached_dev);
 
 	ret = blocking_notifier_call_chain(&(muic_notifier.notifier_call_chain),
 			muic_notifier.cxt.attach, pcxt);
-#else
-	pcxt = (void *)&(muic_notifier.attached_dev);
-
-	ret = blocking_notifier_call_chain(&(muic_notifier.notifier_call_chain),
-			muic_notifier.cmd, pcxt);
-#endif
 
 	switch (ret) {
 	case NOTIFY_STOP_MASK:
@@ -203,7 +175,7 @@ static int muic_notifier_notify(void)
 	return ret;
 }
 
-#if defined(CONFIG_CCIC_S2MU004)
+#if defined(CONFIG_CCIC_S2MU004) || defined(CONFIG_CCIC_S2MU107) || defined(CONFIG_MUIC_S2MU106)//TEMP CCIC_S2MU107
 int muic_ccic_notifier_register(struct notifier_block *nb, notifier_fn_t notifier,
 			muic_notifier_device_t listener)
 {
@@ -297,28 +269,38 @@ void muic_notifier_attach_attached_dev(muic_attached_dev_t new_dev)
 	muic_notifier_notify();
 }
 
-#if defined(CONFIG_CCIC_S2MU004)
 void muic_pdic_notifier_attach_attached_dev(muic_attached_dev_t new_dev)
 {
 	pr_info("%s: (%d)\n", __func__, new_dev);
 
-
+#if defined(CONFIG_CCIC_S2MU004) || defined(CONFIG_MUIC_S2MU107) || defined(CONFIG_MUIC_S2MU106)
 	__set_ccic_noti_cxt(MUIC_PDIC_NOTIFY_CMD_ATTACH, new_dev);
 
 	/* muic's attached_device attach broadcast */
 	muic_ccic_notifier_notify();
+#else
+	__set_noti_cxt(MUIC_PDIC_NOTIFY_CMD_ATTACH, new_dev);
+
+	/* muic's attached_device attach broadcast */
+	muic_notifier_notify();
+#endif
 }
 
 void muic_pdic_notifier_detach_attached_dev(muic_attached_dev_t new_dev)
 {
 	pr_info("%s: (%d)\n", __func__, new_dev);
 
+#if defined(CONFIG_CCIC_S2MU004) || defined(CONFIG_MUIC_S2MU107) || defined(CONFIG_MUIC_S2MU106)
 	__set_ccic_noti_cxt(MUIC_PDIC_NOTIFY_CMD_DETACH, new_dev);
 
 	/* muic's attached_device attach broadcast */
 	muic_ccic_notifier_notify();
-}
+#else
+	__set_noti_cxt(MUIC_PDIC_NOTIFY_CMD_DETACH, muic_notifier.attached_dev);
+	/* muic's attached_device attach broadcast */
+	muic_notifier_notify();
 #endif
+}
 
 void muic_notifier_detach_attached_dev(muic_attached_dev_t cur_dev)
 {
@@ -326,25 +308,15 @@ void muic_notifier_detach_attached_dev(muic_attached_dev_t cur_dev)
 
 	__set_noti_cxt(MUIC_NOTIFY_CMD_DETACH, -1);
 
-#if defined(CONFIG_MUIC_SUPPORT_CCIC)
-	if (muic_notifier.cxt.cable_type != cur_dev)
+	if (muic_notifier.cxt.cable_type != cur_dev) {
 		pr_warn("%s: attached_dev of muic_notifier(%d) != muic_data(%d)\n",
-			__func__, muic_notifier.cxt.cable_type, cur_dev);
+				__func__, muic_notifier.cxt.cable_type, cur_dev);
+	}
 
 	if (muic_notifier.cxt.cable_type != ATTACHED_DEV_NONE_MUIC) {
 		/* muic's attached_device detach broadcast */
 		muic_notifier_notify();
 	}
-#else
-	if (muic_notifier.attached_dev != cur_dev)
-		pr_warn("%s: attached_dev of muic_notifier(%d) != muic_data(%d)\n",
-			__func__, muic_notifier.attached_dev, cur_dev);
-
-	if (muic_notifier.attached_dev != ATTACHED_DEV_NONE_MUIC) {
-		/* muic's attached_device detach broadcast */
-		muic_notifier_notify();
-	}
-#endif
 
 	__set_noti_cxt(0, ATTACHED_DEV_NONE_MUIC);
 }
@@ -379,7 +351,9 @@ void muic_notifier_hiccup_mode(int enable)
 	
 	pr_info("%s: hiccup mode (%d)\n", __func__, enable);
 
+#if 0
 	__set_noti_cxt(MUIC_NOTIFY_CMD_HICCUP, enable);
+#endif
 
 	/* muic's hiccup mode broadcast */
 	muic_notifier_notify();
@@ -401,7 +375,7 @@ static int __init muic_notifier_init(void)
 
 	pr_info("%s\n", __func__);
 
-#ifdef CONFIG_SWITCH
+#if defined(CONFIG_SWITCH) && !defined(CONFIG_MUIC_S2MU107) && !defined(CONFIG_MUIC_S2MU106)//TEMP CCIC_S2MU107
 	switch_device = sec_device_create(0, NULL, "switch");
 	if (IS_ERR(switch_device)) {
 		pr_err("(%s): failed to created device (switch_device)!\n",
@@ -409,7 +383,7 @@ static int __init muic_notifier_init(void)
 		return -ENODEV;
 	}
 #endif
-#if defined(CONFIG_CCIC_S2MU004)
+#if defined(CONFIG_CCIC_S2MU004) || defined(CONFIG_MUIC_S2MU107) || defined(CONFIG_MUIC_S2MU106)//TEMP CCIC_S2MU107
 	muic_uses_new_noti = 1;
 
 	BLOCKING_INIT_NOTIFIER_HEAD(&(muic_notifier.notifier_call_chain));
@@ -443,4 +417,3 @@ static int __init muic_notifier_header_init(void)
 	return ret;
 }
 subsys_initcall(muic_notifier_header_init);
-

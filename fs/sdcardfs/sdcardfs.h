@@ -46,7 +46,6 @@
 #include <linux/string.h>
 #include <linux/list.h>
 #include <linux/ratelimit.h>
-#include <linux/android_aid.h>
 #include "multiuser.h"
 
 /* the file system name */
@@ -223,7 +222,9 @@ struct sdcardfs_mount_options {
 	bool multiuser;
 	bool gid_derivation;
 	bool default_normal;
+	bool unshared_obb;
 	unsigned int reserved_mb;
+	bool nocache;
 };
 
 struct sdcardfs_vfsmount_options {

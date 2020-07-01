@@ -771,6 +771,52 @@ int32_t msm_camera_fill_vreg_params(
 			if (j == num_vreg)
 				power_setting[i].seq_val = INVALID_VREG;
 			break;
+		case SENSOR_CUSTOM_REG3:
+			for (j = 0; j < num_vreg; j++) {
+
+				if (!strcmp(soc_info->rgltr_name[j],
+					"cam_v_custom3")) {
+					CAM_DBG(CAM_SENSOR,
+						"i:%d j:%d cam_vcustom3", i, j);
+					power_setting[i].seq_val = j;
+
+					if (VALIDATE_VOLTAGE(
+						soc_info->rgltr_min_volt[j],
+						soc_info->rgltr_max_volt[j],
+						power_setting[i].config_val)) {
+						soc_info->rgltr_min_volt[j] =
+						soc_info->rgltr_max_volt[j] =
+						power_setting[i].config_val;
+					}
+					break;
+				}
+			}
+			if (j == num_vreg)
+				power_setting[i].seq_val = INVALID_VREG;
+			break;
+		case SENSOR_CUSTOM_REG4:
+			for (j = 0; j < num_vreg; j++) {
+
+				if (!strcmp(soc_info->rgltr_name[j],
+					"cam_v_custom4")) {
+					CAM_DBG(CAM_SENSOR,
+						"i:%d j:%d cam_vcustom4", i, j);
+					power_setting[i].seq_val = j;
+
+					if (VALIDATE_VOLTAGE(
+						soc_info->rgltr_min_volt[j],
+						soc_info->rgltr_max_volt[j],
+						power_setting[i].config_val)) {
+						soc_info->rgltr_min_volt[j] =
+						soc_info->rgltr_max_volt[j] =
+						power_setting[i].config_val;
+					}
+					break;
+				}
+			}
+			if (j == num_vreg)
+				power_setting[i].seq_val = INVALID_VREG;
+			break;
 		default:
 			break;
 		}
@@ -1707,6 +1753,8 @@ int cam_sensor_core_power_up(struct cam_sensor_power_ctrl_t *ctrl,
 		case SENSOR_VAF_PWDM:
 		case SENSOR_CUSTOM_REG1:
 		case SENSOR_CUSTOM_REG2:
+		case SENSOR_CUSTOM_REG3:
+		case SENSOR_CUSTOM_REG4:
 #ifdef NEVER
 			if (power_setting->seq_val == INVALID_VREG)
 				break;
@@ -1825,6 +1873,8 @@ power_up_failed:
 		case SENSOR_VAF_PWDM:
 		case SENSOR_CUSTOM_REG1:
 		case SENSOR_CUSTOM_REG2:
+		case SENSOR_CUSTOM_REG3:
+		case SENSOR_CUSTOM_REG4:
 			if (power_setting->seq_val < num_vreg) {
 				CAM_DBG(CAM_SENSOR, "Disable Regulator");
 				vreg_idx = power_setting->seq_val;
@@ -1993,6 +2043,8 @@ int cam_sensor_util_power_down(struct cam_sensor_power_ctrl_t *ctrl,
 		case SENSOR_VAF_PWDM:
 		case SENSOR_CUSTOM_REG1:
 		case SENSOR_CUSTOM_REG2:
+		case SENSOR_CUSTOM_REG3:
+		case SENSOR_CUSTOM_REG4:
 #ifdef NEVER
 			if (pd->seq_val == INVALID_VREG)
 				break;

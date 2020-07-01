@@ -166,6 +166,12 @@ static ssize_t ss_xlog_dump_read(struct file *file, char __user *buff,
 
 	if (__ss_dump_xlog_calc_range()) {
 		len = ss_xlog_dump_entry(xlog_buf, SS_XLOG_BUF_MAX);
+
+		if (len < 0 || len > count) {
+			pr_err("len is more than user buffer size");
+			return 0;
+		}
+
 		if (copy_to_user(buff, xlog_buf, len))
 			return -EFAULT;
 		*ppos += len;
@@ -199,6 +205,7 @@ void ss_store_xlog_panic_dbg(void)
 	char err_buf[SS_XLOG_PANIC_DBG_LENGTH] = {0,};
 	struct ss_tlog *log;
 	struct ss_dbg_xlog *xlog = &ss_dbg_xlog;
+	struct samsung_display_driver_data *vdd = ss_get_vdd(PRIMARY_DISPLAY_NDX);
 
 	last = xlog->last;
 	if (last)
@@ -221,6 +228,9 @@ void ss_store_xlog_panic_dbg(void)
 	}
 end:
 	pr_info("%s:%s\n", __func__, err_buf);
+
+	if (gpio_is_valid(vdd->ub_con_det.gpio))
+	LCD_ERR("ub con gpio = %d\n", gpio_get_value(vdd->ub_con_det.gpio));
 /*
  * #ifdef CONFIG_SEC_DEBUG
  *	sec_debug_store_additional_dbg(DBG_2_DISPLAY_ERR, 0, "%s", err_buf);
@@ -632,6 +642,7 @@ static int dpci_notifier_callback(struct notifier_block *self,
 	if (lcd_debug.ftout.count) {
 		len += snprintf((tbuf + len), (SS_XLOG_DPCI_LENGTH - len),
 			"FTOUT CNT=%d ", lcd_debug.ftout.count);
+		lcd_debug.ftout.name[sizeof(lcd_debug.ftout.name) - 1] = '\0';
 		len += snprintf((tbuf + len), (SS_XLOG_DPCI_LENGTH - len),
 			"NAME=%s ", lcd_debug.ftout.name);
 	}

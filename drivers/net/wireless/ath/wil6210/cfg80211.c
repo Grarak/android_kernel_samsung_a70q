@@ -114,6 +114,8 @@ enum wil_nl_60g_evt_type {
 
 enum wil_nl_60g_debug_cmd {
 	NL_60G_DBG_FORCE_WMI_SEND,
+	NL_60G_GEN_RADAR_ALLOC_BUFFER,
+	NL_60G_GEN_FW_RESET,
 };
 
 struct wil_nl_60g_send_receive_wmi {
@@ -917,6 +919,16 @@ out:
 	return rc;
 }
 
+static bool wil_is_safe_switch(enum nl80211_iftype from,
+			       enum nl80211_iftype to)
+{
+	if (from == NL80211_IFTYPE_STATION &&
+	    to == NL80211_IFTYPE_P2P_CLIENT)
+		return true;
+
+	return false;
+}
+
 static int wil_cfg80211_change_iface(struct wiphy *wiphy,
 				     struct net_device *ndev,
 				     enum nl80211_iftype type,
@@ -942,7 +954,8 @@ static int wil_cfg80211_change_iface(struct wiphy *wiphy,
 	 * because it can cause significant disruption
 	 */
 	if (!wil_has_other_active_ifaces(wil, ndev, true, false) &&
-	    netif_running(ndev) && !wil_is_recovery_blocked(wil)) {
+	    netif_running(ndev) && !wil_is_recovery_blocked(wil) &&
+	    !wil_is_safe_switch(wdev->iftype, type)) {
 		wil_dbg_misc(wil, "interface is up. resetting...\n");
 		mutex_lock(&wil->mutex);
 		__wil_down(wil);
@@ -3584,6 +3597,23 @@ static int wil_nl_60g_handle_cmd(struct wiphy *wiphy, struct wireless_dev *wdev,
 
 			wil_dbg_wmi(wil, "force sending wmi commands %d\n",
 				    wil->force_wmi_send);
+			break;
+		case NL_60G_GEN_FW_RESET:
+			if (!test_bit(WMI_FW_CAPABILITY_WMI_ONLY,
+				      wil->fw_capabilities)) {
+				rc = -EOPNOTSUPP;
+				break;
+			}
+
+			wil_dbg_misc(wil,
+				     "NL_60G_GEN_FW_RESET, resetting...\n");
+
+			mutex_lock(&wil->mutex);
+			down_write(&wil->mem_lock);
+			rc = wil_reset(wil, true);
+			up_write(&wil->mem_lock);
+			mutex_unlock(&wil->mutex);
+
 			break;
 		default:
 			rc = -EINVAL;

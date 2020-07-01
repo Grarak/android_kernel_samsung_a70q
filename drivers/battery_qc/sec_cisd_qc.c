@@ -16,7 +16,11 @@
 #include <linux/sti/abc_common.h>
 #endif
 #if defined(CONFIG_QPNP_SMB5)
+#if defined(CONFIG_SEC_A90Q_PROJECT)
+#include "../power/supply/qcom_r1/smb5-lib.h"
+#else
 #include "../power/supply/qcom/smb5-lib.h"
+#endif
 #endif
 
 const char *cisd_data_str[] = {

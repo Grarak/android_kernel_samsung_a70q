@@ -1177,9 +1177,9 @@ skip_cqterri:
 		}
 
 		if (err_inject && err == -ETIMEDOUT)
-			goto out;
+			goto hac;
 		cmdq_finish_data(mmc, tag);
-		goto out;
+		goto hac;
 	} else {
 		cmdq_writel(cq_host, status, CQIS);
 	}
@@ -1215,7 +1215,6 @@ skip_cqterri:
 			}
 		}
 	}
-
 hac:
 	if (status & CQIS_HAC) {
 		if (cq_host->ops->post_cqe_halt)
@@ -1227,7 +1226,6 @@ hac:
 		complete(&cq_host->halt_comp);
 	}
 
-out:
 	return IRQ_HANDLED;
 }
 EXPORT_SYMBOL(cmdq_irq);

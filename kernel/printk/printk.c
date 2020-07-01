@@ -61,15 +61,15 @@
 #include "braille.h"
 #include "internal.h"
 
-#include <linux/sec_bsp.h>
+#ifdef CONFIG_SEC_DEBUG
 #include <linux/sec_debug.h>
-#include <linux/sec_debug_summary.h>
+#endif
 
 #ifdef CONFIG_EARLY_PRINTK_DIRECT
 extern void printascii(char *);
 #endif
 
-#ifdef CONFIG_SEC_DEBUG_PRINTK_NOCACHE
+#ifdef CONFIG_SEC_LOG_BUF
 #define _ALIGN_DOWN(addr, size)  ((addr)&(~((size)-1)))
 #define _ALIGN_UP(addr, size)    _ALIGN_DOWN(addr + size - 1, size)
 #endif
@@ -374,11 +374,11 @@ struct printk_log {
 	u8 facility;		/* syslog facility */
 	u8 flags:5;		/* internal record flags */
 	u8 level:3;		/* syslog level */
-#ifdef CONFIG_SEC_DEBUG_PRINTK_NOCACHE
-	char process[16];	/* process Name CONFIG_PRINTK_PROCESS */
-	u16 pid;		/* process id CONFIG_PRINTK_PROCESS */
-	u16 cpu;		/* cpu core number CONFIG_PRINTK_PROCESS */
-	u8 in_interrupt;	/* in interrupt CONFIG_PRINTK_PROCESS */
+#ifdef CONFIG_SEC_LOG_BUF
+	char process[TASK_COMM_LEN];	/* process Name CONFIG_PRINTK_PROCESS */
+	pid_t pid;		/* process id CONFIG_PRINTK_PROCESS */
+	unsigned int cpu;		/* cpu core number CONFIG_PRINTK_PROCESS */
+	bool in_interrupt;	/* in interrupt CONFIG_PRINTK_PROCESS */
 #endif
 }
 #ifdef CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS
@@ -386,16 +386,44 @@ __packed __aligned(4)
 #endif
 ;
 
+#ifdef CONFIG_SEC_LOG_BUF
+static void inline save_process(struct printk_log *msg)
+{
+	sec_debug_strcpy_task_comm(msg->process, current->comm);
+	msg->pid = task_pid_nr(current);
+	msg->cpu = smp_processor_id();
+	msg->in_interrupt = in_interrupt() ? true : false;
+}
+
+static size_t inline print_process(const struct printk_log *msg, char *buf)
+{
+	if (!buf)
+		return snprintf(NULL, 0, "%c[%1d:%15s:%5d] ", ' ', 0, " ", 0);
+
+	return sprintf(buf, "%c[%1d:%15s:%5d] ",
+					msg->in_interrupt ? 'I' : ' ',
+					msg->cpu,
+					msg->process,
+					msg->pid);
+}
+
+#else
+static void inline save_process(struct printk_log *msg) { }
+static size_t inline print_process(const struct printk_log *msg, char *buf) { return 0; }
+#endif
+
+#ifdef CONFIG_SEC_LOG_BUF_NO_CONSOLE
+static void __sec_log_buf_add(const struct printk_log *msg);
+#else
+static inline void __sec_log_buf_add(const struct printk_log *msg) {}
+#endif
+
 /*
  * The logbuf_lock protects kmsg buffer, indices, counters.  This can be taken
  * within the scheduler's rq lock. It must be released before calling
  * console_unlock() or anything else that might wake up a process.
  */
 DEFINE_RAW_SPINLOCK(logbuf_lock);
-
-#ifdef CONFIG_SEC_DEBUG_PRINTK_NOCACHE
-static void sec_log_add(const struct printk_log *msg);
-#endif
 
 /*
  * Helper macros to lock/unlock logbuf_lock and switch between
@@ -448,50 +476,23 @@ static u32 console_idx;
 static u64 clear_seq;
 static u32 clear_idx;
 
-#ifdef CONFIG_SEC_DEBUG_PRINTK_NOCACHE
-
-/* { SecProductFeature_KNOX.SEC_PRODUCT_FEATURE_KNOX_SUPPORT_MDM */
-/* the next printk record to read after the last 'clear_knox' command */
+/* { SecProductFeature_KNOX.SEC_PRODUCT_FEATURE_KNOX_SUPPORT_MDM - the next printk record to read after the last 'clear_knox' command */
 static u64 clear_seq_knox;
 static u32 clear_idx_knox;
 
 #define SYSLOG_ACTION_READ_CLEAR_KNOX 99
 /* } SecProductFeature_KNOX.SEC_PRODUCT_FEATURE_KNOX_SUPPORT_MDM */
 
+#ifdef CONFIG_SEC_LOG_BUF
 #define PREFIX_MAX		48
+#define LOG_LINE_MAX		(2048 - PREFIX_MAX)
 #else
 #define PREFIX_MAX		32
+#define LOG_LINE_MAX		(1024 - PREFIX_MAX)
 #endif
-
-#define LOG_BUF_SIZE		(2048)
-#define LOG_LINE_MAX		(LOG_BUF_SIZE - PREFIX_MAX)
 
 #define LOG_LEVEL(v)		((v) & 0x07)
 #define LOG_FACILITY(v)		((v) >> 3 & 0xff)
-
-#ifdef CONFIG_SEC_DEBUG_PRINTK_NOCACHE
-/*
- * Example usage: sec_log=256K@0x45000000
- *
- * In above case, log_buf size is 256KB and its physical base address
- * is 0x45000000. Actually, *(int *)(base - 8) is log_magic and *(int
- * *)(base - 4) is log_ptr. Therefore we reserve (size + 8) bytes from
- * (base - 8)
- */
-#define SEC_LOG_MAGIC 0x4d474f4c /* "LOGM" */
-
-/* These variables are also protected by logbuf_lock */
-static unsigned *sec_log_idx_ptr; /* Log buffer index pointer*/
-static char     *sec_log_buf;
-static unsigned sec_log_size;
-
-static phys_addr_t sec_log_buf_paddr;
-
-#define LAST_LOG_BUF_SHIFT 19
-static char *last_kmsg_buffer;
-static unsigned last_kmsg_size;
-#endif /* CONFIG_PRINTK_NOCACHE */
-
 
 /* record buffer */
 #define LOG_ALIGN __alignof__(struct printk_log)
@@ -595,13 +596,13 @@ static int log_make_free_space(u32 msg_size)
 		clear_idx = log_first_idx;
 	}
 
-	/* { SecProductFeature_KNOX.SEC_PRODUCT_FEATURE_KNOX_SUPPORT_MDM */
-	/* messages are gone, move to first available one */
-	if (clear_seq_knox < log_first_seq) {
-		clear_seq_knox = log_first_seq;
-		clear_idx_knox = log_first_idx;
-	}
-	/* } SecProductFeature_KNOX.SEC_PRODUCT_FEATURE_KNOX_SUPPORT_MDM */
+    /* { SecProductFeature_KNOX.SEC_PRODUCT_FEATURE_KNOX_SUPPORT_MDM */
+    /* messages are gone, move to first available one */
+    if (clear_seq_knox < log_first_seq) {
+        clear_seq_knox = log_first_seq;
+        clear_idx_knox = log_first_idx;
+    }
+    /* } SecProductFeature_KNOX.SEC_PRODUCT_FEATURE_KNOX_SUPPORT_MDM */
 
 	/* sequence numbers are equal, so the log buffer is empty */
 	if (logbuf_has_space(msg_size, log_first_seq == log_next_seq))
@@ -618,7 +619,7 @@ static u32 msg_used_size(u16 text_len, u16 dict_len, u32 *pad_len)
 	size = sizeof(struct printk_log) + text_len + dict_len;
 	*pad_len = (-size) & (LOG_ALIGN - 1);
 	size += *pad_len;
-#ifdef CONFIG_SEC_DEBUG_PRINTK_NOCACHE //8 bytes align for 64 bit XBL ramdump */
+#ifdef CONFIG_SEC_LOG_BUF //8 bytes align for 64 bit XBL ramdump */
 	size = _ALIGN_UP(size,8);
 #endif
 	return size;
@@ -631,11 +632,6 @@ static u32 msg_used_size(u16 text_len, u16 dict_len, u32 *pad_len)
  */
 #define MAX_LOG_TAKE_PART 4
 static const char trunc_msg[] = "<truncated>";
-
-#ifdef CONFIG_SEC_DEBUG_PRINTK_NOCACHE
-static bool printk_process =
-	IS_ENABLED(CONFIG_SEC_DEBUG_PRINTK_NOCACHE) ? 1 : 0;
-#endif
 
 static u32 truncate_msg(u16 *text_len, u16 *trunc_msg_len,
 			u16 *dict_len, u32 *pad_len)
@@ -656,28 +652,6 @@ static u32 truncate_msg(u16 *text_len, u16 *trunc_msg_len,
 }
 
 /* insert record into the buffer, discard old ones, update heads */
-#ifndef SZ_128K
-#define SZ_128K                               0x20000
-#endif
-char init_log_buffer[SZ_128K];
-size_t init_log_size = (size_t)SZ_128K;
-static unsigned long buf_idx;
-
-static void sec_debug_hook_init_log(const char *str, u16 size)
-{
-	int len;
-
-	if (buf_idx + size > init_log_size) {
-		len = init_log_size - buf_idx;
-		memcpy(init_log_buffer + buf_idx, str, len);
-		memcpy(init_log_buffer, str + len, size - len);
-		buf_idx = size - len;
-	} else {
-		memcpy(init_log_buffer + buf_idx, str, size);
-		buf_idx = (buf_idx + size) % init_log_size;
-	}
-}
-
 static int log_store(int facility, int level,
 		     enum log_flags flags, u64 ts_nsec,
 		     const char *dict, u16 dict_len,
@@ -712,10 +686,6 @@ static int log_store(int facility, int level,
 	/* fill message */
 	msg = (struct printk_log *)(log_buf + log_next_idx);
 	memcpy(log_text(msg), text, text_len);
-	// init task 128K buffer log 
-	if (task_pid_nr(current) == 1)
-		sec_debug_hook_init_log(text, text_len);
-
 	msg->text_len = text_len;
 	if (trunc_msg_len) {
 		memcpy(log_text(msg) + text_len, trunc_msg, trunc_msg_len);
@@ -737,17 +707,8 @@ static int log_store(int facility, int level,
 	log_next_idx += msg->len;
 	log_next_seq++;
 
-#ifdef CONFIG_SEC_DEBUG_PRINTK_NOCACHE
-	if (printk_process) {
-		strlcpy(msg->process, current->comm, sizeof(msg->process));
-		msg->pid = task_pid_nr(current);
-		msg->cpu = smp_processor_id();
-		msg->in_interrupt = in_interrupt() ? 1 : 0;
-	}
-
-	/* Save the log here,using "msg".*/
-	sec_log_add(msg);
-#endif
+	save_process(msg);
+	__sec_log_buf_add(msg);
 
 	return msg->text_len;
 }
@@ -888,11 +849,12 @@ static ssize_t devkmsg_write(struct kiocb *iocb, struct iov_iter *from)
 		return len;
 
 	/* Ratelimit when not explicitly enabled. */
+	/*
 	if (!(devkmsg_log & DEVKMSG_LOG_MASK_ON)) {
 		if (!___ratelimit(&user->rs, current->comm))
 			return ret;
 	}
-
+	*/
 	buf = kmalloc(len+1, GFP_KERNEL);
 	if (buf == NULL)
 		return -ENOMEM;
@@ -1344,25 +1306,6 @@ static size_t print_time(u64 ts, char *buf)
 		       (unsigned long)ts, rem_nsec / 1000);
 }
 
-#ifdef CONFIG_SEC_DEBUG_PRINTK_NOCACHE
-static size_t print_process(const struct printk_log *msg, char *buf)
-{
-	if (!printk_process)
-		return 0;
-
-	if (!buf)
-		return snprintf(NULL, 0, "%c[%1d:%15s:%5d] ", ' ', 0, " ", 0);
-
-	return snprintf(buf, __LOG_BUF_LEN, "%c[%1d:%15s:%5d] ",
-					msg->in_interrupt ? 'I' : ' ',
-					msg->cpu,
-					msg->process,
-					msg->pid);
-}
-#else
-#define print_process(...)	(0)
-#endif
-
 static size_t print_prefix(const struct printk_log *msg, bool syslog, char *buf)
 {
 	size_t len = 0;
@@ -1383,9 +1326,8 @@ static size_t print_prefix(const struct printk_log *msg, bool syslog, char *buf)
 	}
 
 	len += print_time(msg->ts_nsec, buf ? buf + len : NULL);
-#ifdef CONFIG_SEC_DEBUG_PRINTK_NOCACHE
 	len += print_process(msg, buf ? buf + len : NULL);
-#endif
+
 	return len;
 }
 
@@ -1511,8 +1453,8 @@ static int syslog_print_all(char __user *buf, int size, bool clear, bool knox)
 		 */
 		/* { SecProductFeature_KNOX.SEC_PRODUCT_FEATURE_KNOX_SUPPORT_MDM */
 		if (!knox) {
-			seq = clear_seq;
-			idx = clear_idx;
+            seq = clear_seq;
+            idx = clear_idx;
 		} else { //MDM edmaudit
 			seq = clear_seq_knox;
 			idx = clear_idx_knox;
@@ -1527,11 +1469,11 @@ static int syslog_print_all(char __user *buf, int size, bool clear, bool knox)
 			seq++;
 		}
 
-		/* { SecProductFeature_KNOX.SEC_PRODUCT_FEATURE_KNOX_SUPPORT_MDM */
 		/* move first record forward until length fits into the buffer */
+		/* { SecProductFeature_KNOX.SEC_PRODUCT_FEATURE_KNOX_SUPPORT_MDM */
 		if (!knox) {
-			seq = clear_seq;
-			idx = clear_idx;
+            seq = clear_seq;
+            idx = clear_idx;
 		} else { // MDM edmaudit
 			seq = clear_seq_knox;
 			idx = clear_idx_knox;
@@ -1581,8 +1523,8 @@ static int syslog_print_all(char __user *buf, int size, bool clear, bool knox)
 	/* { SecProductFeature_KNOX.SEC_PRODUCT_FEATURE_KNOX_SUPPORT_MDM */
 	if (clear) {
 		if (!knox) {
-			clear_seq = log_next_seq;
-			clear_idx = log_next_idx;
+            clear_seq = log_next_seq;
+            clear_idx = log_next_idx;
 		} else { //MDM edmaudit
 			clear_seq_knox = log_next_seq;
 			clear_idx_knox = log_next_idx;
@@ -1700,32 +1642,169 @@ int do_syslog(int type, char __user *buf, int len, int source)
 	case SYSLOG_ACTION_SIZE_BUFFER:
 		error = log_buf_len;
 		break;
-	/* { SecProductFeature_KNOX.SEC_PRODUCT_FEATURE_KNOX_SUPPORT_MDM edmaudit Read last kernel messages */
-	case SYSLOG_ACTION_READ_CLEAR_KNOX:
-		error = -EINVAL;
-		if (!buf || len < 0)
-			goto out;
-		error = 0;
-		if (!len)
-			goto out;
-		if (!access_ok(VERIFY_WRITE, buf, len)) {
-			error = -EFAULT;
-			goto out;
-		}
-		error = syslog_print_all(buf, len, /* clear */ true, /* knox */true);
-		break;
-	/* } SecProductFeature_KNOX.SEC_PRODUCT_FEATURE_KNOX_SUPPORT_MDM */
+    /* { SecProductFeature_KNOX.SEC_PRODUCT_FEATURE_KNOX_SUPPORT_MDM edmaudit Read last kernel messages */
+    case SYSLOG_ACTION_READ_CLEAR_KNOX:
+        if (!buf || len < 0)
+            error = -EINVAL;
+        else if (!len)
+            error = 0;
+        else if (!access_ok(VERIFY_WRITE, buf, len))
+            error = -EFAULT;
+        else
+            error = syslog_print_all(buf, len, /* clear */ true, /* knox */true);
+        break;
+    /* } SecProductFeature_KNOX.SEC_PRODUCT_FEATURE_KNOX_SUPPORT_MDM */
 	default:
 		error = -EINVAL;
 		break;
 	}
-out:
+
 	return error;
 }
 
 SYSCALL_DEFINE3(syslog, int, type, char __user *, buf, int, len)
 {
 	return do_syslog(type, buf, len, SYSLOG_FROM_READER);
+}
+
+/*
+ * Special console_lock variants that help to reduce the risk of soft-lockups.
+ * They allow to pass console_lock to another printk() call using a busy wait.
+ */
+
+#ifdef CONFIG_LOCKDEP
+static struct lockdep_map console_owner_dep_map = {
+	.name = "console_owner"
+};
+#endif
+
+static DEFINE_RAW_SPINLOCK(console_owner_lock);
+static struct task_struct *console_owner;
+static bool console_waiter;
+
+/**
+ * console_lock_spinning_enable - mark beginning of code where another
+ *	thread might safely busy wait
+ *
+ * This basically converts console_lock into a spinlock. This marks
+ * the section where the console_lock owner can not sleep, because
+ * there may be a waiter spinning (like a spinlock). Also it must be
+ * ready to hand over the lock at the end of the section.
+ */
+static void console_lock_spinning_enable(void)
+{
+	raw_spin_lock(&console_owner_lock);
+	console_owner = current;
+	raw_spin_unlock(&console_owner_lock);
+
+	/* The waiter may spin on us after setting console_owner */
+	spin_acquire(&console_owner_dep_map, 0, 0, _THIS_IP_);
+}
+
+/**
+ * console_lock_spinning_disable_and_check - mark end of code where another
+ *	thread was able to busy wait and check if there is a waiter
+ *
+ * This is called at the end of the section where spinning is allowed.
+ * It has two functions. First, it is a signal that it is no longer
+ * safe to start busy waiting for the lock. Second, it checks if
+ * there is a busy waiter and passes the lock rights to her.
+ *
+ * Important: Callers lose the lock if there was a busy waiter.
+ *	They must not touch items synchronized by console_lock
+ *	in this case.
+ *
+ * Return: 1 if the lock rights were passed, 0 otherwise.
+ */
+static int console_lock_spinning_disable_and_check(void)
+{
+	int waiter;
+
+	raw_spin_lock(&console_owner_lock);
+	waiter = READ_ONCE(console_waiter);
+	console_owner = NULL;
+	raw_spin_unlock(&console_owner_lock);
+
+	if (!waiter) {
+		spin_release(&console_owner_dep_map, 1, _THIS_IP_);
+		return 0;
+	}
+
+	/* The waiter is now free to continue */
+	WRITE_ONCE(console_waiter, false);
+
+	spin_release(&console_owner_dep_map, 1, _THIS_IP_);
+
+	/*
+	 * Hand off console_lock to waiter. The waiter will perform
+	 * the up(). After this, the waiter is the console_lock owner.
+	 */
+	mutex_release(&console_lock_dep_map, 1, _THIS_IP_);
+	return 1;
+}
+
+/**
+ * console_trylock_spinning - try to get console_lock by busy waiting
+ *
+ * This allows to busy wait for the console_lock when the current
+ * owner is running in specially marked sections. It means that
+ * the current owner is running and cannot reschedule until it
+ * is ready to lose the lock.
+ *
+ * Return: 1 if we got the lock, 0 othrewise
+ */
+static int console_trylock_spinning(void)
+{
+	struct task_struct *owner = NULL;
+	bool waiter;
+	bool spin = false;
+	unsigned long flags;
+
+	if (console_trylock())
+		return 1;
+
+	printk_safe_enter_irqsave(flags);
+
+	raw_spin_lock(&console_owner_lock);
+	owner = READ_ONCE(console_owner);
+	waiter = READ_ONCE(console_waiter);
+	if (!waiter && owner && owner != current) {
+		WRITE_ONCE(console_waiter, true);
+		spin = true;
+	}
+	raw_spin_unlock(&console_owner_lock);
+
+	/*
+	 * If there is an active printk() writing to the
+	 * consoles, instead of having it write our data too,
+	 * see if we can offload that load from the active
+	 * printer, and do some printing ourselves.
+	 * Go into a spin only if there isn't already a waiter
+	 * spinning, and there is an active printer, and
+	 * that active printer isn't us (recursive printk?).
+	 */
+	if (!spin) {
+		printk_safe_exit_irqrestore(flags);
+		return 0;
+	}
+
+	/* We spin waiting for the owner to release us */
+	spin_acquire(&console_owner_dep_map, 0, 0, _THIS_IP_);
+	/* Owner will clear console_waiter on hand off */
+	while (READ_ONCE(console_waiter))
+		cpu_relax();
+	spin_release(&console_owner_dep_map, 1, _THIS_IP_);
+
+	printk_safe_exit_irqrestore(flags);
+	/*
+	 * The owner passed the console lock to us.
+	 * Since we did not spin on console lock, annotate
+	 * this as a trylock. Otherwise lockdep will
+	 * complain.
+	 */
+	mutex_acquire(&console_lock_dep_map, 0, 1, _THIS_IP_);
+
+	return 1;
 }
 
 /*
@@ -1957,7 +2036,7 @@ asmlinkage int vprintk_emit(int facility, int level,
 		 * semaphore.  The release will print out buffers and wake up
 		 * /dev/kmsg and syslog() users.
 		 */
-		if (console_trylock())
+		if (console_trylock_spinning())
 			console_unlock();
 		preempt_enable();
 	}
@@ -2060,6 +2139,8 @@ static ssize_t msg_print_ext_header(char *buf, size_t size,
 static ssize_t msg_print_ext_body(char *buf, size_t size,
 				  char *dict, size_t dict_len,
 				  char *text, size_t text_len) { return 0; }
+static void console_lock_spinning_enable(void) { }
+static int console_lock_spinning_disable_and_check(void) { return 0; }
 static void call_console_drivers(const char *ext_text, size_t ext_len,
 				 const char *text, size_t len) {}
 static size_t msg_print_text(const struct printk_log *msg,
@@ -2158,9 +2239,6 @@ static int __init console_setup(char *str)
 
 	__add_preferred_console(buf, idx, options, brl_options);
 	console_set_on_cmdline = 1;
-
-	if (strcmp(buf, "null"))
-		sec_bsp_enable_console();
 
 	return 1;
 }
@@ -2429,14 +2507,29 @@ skip:
 		console_seq++;
 		raw_spin_unlock(&logbuf_lock);
 
+		/*
+		 * While actively printing out messages, if another printk()
+		 * were to occur on another CPU, it may wait for this one to
+		 * finish. This task can not be preempted if there is a
+		 * waiter waiting to take over.
+		 */
+		console_lock_spinning_enable();
+
 		stop_critical_timings();	/* don't trace print latency */
 		call_console_drivers(ext_text, ext_len, text, len);
 		start_critical_timings();
+
+		if (console_lock_spinning_disable_and_check()) {
+			printk_safe_exit_irqrestore(flags);
+			goto out;
+		}
+
 		printk_safe_exit_irqrestore(flags);
 
 		if (do_cond_resched)
 			cond_resched();
 	}
+
 	console_locked = 0;
 
 	/* Release the exclusive_console once it is used */
@@ -2461,6 +2554,7 @@ skip:
 	if (retry && console_trylock())
 		goto again;
 
+out:
 	if (wake_klogd)
 		wake_up_klogd();
 }
@@ -3313,9 +3407,6 @@ void __init dump_stack_set_arch_desc(const char *fmt, ...)
 	vsnprintf(dump_stack_arch_desc_str, sizeof(dump_stack_arch_desc_str),
 		  fmt, args);
 	va_end(args);
-#ifdef CONFIG_SEC_DEBUG_SUMMARY
-	sec_debug_arch_desc = (char *)dump_stack_arch_desc_str;
-#endif
 }
 
 /**
@@ -3354,222 +3445,47 @@ void show_regs_print_info(const char *log_lvl)
 	printk("%stask: %p task.stack: %p\n",
 	       log_lvl, current, task_stack_page(current));
 }
-
 #endif
 
-#ifdef CONFIG_SEC_DEBUG_PRINTK_NOCACHE
-unsigned int get_sec_log_idx(void)
+#ifdef CONFIG_SEC_LOG_BUF_NO_CONSOLE
+static void __sec_log_buf_add(const struct printk_log *msg)
 {
-	return *sec_log_idx_ptr;
-}
-EXPORT_SYMBOL(get_sec_log_idx);
+	static char tmp[PAGE_SIZE];
+	unsigned int size;
 
-static inline void emit_sec_log_char(char c)
-{
-	sec_log_buf[*sec_log_idx_ptr % sec_log_size] = c;
-	(*sec_log_idx_ptr)++;
-}
+	size = msg_print_text(msg, true, tmp, PAGE_SIZE);
+	sec_log_buf_write(tmp, size);
 
-static void sec_log_add(const struct printk_log *msg)
-{
-	static char tmp[LOG_BUF_SIZE];
-	static unsigned char prev_flag;
-	size_t size = 0;
-	int i;
-
-	if (!sec_log_buf || !sec_log_idx_ptr)
-		return;
-
-	size = msg_print_text(msg, true, tmp, LOG_BUF_SIZE);
-	prev_flag = msg->flags;
-	for (i = 0; i < size; i++)
-		emit_sec_log_char(tmp[i]);
+	if (unlikely(msg->pid == 1))
+		sec_init_log_buf_write(tmp, size);
 }
 
-static void sec_log_add_on_bootup(void)
+void __init sec_log_buf_pull_early_buffer(bool *init_done)
 {
 	u32 current_idx = log_first_idx;
 	struct printk_log *msg;
+	unsigned long flags;
+
+	logbuf_lock_irqsave(flags);
+
+	*init_done = true;
 
 	while (current_idx < log_next_idx) {
 		msg = log_from_idx(current_idx);
-		sec_log_add(msg);
+		__sec_log_buf_add(msg);
 		current_idx = log_next(current_idx);
 	}
+
+	logbuf_unlock_irqrestore(flags);
 }
+#endif
 
 #ifdef CONFIG_SEC_DEBUG_SUMMARY
-void sec_debug_summary_set_kloginfo(uint64_t *first_idx_paddr,
-	uint64_t *next_idx_paddr, uint64_t *log_paddr, uint64_t *size_paddr)
+void sec_debug_summary_set_klog_info(struct sec_debug_summary_data_apss *apss)
 {
-	*first_idx_paddr = (unsigned int)__pa(&log_first_idx);
-	*next_idx_paddr = (unsigned int)__pa(&log_next_idx);
-	*log_paddr = (unsigned long)__pa(log_buf);
-	*size_paddr = (unsigned long)__pa(&log_buf_len);
+	apss->log.first_idx_paddr = (unsigned int)__pa(&log_first_idx);
+	apss->log.next_idx_paddr = (unsigned int)__pa(&log_next_idx);
+	apss->log.log_paddr = (unsigned long)__pa(log_buf);
+	apss->log.size_paddr = (unsigned long)__pa(&log_buf_len);
 }
-EXPORT_SYMBOL(sec_debug_summary_set_kloginfo);
-#endif
-
-#ifdef CONFIG_SEC_LOG_LAST_KMSG
-static int __init sec_log_save_old(void)
-{
-	/* provide previous log as last_kmsg */
-	last_kmsg_size =
-		min((unsigned)(1 << LAST_LOG_BUF_SHIFT), *sec_log_idx_ptr);
-
-	last_kmsg_buffer = kmalloc(last_kmsg_size, GFP_KERNEL);
-
-	if (last_kmsg_size && last_kmsg_buffer && sec_log_buf) {
-		unsigned int i;
-		for (i = 0; i < last_kmsg_size; i++)
-			last_kmsg_buffer[i] = sec_log_buf[
-				(*sec_log_idx_ptr - last_kmsg_size + i)
-				% sec_log_size];
-		return 1;
-	}
-	return 0;
-}
-#else /* CONFIG_SEC_LOG_LAST_KMSG */
-static int __init sec_log_save_old(void)
-{
-	return 1;
-}
-#endif /* CONFIG_SEC_LOG_LAST_KMSG */
-
-/* This function remap the given address to sec_log buffer.*/
-static int __init printk_remap_nocache(void)
-{
-	void __iomem *nocache_base;
-	unsigned *sec_log_mag;
-	unsigned long flags;
-	int bOk = 0;
-
-	pr_err("%s: printk virtual addrs phy=0x%llx\n",
-		__func__, (uint64_t)sec_log_buf_paddr);
-
-	nocache_base = ioremap_nocache(
-				(phys_addr_t)(sec_log_buf_paddr),
-				sec_log_size);
-
-	if (!nocache_base) {
-		pr_err("Failed to remap nocache log region\n");
-		return -ENXIO;
-	}
-
-	pr_err("%s: nocache_base printk virtual addrs 0x%p phy=0x%llx\n",
-		__func__, nocache_base, (uint64_t)sec_log_buf_paddr);
-
-	sec_log_buf = nocache_base + 0xC;
-	sec_log_mag = nocache_base + 0x4;
-	sec_log_idx_ptr = nocache_base + 0x8;
-	sec_log_size -= 0xC;
-
-
-	if (*sec_log_mag != SEC_LOG_MAGIC) {
-		pr_err("%s: sec_log_magic is not valid : 0x%x at 0x%p\n",
-				__func__, *sec_log_mag, sec_log_mag);
-		*sec_log_idx_ptr = 0;
-		*sec_log_mag = SEC_LOG_MAGIC;
-	} else {
-		bOk = sec_log_save_old();
-	}
-
-	raw_spin_lock_irqsave(&logbuf_lock, flags);
-
-	/*We have to save logs printed prior to the sec log initialization here.*/
-	sec_log_add_on_bootup();
-
-	raw_spin_unlock_irqrestore(&logbuf_lock, flags);
-
-#ifdef CONFIG_SEC_LOG_LAST_KMSG
-	if (bOk)
-		pr_info("%s: saved old log at %d@%p\n",
-			__func__, last_kmsg_size, last_kmsg_buffer);
-	else
-		pr_err("%s: failed saving old log \n",__func__);
-#endif
-	return 0;
-}
-
-static ssize_t seclog_read(struct file *file, char __user *buf,
-				    size_t len, loff_t *offset)
-{
-	loff_t pos = *offset;
-	ssize_t count = 0;
-	size_t log_size;
-	const char *log;
-
-	if (IS_ENABLED(CONFIG_SEC_LOG_LAST_KMSG)) {
-		log_size = last_kmsg_size;
-		log = last_kmsg_buffer;
-	} else {
-		log_size = sec_log_size;
-		log = sec_log_buf;
-	}
-
-	if (pos < log_size) {
-		count = min(len, (size_t)(log_size - pos));
-		if (copy_to_user(buf, log + pos, count))
-			return -EFAULT;
-	}
-
-	*offset += count;
-	return count;
-}
-
-static const struct file_operations seclog_file_ops = {
-	.owner = THIS_MODULE,
-	.read = seclog_read,
-};
-static int __init seclog_late_init(void)
-{
-	struct proc_dir_entry *entry;
-	size_t log_size;
-
-	if (!sec_log_buf)
-		return 0;
-
-	if (IS_ENABLED(CONFIG_SEC_LOG_LAST_KMSG))
-		log_size = last_kmsg_size;
-	else
-		log_size = sec_log_size;
-
-	/* The reason we are using the file name "last_kmsg" is only
-	 * because the dumpstate app is dumping this file.
-	 * If we add a line in the dumpstate app (and we should change
-	 * the owner and permission in init.rc) with a new name, then
-	 * we can use a more appropriate name. (But the purpose of
-	 * last_kmsg and this file are almost the same, so the name isn't
-	 * that odd) */
-	entry = proc_create_data("last_kmsg", S_IFREG | S_IRUGO,
-			NULL, &seclog_file_ops, NULL);
-	if (!entry) {
-		pr_err("%s: failed to create proc entry."
-			"ram console may be present.\n", __func__);
-		return 0;
-	}
-
-	proc_set_size(entry, log_size);
-
-	return 0;
-}
-late_initcall(seclog_late_init);
-subsys_initcall(printk_remap_nocache);
-
-static int __init sec_log_setup(char *str)
-{
-	unsigned size = memparse(str, &str);
-	int ret;
-
-	if (size && (size == roundup_pow_of_two(size)) && (*str == '@')) {
-		unsigned long long base = 0;
-
-		ret = kstrtoull(++str, 0, &base);
-
-		sec_log_buf_paddr = base;
-		sec_log_size = size;
-	}
-	return 1;
-}
-__setup("sec_log=", sec_log_setup);
 #endif

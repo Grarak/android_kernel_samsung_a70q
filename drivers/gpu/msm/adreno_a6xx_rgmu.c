@@ -116,7 +116,7 @@ static int a6xx_rgmu_oob_set(struct adreno_device *adreno_dev,
 	struct rgmu_device *rgmu = KGSL_RGMU_DEVICE(device);
 	int ret, set, check;
 
-	if (!gmu_core_isenabled(device))
+	if (!gmu_core_gpmu_isenabled(device))
 		return 0;
 
 	set = BIT(req + 16);
@@ -155,7 +155,7 @@ static inline void a6xx_rgmu_oob_clear(struct adreno_device *adreno_dev,
 {
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 
-	if (!gmu_core_isenabled(device))
+	if (!gmu_core_gpmu_isenabled(device))
 		return;
 
 	gmu_core_regwrite(device, A6XX_GMU_HOST2GMU_INTR_SET, BIT(req + 24));
@@ -219,8 +219,9 @@ static int a6xx_rgmu_ifpc_store(struct adreno_device *adreno_dev,
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 	struct rgmu_device *rgmu = KGSL_RGMU_DEVICE(device);
 	unsigned int requested_idle_level;
+	int ret;
 
-	if (!gmu_core_isenabled(device) ||
+	if (!gmu_core_gpmu_isenabled(device) ||
 		!ADRENO_FEATURE(adreno_dev, ADRENO_IFPC))
 		return -EINVAL;
 
@@ -235,13 +236,15 @@ static int a6xx_rgmu_ifpc_store(struct adreno_device *adreno_dev,
 	mutex_lock(&device->mutex);
 
 	/* Power down the GPU before changing the idle level */
-	kgsl_pwrctrl_change_state(device, KGSL_STATE_SUSPEND);
-	rgmu->idle_level = requested_idle_level;
-	kgsl_pwrctrl_change_state(device, KGSL_STATE_SLUMBER);
+	ret = kgsl_pwrctrl_change_state(device, KGSL_STATE_SUSPEND);
+	if (!ret) {
+		rgmu->idle_level = requested_idle_level;
+		kgsl_pwrctrl_change_state(device, KGSL_STATE_SLUMBER);
+	}
 
 	mutex_unlock(&device->mutex);
 
-	return 0;
+	return ret;
 }
 
 static unsigned int a6xx_rgmu_ifpc_show(struct adreno_device *adreno_dev)
@@ -249,7 +252,8 @@ static unsigned int a6xx_rgmu_ifpc_show(struct adreno_device *adreno_dev)
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 	struct rgmu_device *rgmu = KGSL_RGMU_DEVICE(device);
 
-	return gmu_core_isenabled(device) && rgmu->idle_level == GPU_HW_IFPC;
+	return gmu_core_gpmu_isenabled(device) &&
+			rgmu->idle_level == GPU_HW_IFPC;
 }
 
 
@@ -284,7 +288,7 @@ static int a6xx_rgmu_wait_for_lowest_idle(struct adreno_device *adreno_dev)
 	unsigned long t;
 	uint64_t ts1, ts2, ts3;
 
-	if (!gmu_core_isenabled(device) ||
+	if (!gmu_core_gpmu_isenabled(device) ||
 			rgmu->idle_level != GPU_HW_IFPC)
 		return 0;
 
@@ -488,7 +492,7 @@ static int a6xx_rgmu_gpu_pwrctrl(struct adreno_device *adreno_dev,
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 	int ret = 0;
 
-	if (!gmu_core_isenabled(device))
+	if (!gmu_core_gpmu_isenabled(device))
 		return 0;
 
 	switch (mode) {
@@ -527,9 +531,6 @@ static int a6xx_rgmu_load_firmware(struct kgsl_device *device)
 	struct rgmu_device *rgmu = KGSL_RGMU_DEVICE(device);
 	const struct adreno_gpu_core *gpucore = adreno_dev->gpucore;
 	int ret;
-
-	if (!gmu_core_isenabled(device))
-		return 0;
 
 	/* RGMU fw already saved and verified so do nothing new */
 	if (rgmu->fw_hostptr)

@@ -1,4 +1,4 @@
-/* Copyright (c) 2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -13,6 +13,10 @@
 &mdm3 {
 	compatible = "qcom,ext-sdx50m";
 	qcom,mdm-link-info = "0305_01.01.00";
+};
+
+&pil_modem {
+	qcom,poff-depends-on = "esoc0";
 };
 
 &wil6210 {
@@ -48,6 +52,26 @@
 		mhi_chan@101 {
 			status = "disabled";
 		};
+
+		mhi_chan@102 {
+			status = "disabled";
+		};
+
+		mhi_chan@103 {
+			status = "disabled";
+		};
+
+		mhi_chan@104 {
+			mhi,offload-chan;
+		};
+
+		mhi_chan@107 {
+			status = "disabled";
+		};
+
+		mhi_chan@108 {
+			status = "disabled";
+		};
 	};
 
 	mhi_events {
@@ -73,6 +97,30 @@
 			mhi,hw-ev;
 			mhi,client-manage;
 			mhi,offload;
+		};
+
+		mhi_events@6 {
+			status = "disabled";
+		};
+
+		mhi_events@7 {
+			status = "disabled";
+		};
+
+		mhi_events@8 {
+			status = "disabled";
+		};
+
+		mhi_events@9 {
+			status = "disabled";
+		};
+
+		mhi_events@10 {
+			status = "disabled";
+		};
+
+		mhi_events@11 {
+			status = "disabled";
 		};
 	};
 };
@@ -98,6 +146,22 @@
 		mhi_chan@101 {
 			status = "disabled";
 		};
+
+		mhi_chan@102 {
+			status = "disabled";
+		};
+
+		mhi_chan@103 {
+			status = "disabled";
+		};
+
+		mhi_chan@107 {
+			status = "disabled";
+		};
+
+		mhi_chan@108 {
+			status = "disabled";
+		};
 	};
 
 	mhi_events {
@@ -123,6 +187,30 @@
 			mhi,hw-ev;
 			mhi,client-manage;
 			mhi,offload;
+		};
+
+		mhi_events@6 {
+			status = "disabled";
+		};
+
+		mhi_events@7 {
+			status = "disabled";
+		};
+
+		mhi_events@8 {
+			status = "disabled";
+		};
+
+		mhi_events@9 {
+			status = "disabled";
+		};
+
+		mhi_events@10 {
+			status = "disabled";
+		};
+
+		mhi_events@11 {
+			status = "disabled";
 		};
 	};
 };
@@ -161,6 +249,10 @@
 };
 
 &soc {
+	ipa_hw: qcom,ipa@1e00000 {
+		qcom,ipa-mhi-proxy;
+	};
+
 	imp: qcom,ipa-mhi-proxy {
 		compatible = "qcom,ipa-mhi-proxy";
 		qcom,mhi-chdb-base = <0x40300300>;
@@ -275,6 +367,7 @@
 		polling-delay = <0>;
 		thermal-governor = "user_space";
 		thermal-sensors = <&qmi_sensor 0>;
+		wake-capable-sensor;
 		trips {
 			active-config0 {
 				temperature = <125000>;
@@ -289,6 +382,7 @@
 		polling-delay = <0>;
 		thermal-governor = "user_space";
 		thermal-sensors = <&qmi_sensor 1>;
+		wake-capable-sensor;
 		trips {
 			active-config0 {
 				temperature = <125000>;
@@ -303,6 +397,7 @@
 		polling-delay = <0>;
 		thermal-governor = "user_space";
 		thermal-sensors = <&qmi_sensor 100>;
+		wake-capable-sensor;
 		trips {
 			active-config0 {
 				temperature = <125000>;
@@ -317,6 +412,7 @@
 		polling-delay = <0>;
 		thermal-governor = "user_space";
 		thermal-sensors = <&qmi_sensor 101>;
+		wake-capable-sensor;
 		trips {
 			active-config0 {
 				temperature = <125000>;
@@ -331,6 +427,7 @@
 		polling-delay = <0>;
 		thermal-governor = "user_space";
 		thermal-sensors = <&qmi_sensor 104>;
+		wake-capable-sensor;
 		trips {
 			active-config0 {
 				temperature = <125000>;
@@ -345,6 +442,7 @@
 		polling-delay = <0>;
 		thermal-governor = "user_space";
 		thermal-sensors = <&qmi_sensor 105>;
+		wake-capable-sensor;
 		trips {
 			active-config0 {
 				temperature = <125000>;
@@ -359,6 +457,7 @@
 		polling-delay = <0>;
 		thermal-governor = "user_space";
 		thermal-sensors = <&qmi_sensor 106>;
+		wake-capable-sensor;
 		trips {
 			active-config0 {
 				temperature = <125000>;
@@ -373,6 +472,7 @@
 		polling-delay = <0>;
 		thermal-governor = "user_space";
 		thermal-sensors = <&qmi_sensor 107>;
+		wake-capable-sensor;
 		trips {
 			active-config0 {
 				temperature = <125000>;
@@ -387,6 +487,7 @@
 		polling-delay = <0>;
 		thermal-governor = "user_space";
 		thermal-sensors = <&qmi_sensor 108>;
+		wake-capable-sensor;
 		trips {
 			active-config0 {
 				temperature = <125000>;
@@ -401,6 +502,7 @@
 		polling-delay = <0>;
 		thermal-governor = "user_space";
 		thermal-sensors = <&qmi_sensor 109>;
+		wake-capable-sensor;
 		trips {
 			active-config0 {
 				temperature = <125000>;
@@ -415,6 +517,7 @@
 		polling-delay = <0>;
 		thermal-governor = "user_space";
 		thermal-sensors = <&qmi_sensor 110>;
+		wake-capable-sensor;
 		trips {
 			active-config0 {
 				temperature = <125000>;
@@ -429,6 +532,7 @@
 		polling-delay = <0>;
 		thermal-governor = "user_space";
 		thermal-sensors = <&qmi_sensor 111>;
+		wake-capable-sensor;
 		trips {
 			active-config0 {
 				temperature = <125000>;
@@ -443,6 +547,7 @@
 		polling-delay = <0>;
 		thermal-governor = "user_space";
 		thermal-sensors = <&qmi_sensor 112>;
+		wake-capable-sensor;
 		trips {
 			active-config0 {
 				temperature = <125000>;
@@ -457,6 +562,7 @@
 		polling-delay = <0>;
 		thermal-governor = "user_space";
 		thermal-sensors = <&qmi_sensor 102>;
+		wake-capable-sensor;
 		trips {
 			active-config0 {
 				temperature = <125000>;
@@ -465,26 +571,12 @@
 			};
 		};
 	};
-
-	soc {
-		trips {
-			soc_trip1: soc-trip1 {
-				temperature = <20>;
-				hysteresis = <0>;
-				type = "passive";
-			};
-		};
-		cooling-maps {
-			soc_modem {
-				trip = <&soc_trip1>;
-				cooling-device =
-					<&modem1_proc 3 3>;
-			};
-		};
-	};
 };
 
 &reserved_memory {
+	#address-cells = <2>;
+	#size-cells = <2>;
+
 	pil_buffer_p2_mem: pil_buffer_p2_region@a0000000 {
 		compatible = "removed-dma-pool";
 		no-map;
@@ -503,5 +595,11 @@
 		 alignment = <0x0 0x400000>;
 		 size = <0x0 0x01000000>;
 		 no-map;
+	};
+};
+
+&usb1 {
+	dwc3@a800000 {
+		snps,bus-suspend-enable;
 	};
 };

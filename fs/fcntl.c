@@ -434,6 +434,17 @@ static long do_fcntl(int fd, unsigned int cmd, unsigned long arg,
 		err = proca_fcntl_setxattr(filp, (void __user *)arg);
 		break;
 #endif
+	case F_FIVE_EDIT:
+		err = five_fcntl_edit(filp);
+		break;
+	case F_FIVE_CLOSE:
+		err = five_fcntl_close(filp);
+		break;
+#ifdef CONFIG_FIVE_DEBUG
+	case F_FIVE_DEBUG:
+		err = five_fcntl_debug(filp, (void __user *)arg);
+		break;
+#endif
 #endif
 	case F_ADD_SEALS:
 	case F_GET_SEALS:

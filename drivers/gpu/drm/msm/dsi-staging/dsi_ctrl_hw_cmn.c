@@ -310,7 +310,7 @@ void dsi_ctrl_hw_cmn_set_video_timing(struct dsi_ctrl_hw *ctrl,
 		reg |= 1;
 		DSI_W32(ctrl, DSI_VIDEO_COMPRESSION_MODE_CTRL, reg);
 	} else {
-		width = mode->h_active;
+		width = mode->h_active + mode->overlap_pixels;
 	}
 
 	hs_end = mode->h_sync_width;
@@ -421,8 +421,8 @@ void dsi_ctrl_hw_cmn_setup_cmd_stream(struct dsi_ctrl_hw *ctrl,
 		stride_final = roi->w * 3;
 		height_final = roi->h;
 	} else {
-		width_final = mode->h_active;
-		stride_final = h_stride;
+		width_final = mode->h_active + mode->overlap_pixels;
+		stride_final = h_stride + mode->overlap_pixels * 3;
 		height_final = mode->v_active;
 	}
 
@@ -1575,6 +1575,19 @@ int dsi_ctrl_hw_cmn_wait_for_cmd_mode_mdp_idle(struct dsi_ctrl_hw *ctrl)
 		pr_err("%s: timed out waiting for idle\n", __func__);
 
 	return rc;
+}
+
+void dsi_ctrl_hw_cmn_hs_req_sel(struct dsi_ctrl_hw *ctrl, bool sel_phy)
+{
+	u32 reg = 0;
+
+	reg = DSI_R32(ctrl, DSI_LANE_CTRL);
+	if (sel_phy)
+		reg &= ~BIT(24);
+	else
+		reg |= BIT(24);
+	DSI_W32(ctrl, DSI_LANE_CTRL, reg);
+	wmb(); /* make sure request is set */
 }
 
 void dsi_ctrl_hw_cmn_set_continuous_clk(struct dsi_ctrl_hw *ctrl, bool enable)

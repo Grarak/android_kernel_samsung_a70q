@@ -30,7 +30,6 @@
 #define CREATE_TRACE_POINTS
 #include <trace/events/irq.h>
 #include <linux/sec_debug.h>
-
 /*
    - No shared variables, all the data are CPU local.
    - If a softirq needs serialization, let it serialize itself
@@ -419,7 +418,6 @@ void irq_exit(void)
 	tick_irq_exit();
 	rcu_irq_exit();
 	trace_hardirq_exit(); /* must be last! */
-	secdbg_msg("hardirq exit");
 }
 
 /*
@@ -558,7 +556,9 @@ static __latent_entropy void tasklet_hi_action(struct softirq_action *a)
 				if (!test_and_clear_bit(TASKLET_STATE_SCHED,
 							&t->state))
 					BUG();
+				trace_tasklet_hi_entry(t->func);
 				t->func(t->data);
+				trace_tasklet_hi_exit(t->func);
 				tasklet_unlock(t);
 				continue;
 			}

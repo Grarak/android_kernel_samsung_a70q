@@ -1022,6 +1022,12 @@ static int etspi_parse_dt(struct device *dev, struct etspi_data *data)
 	}
 	pr_info("%s: position: %s\n", __func__, data->sensor_position);
 
+	if (of_property_read_string_index(np, "etspi-rb", 0,
+			(const char **)&data->rb)) {
+		data->rb = "525,-1,-1";
+	}
+	pr_info("%s: rb: %s\n", __func__, data->rb);
+
 	if (of_property_read_u32(np, "etspi-orient", &data->orient))
 		data->orient = 0;
 	pr_info("%s: orient: %d\n", __func__, data->orient);
@@ -1087,6 +1093,7 @@ static int etspi_type_check(struct etspi_data *etspi)
 	 * type check return value
 	 * ET711A : 0x07 / 0x1D or 0x07 / 0x0B
 	 * ET713A : 0x07 / 0x0D
+	 * ET715  : 0x07 / 0x0F
 	 */
 	if ((buf1 == 0x07) && ((buf2 == 0x1D) || (buf2 == 0x0B))) {
 		etspi->sensortype = SENSOR_EGIS;
@@ -1094,6 +1101,9 @@ static int etspi_type_check(struct etspi_data *etspi)
 	} else if ((buf1 == 0x07) && (buf2 == 0x0D)) {
 		etspi->sensortype = SENSOR_EGIS;
 		pr_info("%s sensor type is EGIS ET713A sensor\n", __func__);
+	} else if ((buf1 == 0x07) && (buf2 == 0x0F)) {
+		etspi->sensortype = SENSOR_EGIS;
+		pr_info("%s sensor type is EGIS ET715 sensor\n", __func__);
 	} else {
 		etspi->sensortype = SENSOR_FAILED;
 		pr_info("%s sensor type is FAILED\n", __func__);
@@ -1156,12 +1166,19 @@ static ssize_t etspi_position_show(struct device *dev,
 	return snprintf(buf, PAGE_SIZE, "%s\n", g_data->sensor_position);
 }
 
+static ssize_t etspi_rb_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	return snprintf(buf, PAGE_SIZE, "%s\n", g_data->rb);
+}
+
 static DEVICE_ATTR(bfs_values, 0444, etspi_bfs_values_show, NULL);
 static DEVICE_ATTR(type_check, 0444, etspi_type_check_show, NULL);
 static DEVICE_ATTR(vendor, 0444, etspi_vendor_show, NULL);
 static DEVICE_ATTR(name, 0444, etspi_name_show, NULL);
 static DEVICE_ATTR(adm, 0444, etspi_adm_show, NULL);
 static DEVICE_ATTR(position, 0444, etspi_position_show, NULL);
+static DEVICE_ATTR(rb, 0444, etspi_rb_show, NULL);
 
 static struct device_attribute *fp_attrs[] = {
 	&dev_attr_bfs_values,
@@ -1170,6 +1187,7 @@ static struct device_attribute *fp_attrs[] = {
 	&dev_attr_name,
 	&dev_attr_adm,
 	&dev_attr_position,
+	&dev_attr_rb,
 	NULL,
 };
 

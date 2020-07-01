@@ -77,6 +77,38 @@ enum {
 };
 #endif
 
+enum muic_param_en {
+	MUIC_DISABLE = 0,
+	MUIC_ENABLE
+};
+
+/* MUIC HV State type */
+typedef enum {
+	HV_STATE_INVALID = -1,
+	HV_STATE_IDLE = 0,
+	HV_STATE_DCP_CHARGER = 1,
+	HV_STATE_FAST_CHARGE_ADAPTOR = 2,
+	HV_STATE_FAST_CHARGE_COMMUNICATION = 3,
+	HV_STATE_AFC_5V_CHARGER = 4,
+	HV_STATE_AFC_9V_CHARGER = 5,
+	HV_STATE_QC_CHARGER = 6,
+	HV_STATE_QC_5V_CHARGER = 7,
+	HV_STATE_QC_9V_CHARGER = 8,
+	HV_STATE_MAX_NUM = 9,
+} muic_hv_state_t;
+
+typedef enum {
+	HV_TRANS_INVALID = -1,
+	HV_TRANS_MUIC_DETACH = 0,
+	HV_TRANS_DCP_DETECTED = 1,
+	HV_TRANS_NO_RESPONSE = 2,
+	HV_TRANS_VDNMON_LOW = 3,
+	HV_TRANS_FAST_CHARGE_PING_RESPONSE = 4,
+	HV_TRANS_VBUS_BOOST = 5,
+	HV_TRANS_VBUS_REDUCE = 6,
+	HV_TRANS_MAX_NUM = 7,
+} muic_hv_transaction_t;
+
 /* bootparam SWITCH_SEL */
 enum {
 	SWITCH_SEL_USB_MASK	= 0x1,
@@ -243,6 +275,8 @@ typedef enum {
 	ATTACHED_DEV_VOLUP_MUIC,
 	ATTACHED_DEV_CHECK_OCP,
 	ATTACHED_DEV_RDU_TA_MUIC,
+	ATTACHED_DEV_FACTORY_UART_MUIC,
+	ATTACHED_DEV_ABNORMAL_OTG_MUIC,
 #if defined(CONFIG_MUIC_KEYBOARD)
 	ATTACHED_DEV_MUIC_KEYBOARD,
 #endif
@@ -286,6 +320,10 @@ struct muic_platform_data {
 	u8 vbus_ldo;
 #endif
 
+#if defined(CONFIG_MUIC_HV)
+	muic_hv_state_t hv_state;
+#endif
+
 	bool rustproof_on;
 	bool afc_disable;
 	bool afc_limit_voltage;
@@ -293,6 +331,13 @@ struct muic_platform_data {
 #ifdef CONFIG_MUIC_HV_FORCE_LIMIT
 	int hv_sel;
 	int silent_chg_change_state;
+#endif
+
+#ifdef CONFIG_MUIC_SYSFS
+#ifdef CONFIG_TEMP
+	struct mutex sysfs_mutex;
+#endif
+	struct device *switch_device;
 #endif
 
 	enum muic_op_mode		opmode;
@@ -317,7 +362,7 @@ struct muic_platform_data {
 	void (*jig_uart_cb)(int jig_state);
 
 	/* muic GPIO control function */
-	int (*init_gpio_cb) (int switch_sel);
+	int (*init_gpio_cb) (void *, int switch_sel);
 	int (*set_gpio_usb_sel) (int usb_path);
 	int (*set_gpio_uart_sel) (int uart_path);
 	int (*set_safeout) (int safeout_path);
@@ -329,13 +374,27 @@ struct muic_platform_data {
 	int (*set_afc)(bool enable);
 
 	int (*muic_afc_set_voltage_cb)(int vol);
-	int (*muic_hv_charger_init_cb) (void);
+	int (*muic_afc_get_voltage_cb)(void);
+
+	/* muic hv charger disable function */
+	int (*muic_hv_charger_disable_cb)(bool en);
+
+	/* muic check charger init function */
+	int (*muic_hv_charger_init_cb)(void);
 
 	/* muic cable data collecting function */
 	void (*init_cable_data_collect_cb)(void);
 };
 
-#if defined(CONFIG_MUIC_S2MU004) /* s2mu004 */
+#if defined(CONFIG_MUIC_S2MU004) || defined(CONFIG_MUIC_S2MU107) || defined(CONFIG_MUIC_S2MU106)
+#define MUIC_PDATA_VOID_FUNC(func, param) \
+{\
+	if (func)	\
+		func(param);	\
+	else	\
+		pr_err("[muic_core] func not defined %s\n", __func__);	\
+}
+
 #define MUIC_PDATA_FUNC(func, param, ret) \
 {\
 	*ret = -1;	\
@@ -456,6 +515,7 @@ struct muic_platform_data {
 				__func__);	\
 	}	\
 }
+
 #else
 #define MUIC_SEND_NOTI_ATTACH(dev)	\
 		muic_notifier_attach_attached_dev(dev)
@@ -477,6 +537,9 @@ struct muic_platform_data {
 #endif
 #endif
 
+#define MUIC_IS_ATTACHED(dev) \
+	(((dev != ATTACHED_DEV_UNKNOWN_MUIC) && (dev != ATTACHED_DEV_NONE_MUIC)) ? (1) : (0))
+
 int muic_core_handle_attach(struct muic_platform_data *muic_pdata,
 			muic_attached_dev_t new_dev, int adc, u8 vbvolt);
 int muic_core_handle_detach(struct muic_platform_data *muic_pdata);
@@ -486,11 +549,20 @@ void muic_core_exit(struct muic_platform_data *muic_pdata);
 extern void muic_disable_otg_detect(void);
 #endif /* s2mu004 */
 
+#if defined(CONFIG_MUIC_HV)
+int muic_core_hv_state_manager(struct muic_platform_data *muic_pdata,
+		muic_hv_transaction_t trans);
+bool muic_core_hv_is_hv_dev(struct muic_platform_data *muic_pdata);
+void muic_core_hv_init(struct muic_platform_data *muic_pdata);
+#endif
+
 int get_switch_sel(void);
 int get_afc_mode(void);
 int muic_afc_set_voltage(int voltage);
 void muic_set_hmt_status(int status);
 extern void muic_send_dock_intent(int type);
+extern int muic_hv_charger_disable(bool en);
+int muic_hv_charger_init(void);
 #if defined(CONFIG_SEC_FACTORY)
 extern void muic_send_attached_muic_cable_intent(int type);
 #endif

@@ -155,7 +155,7 @@ int alarm_set_alarm(char *alarm_data)
 {
 	struct rtc_wkalrm alm;
 	int ret = 0;
-	char buf_ptr[BOOTALM_BIT_TOTAL+1];
+	char buf_ptr[BOOTALM_BIT_TOTAL+1] = {0,};
 	struct rtc_time     rtc_tm;
 	unsigned long       rtc_sec;
 	unsigned long       rtc_alm_sec;
@@ -740,7 +740,7 @@ static ktime_t alarm_timer_remaining(struct k_itimer *timr, ktime_t now)
 {
 	struct alarm *alarm = &timr->it.alarm.alarmtimer;
 
-	return ktime_sub(now, alarm->node.expires);
+	return ktime_sub(alarm->node.expires, now);
 }
 
 /**

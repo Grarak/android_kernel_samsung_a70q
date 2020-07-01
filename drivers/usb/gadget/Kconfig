@@ -272,6 +272,9 @@ config USB_F_GSI
 
 config USB_F_QDSS
 	tristate
+	
+config USB_F_CONN_GADGET
+	tristate
 
 # this first set of drivers all depend on bulk-capable hardware.
 
@@ -286,6 +289,13 @@ config USB_CONFIGFS
 	  Associating functions with configurations is done by creating
 	  appropriate symbolic links.
 	  For more information see Documentation/usb/gadget_configfs.txt.
+
+config USB_CONFIGFS_CONN_GADGET
+	bool "Samsung Sidesync function"
+	depends on USB_CONFIGFS
+	select USB_F_CONN_GADGET
+	help
+	  USB Sidesync function support
 
 config USB_CONFIGFS_SERIAL
 	bool "Generic serial bulk in/out"
@@ -366,6 +376,11 @@ config USB_CONFIGFS_RNDIS
 	   XP, you'll need to download drivers from Microsoft's website; a URL
 	   is given in comments found in that info file.
 
+config USB_CONN_GADGET_NDOP
+        bool "Conn gadget that do not support DexLive"
+        help
+          Next SideSync
+
 config USB_CONFIGFS_EEM
 	bool "Ethernet Emulation Model (EEM)"
 	depends on USB_CONFIGFS
@@ -440,6 +455,19 @@ config USB_CONFIGFS_F_PTP
 	select USB_F_PTP
 	help
 	  USB gadget PTP support
+
+config USB_CONFIGFS_F_CONN_GADGET
+        bool "Conn gadget function"
+        depends on USB_CONFIGFS
+        select USB_F_CONN_GADGET
+        help
+          SideSync
+
+config USB_F_CONN_GADGET_NDOP
+        bool "Conn gadget that do not support DexLive"
+        depends on USB_CONFIGFS_F_CONN_GADGET
+        help
+          Next SideSync
 
 config USB_CONFIGFS_F_ACC
 	boolean "Accessory gadget"
@@ -615,6 +643,7 @@ config USB_CONFIGFS_F_GSI
 	bool "USB GSI function"
 	select USB_F_GSI
 	select USB_RNDIS
+	select USB_U_ETHER
 	depends on USB_CONFIGFS
 	help
 	  The GSI function supports the IPA Generic Software Interface found

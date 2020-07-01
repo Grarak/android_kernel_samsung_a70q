@@ -25,8 +25,8 @@
 #include "edac_mc.h"
 #include "edac_device.h"
 
-#ifdef CONFIG_USER_RESET_DEBUG
-#include <linux/sec_debug_partition.h>
+#ifdef CONFIG_SEC_DEBUG
+#include <linux/sec_debug.h>
 #endif
 
 #ifdef CONFIG_EDAC_KRYO_ARM64_POLL
@@ -153,7 +153,7 @@ static struct erp_drvdata *panic_handler_drvdata;
 
 static DEFINE_SPINLOCK(local_handler_lock);
 
-#ifdef CONFIG_USER_RESET_DEBUG
+#ifdef CONFIG_SEC_USER_RESET_DEBUG
 static ap_health_t *p_health;
 enum {
 	ID_L1_CACHE = 0,
@@ -319,7 +319,7 @@ static void dump_err_reg(int errorcode, int level, u64 errxstatus, u64 errxmisc,
 		edac_printk(KERN_CRIT, EDAC_CPU,
 			"Way: %d\n", (int) KRYO_ERRXMISC_WAY(errxmisc) >> 2);
 
-#ifdef CONFIG_USER_RESET_DEBUG
+#ifdef CONFIG_SEC_USER_RESET_DEBUG
 	if (level == L3)
 		update_arm64_edac_count(0, level, errorcode);
 	else
@@ -349,7 +349,7 @@ static void kryo_parse_l1_l2_cache_error(u64 errxstatus, u64 errxmisc,
 			break;
 		default:
 			edac_printk(KERN_CRIT, EDAC_CPU,
-				"silver cpu:%d unknown error location:%u\n",
+				"silver cpu:%d unknown error location:%llu\n",
 				cpu, KRYO_ERRXMISC_LVL(errxmisc));
 		}
 		break;
@@ -365,7 +365,7 @@ static void kryo_parse_l1_l2_cache_error(u64 errxstatus, u64 errxmisc,
 			break;
 		default:
 			edac_printk(KERN_CRIT, EDAC_CPU,
-				"gold cpu:%d unknown error location:%u\n",
+				"gold cpu:%d unknown error location:%llu\n",
 				cpu, KRYO_ERRXMISC_LVL_GOLD(errxmisc));
 		}
 		break;
@@ -428,7 +428,7 @@ static bool l3_is_bus_error(u64 errxstatus)
 {
 	if (KRYO_ERRXSTATUS_SERR(errxstatus) == BUS_ERROR) {
 		edac_printk(KERN_CRIT, EDAC_CPU, "Bus Error\n");
-#ifdef CONFIG_USER_RESET_DEBUG
+#ifdef CONFIG_SEC_USER_RESET_DEBUG
 		update_arm64_edac_count(0, ID_BUS_ERR, BUS_ERROR);
 #endif
 		return true;
@@ -534,7 +534,7 @@ static int kryo_pmu_cpu_pm_notify(struct notifier_block *self,
 	return NOTIFY_OK;
 }
 
-#ifdef CONFIG_USER_RESET_DEBUG
+#ifdef CONFIG_SEC_USER_RESET_DEBUG
 static int arm64_edac_dbg_part_notifier_callback(
 		struct notifier_block *nfb, unsigned long action, void *data)
 {
@@ -613,7 +613,7 @@ static int kryo_cpu_erp_probe(struct platform_device *pdev)
 	}
 
 	cpu_pm_register_notifier(&(drv->nb_pm));
-#ifdef CONFIG_USER_RESET_DEBUG
+#ifdef CONFIG_SEC_USER_RESET_DEBUG
 	dbg_partition_notifier_register(&arm64_edac_dbg_part_notifier);
 #endif
 	return 0;

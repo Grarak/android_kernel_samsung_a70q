@@ -787,6 +787,7 @@ power_attr(cpufreq_min_limit);
 
 struct cpufreq_limit_handle *cpufreq_min_touch;
 struct cpufreq_limit_handle *cpufreq_min_finger;
+struct cpufreq_limit_handle *cpufreq_min_argos;
 int set_freq_limit(unsigned long id, unsigned int freq)
 {
 	ssize_t ret = 0;
@@ -821,6 +822,21 @@ int set_freq_limit(unsigned long id, unsigned int freq)
 			if (IS_ERR(cpufreq_min_finger)) {
 				pr_err("%s: fail to get the handle\n", __func__);
 				cpufreq_min_finger = NULL;
+				ret = -EINVAL;
+			}
+		}
+	}
+
+	if (id & DVFS_ARGOS_ID) {
+		if (cpufreq_min_argos) {
+			cpufreq_limit_put(cpufreq_min_argos);
+			cpufreq_min_argos = NULL;
+		}
+		if (freq != -1) {
+			cpufreq_min_argos = cpufreq_limit_min_freq(freq, "argos min");
+			if (IS_ERR(cpufreq_min_argos)) {
+				pr_err("%s: fail to get the handle\n", __func__);
+				cpufreq_min_argos = NULL;
 				ret = -EINVAL;
 			}
 		}

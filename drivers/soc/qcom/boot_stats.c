@@ -1,4 +1,4 @@
-/* Copyright (c) 2013-2017 The Linux Foundation. All rights reserved.
+/* Copyright (c) 2013-2017, 2019 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -24,13 +24,6 @@
 #include <linux/of_address.h>
 #include <soc/qcom/boot_stats.h>
 
-struct boot_stats {
-	uint32_t bootloader_start;
-	uint32_t bootloader_end;
-	uint32_t bootloader_display;
-	uint32_t bootloader_load_kernel;
-};
-
 #ifdef CONFIG_SEC_BSP
 uint32_t bs_linuxloader_start;
 uint32_t bs_linux_start;
@@ -39,8 +32,9 @@ uint32_t bs_bootloader_load_kernel;
 #endif
 
 static void __iomem *mpm_counter_base;
+static phys_addr_t mpm_counter_pa;
 static uint32_t mpm_counter_freq;
-static struct boot_stats __iomem *boot_stats;
+struct boot_stats __iomem *boot_stats;
 
 static int mpm_parse_dt(void)
 {
@@ -91,17 +85,22 @@ static void print_boot_stats(void)
 #endif
 
 	pr_info("KPI: Bootloader start count = %u\n",
-		readl_relaxed(&boot_stats->bootloader_start));
+			readl_relaxed(&boot_stats->bootloader_start));
 	pr_info("KPI: Bootloader end count = %u\n",
-		readl_relaxed(&boot_stats->bootloader_end));
+			readl_relaxed(&boot_stats->bootloader_end));
 	pr_info("KPI: Bootloader display count = %u\n",
-		readl_relaxed(&boot_stats->bootloader_display));
+			readl_relaxed(&boot_stats->bootloader_display));
 	pr_info("KPI: Bootloader load kernel count = %u\n",
-		readl_relaxed(&boot_stats->bootloader_load_kernel));
+			readl_relaxed(&boot_stats->bootloader_load_kernel));
 	pr_info("KPI: Kernel MPM timestamp = %u\n",
-		readl_relaxed(mpm_counter_base));
+			readl_relaxed(mpm_counter_base));
 	pr_info("KPI: Kernel MPM Clock frequency = %u\n",
-		mpm_counter_freq);
+			mpm_counter_freq);
+}
+
+phys_addr_t msm_timer_get_pa(void)
+{
+	return mpm_counter_pa;
 }
 
 #ifdef CONFIG_SEC_BSP
@@ -163,6 +162,7 @@ int boot_stats_init(void)
 
 	if (!(boot_marker_enabled()))
 		boot_stats_exit();
+
 	return 0;
 }
 
@@ -174,4 +174,3 @@ int boot_stats_exit(void)
 #endif
 	return 0;
 }
-

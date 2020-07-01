@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014-2018 The Linux Foundation. All rights reserved.
+ * Copyright (C) 2014-2019 The Linux Foundation. All rights reserved.
  * Copyright (C) 2013 Red Hat
  * Author: Rob Clark <robdclark@gmail.com>
  *
@@ -42,9 +42,11 @@
 #include "sde_encoder.h"
 #include "../samsung/ss_dsi_panel_common.h"
 #ifdef CONFIG_SEC_DEBUG
-#include <linux/sec_debug_partition.h>
+#include <linux/sec_debug.h>
 #endif
 #endif
+
+#include "../../../../../drivers/gpu/msm/kgsl_device.h"
 
 #define SDE_DEBUG_PLANE(pl, fmt, ...) SDE_DEBUG("plane%d " fmt,\
 		(pl) ? (pl)->base.base.id : -1, ##__VA_ARGS__)
@@ -76,8 +78,7 @@ enum {
 	R_MAX
 };
 
-#define SDE_QSEED3_DEFAULT_PRELOAD_H 0x4
-#define SDE_QSEED3_DEFAULT_PRELOAD_V 0x3
+#define SDE_QSEED_DEFAULT_DYN_EXP 0x0
 
 #define DEFAULT_REFRESH_RATE	60
 
@@ -115,7 +116,7 @@ struct sde_plane {
 	struct mutex lock;
 
 	enum sde_sspp pipe;
-	uint32_t features;      /* capabilities from catalog */
+	unsigned long features;      /* capabilities from catalog */
 	uint32_t nformats;
 	uint32_t formats[64];
 
@@ -721,12 +722,13 @@ static void _sde_plane_set_qos_remap(struct drm_plane *plane)
 	qos_params.clk_ctrl = psde->pipe_hw->cap->clk_ctrl;
 	qos_params.xin_id = psde->pipe_hw->cap->xin_id;
 	qos_params.num = psde->pipe_hw->idx - SSPP_VIG0;
-	qos_params.is_rt = psde->is_rt_pipe;
+	qos_params.client_type = psde->is_rt_pipe ?
+					VBIF_RT_CLIENT : VBIF_NRT_CLIENT;
 
 	SDE_DEBUG("plane%d pipe:%d vbif:%d xin:%d rt:%d, clk_ctrl:%d\n",
 			plane->base.id, qos_params.num,
 			qos_params.vbif_idx,
-			qos_params.xin_id, qos_params.is_rt,
+			qos_params.xin_id, qos_params.client_type,
 			qos_params.clk_ctrl);
 
 	sde_vbif_set_qos_remap(sde_kms, &qos_params);
@@ -879,11 +881,11 @@ static void _sde_plane_inline_rot_set_qos_remap(struct drm_plane *plane,
 	qos_params.xin_id = cfg->xin_id;
 	qos_params.clk_ctrl = cfg->clk_ctrl;
 	qos_params.num = cfg->num;
-	qos_params.is_rt = true;
+	qos_params.client_type = VBIF_RT_CLIENT;
 
 	SDE_DEBUG("vbif:%d xin:%d num:%d rt:%d clk_ctrl:%d\n",
-			qos_params.vbif_idx, qos_params.xin_id,
-			qos_params.num, qos_params.is_rt, qos_params.clk_ctrl);
+		qos_params.vbif_idx, qos_params.xin_id,
+		qos_params.num, qos_params.client_type, qos_params.clk_ctrl);
 
 	sde_vbif_set_qos_remap(sde_kms, &qos_params);
 }
@@ -902,6 +904,8 @@ int sde_plane_wait_input_fence(struct drm_plane *plane, uint32_t wait_ms)
 	} else if (!plane->state) {
 		SDE_ERROR_PLANE(to_sde_plane(plane), "invalid state\n");
 	} else {
+		struct kgsl_device *device = kgsl_get_device(KGSL_DEVICE_3D0);
+
 		psde = to_sde_plane(plane);
 		pstate = to_sde_plane_state(plane->state);
 		input_fence = pstate->input_fence;
@@ -926,6 +930,16 @@ int sde_plane_wait_input_fence(struct drm_plane *plane, uint32_t wait_ms)
 				}
 #endif
 				ret = -ETIMEDOUT;
+				// Temporally add gpu snapsot for getting gpu information (Case 03183477)
+				mutex_lock(&device->mutex);
+				if (kgsl_state_is_awake(device)) {
+					device->force_panic = 1;  // case 03365510
+					kgsl_device_snapshot(device, NULL, false);
+				} else
+					printk("KGSL device is not awake\n");
+				mutex_unlock(&device->mutex);
+				/* case 03365510, prevent panic() here, to get full gpu snapshot.
+				 * panic("!!!FENCE TIMEOUT"); */ /* Added for debug purpose of fence */
 				break;
 			case -ERESTARTSYS:
 				SDE_ERROR_PLANE(psde,
@@ -1065,7 +1079,7 @@ static inline void _sde_plane_set_scanout(struct drm_plane *plane,
 		psde->is_error = true;
 	}
 	else if (psde->pipe_hw->ops.setup_sourceaddress) {
-		SDE_EVT32_VERBOSE(psde->pipe_hw->idx,
+		SDE_EVT32(psde->pipe_hw->idx,
 				pipe_cfg->layout.width,
 				pipe_cfg->layout.height,
 				pipe_cfg->layout.plane_addr[0],
@@ -1186,12 +1200,15 @@ static void _sde_plane_setup_scaler3(struct sde_plane *psde,
 			scale_cfg->src_width[i] /= chroma_subsmpl_h;
 			scale_cfg->src_height[i] /= chroma_subsmpl_v;
 		}
-		scale_cfg->preload_x[i] = SDE_QSEED3_DEFAULT_PRELOAD_H;
-		scale_cfg->preload_y[i] = SDE_QSEED3_DEFAULT_PRELOAD_V;
+
+		scale_cfg->preload_x[i] = psde->pipe_sblk->scaler_blk.h_preload;
+		scale_cfg->preload_y[i] = psde->pipe_sblk->scaler_blk.v_preload;
+
 		pstate->pixel_ext.num_ext_pxls_top[i] =
 			scale_cfg->src_height[i];
 		pstate->pixel_ext.num_ext_pxls_left[i] =
 			scale_cfg->src_width[i];
+
 	}
 
 	if ((!(SDE_FORMAT_IS_YUV(fmt)) && (src_h == dst_h)
@@ -1212,6 +1229,7 @@ static void _sde_plane_setup_scaler3(struct sde_plane *psde,
 	scale_cfg->lut_flag = 0;
 	scale_cfg->blend_cfg = 1;
 	scale_cfg->enable = 1;
+	scale_cfg->dyn_exp_disabled = SDE_QSEED_DEFAULT_DYN_EXP;
 }
 
 /**
@@ -1716,6 +1734,36 @@ static int _sde_plane_color_fill(struct sde_plane *psde,
 	}
 
 	return 0;
+}
+
+static void _sde_plane_setup_panel_stacking(struct sde_plane *psde,
+		struct sde_plane_state *pstate)
+{
+	struct sde_hw_pipe_line_insertion_cfg *cfg;
+	struct sde_crtc_state *cstate;
+	uint32_t h_start, h_total, y_start;
+
+	if (!test_bit(SDE_SSPP_LINE_INSERTION, &psde->features))
+		return;
+
+	cfg = &pstate->line_insertion_cfg;
+	memset(cfg, 0, sizeof(*cfg));
+
+	cstate = to_sde_crtc_state(psde->base.state->crtc->state);
+	if (!cstate->padding_height)
+		return;
+
+	sde_crtc_calc_vpadding_param(psde->base.state->crtc->state,
+		pstate->base.crtc_y, pstate->base.crtc_h,
+		&y_start, &h_start, &h_total);
+
+	cfg->enable = true;
+	cfg->dummy_lines = cstate->padding_dummy;
+	cfg->active_lines = cstate->padding_active;
+	cfg->first_active_lines = h_start;
+	cfg->dst_h = h_total;
+
+	psde->pipe_cfg.dst_rect.y += y_start - pstate->base.crtc_y;
 }
 
 u32 sde_plane_rot_get_prefill(struct drm_plane *plane)
@@ -2223,7 +2271,7 @@ static void _sde_plane_rot_get_fb(struct drm_plane *plane,
 		SDE_DEBUG("cleared fb_id\n");
 		rstate->out_fb = NULL;
 	} else if (!rstate->out_fb) {
-		fb = drm_framebuffer_lookup(plane->dev, fb_id);
+		fb = drm_framebuffer_lookup(plane->dev, NULL, fb_id);
 		if (fb) {
 			SDE_DEBUG("plane%d.%d get fb:%d\n", plane->base.id,
 					rstate->sequence_id, fb_id);
@@ -4038,6 +4086,8 @@ static int sde_plane_sspp_atomic_update(struct drm_plane *plane,
 
 		_sde_plane_setup_scaler(psde, pstate, fmt, false);
 
+		_sde_plane_setup_panel_stacking(psde, pstate);
+
 		/* check for color fill */
 		psde->color_fill = (uint32_t)sde_plane_get_property(pstate,
 				PLANE_PROP_COLOR_FILL);
@@ -4079,6 +4129,13 @@ static int sde_plane_sspp_atomic_update(struct drm_plane *plane,
 					psde->pipe_hw,
 					pstate->multirect_index,
 					pstate->multirect_mode);
+
+		/* update line insertion */
+		if (psde->pipe_hw->ops.setup_line_insertion)
+			psde->pipe_hw->ops.setup_line_insertion(
+					psde->pipe_hw,
+					pstate->multirect_index,
+					&pstate->line_insertion_cfg);
 	}
 
 	if ((pstate->dirty & SDE_PLANE_DIRTY_FORMAT ||
@@ -4502,6 +4559,8 @@ static void _sde_plane_install_properties(struct drm_plane *plane,
 			psde->pipe_sblk->maxvdeciexp);
 	sde_kms_info_add_keyint(info, "max_per_pipe_bw",
 			psde->pipe_sblk->max_per_pipe_bw * 1000LL);
+	sde_kms_info_add_keyint(info, "max_per_pipe_bw_high",
+			psde->pipe_sblk->max_per_pipe_bw_high * 1000LL);
 
 	if ((!master_plane_id &&
 		(psde->features & BIT(SDE_SSPP_INVERSE_PMA))) ||
@@ -5219,7 +5278,7 @@ static int _sde_plane_init_debugfs(struct drm_plane *plane)
 		return -ENOMEM;
 
 	/* don't error check these */
-	debugfs_create_x32("features", 0600,
+	debugfs_create_ulong("features", 0600,
 			psde->debugfs_root, &psde->features);
 
 	/* add register dump support */
@@ -5396,7 +5455,7 @@ struct drm_plane *sde_plane_init(struct drm_device *dev,
 	psde->pipe = pipe;
 	psde->is_virtual = (master_plane_id != 0);
 	INIT_LIST_HEAD(&psde->mplane_list);
-	master_plane = drm_plane_find(dev, master_plane_id);
+	master_plane = drm_plane_find(dev, NULL, master_plane_id);
 	if (master_plane) {
 		struct sde_plane *mpsde = to_sde_plane(master_plane);
 

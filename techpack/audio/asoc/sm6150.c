@@ -669,6 +669,15 @@ static struct msm_asoc_wcd93xx_codec msm_codec_fn;
 static int dmic_0_1_gpio_cnt;
 static int dmic_2_3_gpio_cnt;
 
+#ifdef CONFIG_SND_SOC_TAS2562
+static struct snd_soc_codec_conf ti_amp_conf[] = {
+	{
+		.dev_name = "tas2562.24-004c",
+		.name_prefix = "TI",
+	}
+};
+#endif
+
 static void *def_wcd_mbhc_cal(struct snd_soc_card *card);
 static int msm_snd_enable_codec_ext_clk(struct snd_soc_codec *codec,
 					int enable, bool dapm);
@@ -3348,6 +3357,10 @@ static int msm_mi2s_rx_format_put(struct snd_kcontrol *kcontrol,
 	mi2s_rx_cfg[idx].bit_format =
 		mi2s_auxpcm_get_format(ucontrol->value.enumerated.item[0]);
 
+	/* I2S needs to configurate same bit format between rx and tx */
+	mi2s_tx_cfg[idx].bit_format =
+		mi2s_auxpcm_get_format(ucontrol->value.enumerated.item[0]);
+
 	pr_debug("%s: idx[%d]_rx_format = %d, item = %d\n", __func__,
 		  idx, mi2s_rx_cfg[idx].bit_format,
 		  ucontrol->value.enumerated.item[0]);
@@ -5249,6 +5262,21 @@ static int msm_int_audrx_init(struct snd_soc_pcm_runtime *rtd)
 err:
 	return ret;
 }
+
+#ifdef CONFIG_SND_SOC_TAS2562
+static int sm6150_tas2562_init(struct snd_soc_pcm_runtime *rtd)
+{
+	struct snd_soc_codec *codec = rtd->codec;
+	struct snd_soc_dapm_context *dapm = snd_soc_codec_get_dapm(codec);
+
+	snd_soc_dapm_ignore_suspend(dapm, "TI ASI1 Capture");
+	snd_soc_dapm_ignore_suspend(dapm, "TI ASI1 Playback");
+	snd_soc_dapm_ignore_suspend(dapm, "TI OUT");
+	snd_soc_dapm_sync(dapm);
+
+	return 0;
+}
+#endif
 
 static int msm_wcn_init(struct snd_soc_pcm_runtime *rtd)
 {
@@ -7977,10 +8005,14 @@ static struct snd_soc_dai_link msm_mi2s_be_dai_links[] = {
 #ifdef CONFIG_SND_SOC_RT5510
 		.codec_name = "rt5510.2-0034",
 		.codec_dai_name = "rt5510-aif",
+#elif defined(CONFIG_SND_SOC_TAS2562)
+		.codec_name     = "tas2562.24-004c",
+		.codec_dai_name = "tas2562 ASI1",
+		.init = &sm6150_tas2562_init,
 #elif defined(CONFIG_SND_SOC_TFA9894)
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
 			SND_SOC_DAIFMT_CBS_CFS,
-#ifdef CONFIG_SEC_A60Q_PROJECT
+#if defined(CONFIG_SEC_A60Q_PROJECT) || defined(CONFIG_SEC_M40_PROJECT)
 		.codec_name = "tfa9xxx.2-0034",
 		.codec_dai_name = "tfa9xxx-aif-2-34",
 #else
@@ -8004,10 +8036,13 @@ static struct snd_soc_dai_link msm_mi2s_be_dai_links[] = {
 		.stream_name = "Secondary MI2S Capture",
 		.cpu_dai_name = "msm-dai-q6-mi2s.1",
 		.platform_name = "msm-pcm-routing",
-#ifdef CONFIG_SND_SOC_TFA9894
+#ifdef CONFIG_SND_SOC_TAS2562
+		.codec_name     = "tas2562.24-004c",
+		.codec_dai_name = "tas2562 ASI1",
+#elif defined(CONFIG_SND_SOC_TFA9894)
 		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
 			SND_SOC_DAIFMT_CBS_CFS,
-#ifdef CONFIG_SEC_A60Q_PROJECT
+#if defined(CONFIG_SEC_A60Q_PROJECT) || defined(CONFIG_SEC_M40_PROJECT)
 		.codec_name = "tfa9xxx.2-0034",
 		.codec_dai_name = "tfa9xxx-aif-2-34",
 #else
@@ -8360,7 +8395,7 @@ static struct snd_soc_dai_link msm_wsa_cdc_dma_be_dai_links[] = {
 };
 #endif
 
-#if defined(CONFIG_SND_SOC_WCD937X) || defined(CONFIG_SEC_A60Q_PROJECT)
+#if defined(CONFIG_SND_SOC_WCD937X) || defined(CONFIG_SEC_A60Q_PROJECT) || defined(CONFIG_SEC_M40_PROJECT)
 static struct snd_soc_dai_link msm_rx_tx_cdc_dma_be_dai_links[] = {
 	/* RX CDC DMA Backend DAI Links */
 	{
@@ -8488,7 +8523,7 @@ static struct snd_soc_dai_link msm_sm6150_dai_links[
 			 ARRAY_SIZE(ext_disp_be_dai_link) +
 			 ARRAY_SIZE(msm_mi2s_be_dai_links) +
 			 ARRAY_SIZE(msm_auxpcm_be_dai_links) +
-#if defined(CONFIG_SND_SOC_WCD937X) || defined(CONFIG_SEC_A60Q_PROJECT)
+#if defined(CONFIG_SND_SOC_WCD937X) || defined(CONFIG_SEC_A60Q_PROJECT) || defined(CONFIG_SEC_M40_PROJECT)
 #ifdef CONFIG_WSA_MACRO
 			 ARRAY_SIZE(msm_wsa_cdc_dma_be_dai_links) +
 #endif
@@ -8926,7 +8961,7 @@ static struct snd_soc_card *populate_snd_card_dailinks(struct device *dev)
 					ARRAY_SIZE(msm_wsa_cdc_dma_be_dai_links);
 			}
 #endif
-#if defined(CONFIG_SND_SOC_WCD937X) || defined(CONFIG_SEC_A60Q_PROJECT)
+#if defined(CONFIG_SND_SOC_WCD937X) || defined(CONFIG_SEC_A60Q_PROJECT) || defined(CONFIG_SEC_M40_PROJECT)
 			memcpy(msm_sm6150_dai_links + total_links,
 			       msm_rx_tx_cdc_dma_be_dai_links,
 			       sizeof(msm_rx_tx_cdc_dma_be_dai_links));
@@ -9755,6 +9790,10 @@ static int msm_asoc_machine_probe(struct platform_device *pdev)
 	pr_info("msm_asoc_machine_probe msm_init_aux_dev ret %d\n", ret);
 	if (ret)
 		goto err;
+#ifdef CONFIG_SND_SOC_TAS2562
+	card->codec_conf = ti_amp_conf;
+	card->num_configs = ARRAY_SIZE(ti_amp_conf);
+#endif
 
 	ret = devm_snd_soc_register_card(&pdev->dev, card);
 	pr_info("msm_asoc_machine_probe devm_snd_soc_register_card ret %d\n", ret);

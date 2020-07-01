@@ -31,7 +31,6 @@
 #include <soc/qcom/minidump.h>
 
 #include <linux/sec_debug.h>
-#include <linux/sec_debug_summary.h>
 
 #define SENTINEL_BYTE_1 0xFF
 #define SENTINEL_BYTE_2 0xAA

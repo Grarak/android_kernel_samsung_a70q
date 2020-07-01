@@ -92,6 +92,16 @@ config BLK_DEV_CRYPT
 
 	  If unsure, say Y.
 
+config BLK_DEV_CRYPT_DUN
+	bool "Enable support DUN(data unit number) for inline-crypto device"
+	default y
+	depends on BLK_DEV_CRYPT
+	depends on CRYPTO_DISKCIPHER_DUN || PFK
+	help
+	  It is needed to support inline encryption with DUN.
+
+	  If unsure, say Y.
+
 config BLK_DEV_CRYPT_ICE
 	bool "ICE support for block crypt"
 	default y

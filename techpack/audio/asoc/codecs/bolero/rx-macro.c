@@ -15,6 +15,7 @@
 #include <linux/io.h>
 #include <linux/platform_device.h>
 #include <linux/clk.h>
+#include <linux/clk-provider.h>
 #include <sound/soc.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
@@ -367,6 +368,7 @@ struct rx_macro_priv {
 	u16 mclk_mux;
 	struct mutex mclk_lock;
 	struct mutex swr_clk_lock;
+	struct mutex clk_lock;
 	struct rx_swr_ctrl_data *swr_ctrl_data;
 	struct rx_swr_ctrl_platform_data swr_plat_data;
 	struct work_struct rx_macro_add_child_devices_work;
@@ -1220,23 +1222,47 @@ static int rx_macro_mclk_event(struct snd_soc_dapm_widget *w,
 	return ret;
 }
 
+static int rx_macro_mclk_reset(struct device *dev)
+{
+	struct rx_macro_priv *rx_priv = dev_get_drvdata(dev);
+	int count = 0;
+
+	mutex_lock(&rx_priv->clk_lock);
+	while (__clk_is_enabled(rx_priv->rx_core_clk)) {
+		clk_disable_unprepare(rx_priv->rx_npl_clk);
+		clk_disable_unprepare(rx_priv->rx_core_clk);
+		count++;
+	}
+	dev_dbg(rx_priv->dev,
+			"%s: clock reset after ssr, count %d\n", __func__, count);
+	while (count) {
+		clk_prepare_enable(rx_priv->rx_core_clk);
+		clk_prepare_enable(rx_priv->rx_npl_clk);
+		count--;
+	}
+
+	mutex_unlock(&rx_priv->clk_lock);
+	return 0;
+}
+
 static int rx_macro_mclk_ctrl(struct device *dev, bool enable)
 {
 	struct rx_macro_priv *rx_priv = dev_get_drvdata(dev);
 	int ret = 0;
 
+	mutex_lock(&rx_priv->clk_lock);
 	if (enable) {
 		ret = clk_prepare_enable(rx_priv->rx_core_clk);
 		if (ret < 0) {
 			dev_err_ratelimited(dev, "%s:rx mclk enable failed\n", __func__);
-			return ret;
+			goto exit;
 		}
 		ret = clk_prepare_enable(rx_priv->rx_npl_clk);
 		if (ret < 0) {
 			clk_disable_unprepare(rx_priv->rx_core_clk);
 			dev_err(dev, "%s:rx npl_clk enable failed\n",
 				__func__);
-			return ret;
+			goto exit;
 		}
 		if (rx_priv->rx_mclk_cnt++ == 0) {
 			if (rx_priv->dev_up)
@@ -1246,7 +1272,7 @@ static int rx_macro_mclk_ctrl(struct device *dev, bool enable)
 		if (rx_priv->rx_mclk_cnt <= 0) {
 			dev_dbg(dev, "%s:rx mclk already disabled\n", __func__);
 			rx_priv->rx_mclk_cnt = 0;
-			return 0;
+			goto exit;
 		}
 		if (--rx_priv->rx_mclk_cnt == 0) {
 			if (rx_priv->dev_up)
@@ -1255,8 +1281,9 @@ static int rx_macro_mclk_ctrl(struct device *dev, bool enable)
 		clk_disable_unprepare(rx_priv->rx_npl_clk);
 		clk_disable_unprepare(rx_priv->rx_core_clk);
 	}
-
-	return 0;
+exit:
+	mutex_unlock(&rx_priv->clk_lock);
+	return ret;
 }
 
 static int rx_macro_event_handler(struct snd_soc_codec *codec, u16 event,
@@ -1308,6 +1335,9 @@ static int rx_macro_event_handler(struct snd_soc_codec *codec, u16 event,
 		swrm_wcd_notify(
 			rx_priv->swr_ctrl_data[0].rx_swr_pdev,
 			SWR_DEVICE_SSR_UP, NULL);
+			break;
+	case BOLERO_MACRO_EVT_CLK_RESET:
+		rx_macro_mclk_reset(rx_dev);
 		break;
 #ifdef CONFIG_SND_SOC_IMPED_SENSING
 	case SEC_BOLERO_MACRO_EVT_IMPED_TRUE:
@@ -1676,6 +1706,8 @@ static int rx_macro_config_classh(struct snd_soc_codec *codec,
 		break;
 	case INTERP_AUX:
 		snd_soc_update_bits(codec, BOLERO_CDC_RX_RX2_RX_PATH_CFG0,
+				0x08, 0x08);
+		snd_soc_update_bits(codec, BOLERO_CDC_RX_RX2_RX_PATH_CFG0,
 				0x10, 0x10);
 		break;
 	}
@@ -1818,14 +1850,23 @@ static int rx_macro_mux_put(struct snd_kcontrol *kcontrol,
 			dev_err(rx_dev, "%s:AIF reset already\n", __func__);
 			return 0;
 		}
+		if (aif_rst > RX_MACRO_AIF4_PB) {
+			dev_err(rx_dev, "%s: Invalid AIF reset\n", __func__);
+			return 0;
+		}
 	}
 	rx_priv->rx_port_value[widget->shift] = rx_port_value;
 
+	dev_dbg(rx_dev, "%s: mux input: %d, mux output: %d, aif_rst: %d\n",
+		__func__, rx_port_value, widget->shift, aif_rst);
+
 	switch (rx_port_value) {
 	case 0:
-		clear_bit(widget->shift,
-			&rx_priv->active_ch_mask[aif_rst]);
-		rx_priv->active_ch_cnt[aif_rst]--;
+		if (rx_priv->active_ch_cnt[aif_rst]) {
+			clear_bit(widget->shift,
+				&rx_priv->active_ch_mask[aif_rst]);
+			rx_priv->active_ch_cnt[aif_rst]--;
+		}
 		break;
 	case 1:
 	case 2:
@@ -1837,7 +1878,8 @@ static int rx_macro_mux_put(struct snd_kcontrol *kcontrol,
 		break;
 	default:
 		dev_err(codec->dev,
-			"%s:Invalid AIF_ID for RX_MACRO MUX\n", __func__);
+			"%s:Invalid AIF_ID for RX_MACRO MUX %d\n",
+			__func__, rx_port_value);
 		goto err;
 	}
 
@@ -2214,14 +2256,16 @@ static int rx_macro_enable_interp_clk(struct snd_soc_codec *codec,
 			(interp_idx * RX_MACRO_RX_PATH_OFFSET);
 	dsm_reg = BOLERO_CDC_RX_RX0_RX_PATH_DSM_CTL +
 			(interp_idx * RX_MACRO_RX_PATH_OFFSET);
+	if (interp_idx == INTERP_AUX)
+		dsm_reg = BOLERO_CDC_RX_RX2_RX_PATH_DSM_CTL;
 	rx_cfg2_reg = BOLERO_CDC_RX_RX0_RX_PATH_CFG2 +
 			(interp_idx * RX_MACRO_RX_PATH_OFFSET);
 
 	if (SND_SOC_DAPM_EVENT_ON(event)) {
 		if (rx_priv->main_clk_users[interp_idx] == 0) {
-			snd_soc_update_bits(codec, dsm_reg, 0x01, 0x01);
 			/* Main path PGA mute enable */
 			snd_soc_update_bits(codec, main_reg, 0x10, 0x10);
+			snd_soc_update_bits(codec, dsm_reg, 0x01, 0x01);
 			/* Clk enable */
 			snd_soc_update_bits(codec, main_reg, 0x20, 0x20);
 			snd_soc_update_bits(codec, rx_cfg2_reg, 0x03, 0x03);
@@ -3636,6 +3680,7 @@ static int rx_macro_probe(struct platform_device *pdev)
 	dev_set_drvdata(&pdev->dev, rx_priv);
 	mutex_init(&rx_priv->mclk_lock);
 	mutex_init(&rx_priv->swr_clk_lock);
+	mutex_init(&rx_priv->clk_lock);
 	rx_macro_init_ops(&ops, rx_io_base);
 
 	ret = bolero_register_macro(&pdev->dev, RX_MACRO, &ops);
@@ -3651,6 +3696,7 @@ static int rx_macro_probe(struct platform_device *pdev)
 err_reg_macro:
 	mutex_destroy(&rx_priv->mclk_lock);
 	mutex_destroy(&rx_priv->swr_clk_lock);
+	mutex_destroy(&rx_priv->clk_lock);
 	return ret;
 }
 
@@ -3671,6 +3717,7 @@ static int rx_macro_remove(struct platform_device *pdev)
 	bolero_unregister_macro(&pdev->dev, RX_MACRO);
 	mutex_destroy(&rx_priv->mclk_lock);
 	mutex_destroy(&rx_priv->swr_clk_lock);
+	mutex_destroy(&rx_priv->clk_lock);
 	kfree(rx_priv->swr_ctrl_data);
 	return 0;
 }

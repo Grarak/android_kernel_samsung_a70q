@@ -235,7 +235,7 @@ int ist40xx_set_input_device(struct ist40xx_data *data)
 	set_bit(EV_ABS, data->input_dev->evbit);
 	set_bit(EV_KEY, data->input_dev->evbit);
 	set_bit(INPUT_PROP_DIRECT, data->input_dev->propbit);
-	set_bit(KEY_HOMEPAGE, data->input_dev->keybit);
+	set_bit(KEY_WAKEUP, data->input_dev->keybit);
 	set_bit(KEY_INT_CANCEL, data->input_dev->keybit);
 
 	input_set_abs_params(data->input_dev, ABS_MT_PALM, 0, 1, 0, 0);
@@ -395,11 +395,11 @@ void ist40xx_special_cmd(struct ist40xx_data *data, int cmd)
 							"AOT Double Tap Trigger\n");
 
 					input_report_key(data->input_dev,
-							 KEY_HOMEPAGE,
+							 KEY_WAKEUP,
 							 true);
 					input_sync(data->input_dev);
 					input_report_key(data->input_dev,
-							 KEY_HOMEPAGE,
+							 KEY_WAKEUP,
 							 false);
 					input_sync(data->input_dev);
 					/* request from sensor team */
@@ -969,7 +969,9 @@ irqreturn_t ist40xx_irq_thread(int irq, void *ptr)
 	}
 
 	if ((CMCS_MSG(*msg) == CM_MSG_VALID) || (CMCS_MSG(*msg) == CS_MSG_VALID) ||
-		(CMCS_MSG(*msg) == CMJIT_MSG_VALID)) {
+		(CMCS_MSG(*msg) == CMJIT_MSG_VALID) ||
+		(CMCS_MSG(*msg) == CRJIT_MSG_VALID) ||
+		(CMCS_MSG(*msg) == CRJIT2_MSG_VALID)) {
 		data->status.cmcs = *msg;
 		data->status.cmcs_result = CMCS_RESULT(*msg);
 		input_info(true, &data->client->dev, "CMCS notify: 0x%08X\n", *msg);
@@ -1831,6 +1833,8 @@ static int ist40xx_parse_dt(struct device *dev, struct ist40xx_data *data)
 	data->dt_data->enable_settings_aot = of_property_read_bool(np, "enable_settings_aot");
 	data->dt_data->support_fod = of_property_read_bool(np, "support_fod");
 
+	data->dt_data->enable_fpcb_noise_test = of_property_read_bool(np, "enable_fpcb_noise_test");
+
 	if (of_property_read_u32_array(np, "imagis,cm_spec", cm_spec, 3)) {
 		input_err(true, dev, "%s: Failed to get zone's size\n", __func__);
 		data->dt_data->cm_min_spec = CM_MIN_SPEC;
@@ -2073,9 +2077,6 @@ static int ist40xx_probe(struct i2c_client *client,
 	struct ist40xx_data *data;
 	struct sec_tclm_data *tdata = NULL;
 	struct input_dev *input_dev;
-#ifdef CONFIG_DISPLAY_SAMSUNG
-	int lcdtype;
-#endif
 
 	input_info(true, &client->dev, "### IMAGIS probe(Slave Addr:0x%02X) ###\n",
 		   client->addr);
@@ -2199,7 +2200,7 @@ static int ist40xx_probe(struct i2c_client *client,
 	data->max_irq_err_cnt = IST40XX_MAX_ERR_CNT;
 	data->report_rate = -1;
 	data->idle_rate = -1;
-	data->timer_period_ms = 5000;
+	data->timer_period_ms = 500;
 	data->status.sys_mode = STATE_POWER_OFF;
 	data->rec_mode = 0;
 	data->rec_type = 0;
@@ -2243,25 +2244,6 @@ static int ist40xx_probe(struct i2c_client *client,
 	trustedui_set_tsp_irq(client->irq);
 	input_info(true, &client->dev, "%s[%d] called!\n", __func__, client->irq);
 #endif
-
-	if (data->dt_data->project_name) {
-		if (strncmp(data->dt_data->project_name, "a90", 3) == 0) {
-#ifdef CONFIG_DISPLAY_SAMSUNG
-			lcdtype = get_lcd_attached("GET");
-			input_info(true, &data->client->dev, "%s: lcdtype: %x (%x)\n", __func__, lcdtype, (lcdtype & 0xff0000));
-
-			/* lcdtype 80xxxx : A90 B-ITO */
-			if ((lcdtype & 0xff0000) == 0x800000) {
-				input_info(true, &data->client->dev, "%s : B-ITO Panel \n", __func__);
-				snprintf(data->dt_data->fw_path, FIRMWARE_PATH_LENGTH, "%s%s_%s_bito.bin",
-					FIRMWARE_PATH, data->dt_data->ic_version,
-					data->dt_data->project_name);
-				input_info(true, &data->client->dev, "%s: firm path: %s\n", __func__,
-					data->dt_data->fw_path);
-			}
-#endif
-		}
-	}
 
 	ret = ist40xx_auto_bin_update(data);
 	if (ret == 0)

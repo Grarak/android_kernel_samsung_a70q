@@ -48,8 +48,9 @@
 #include <linux/sched.h>
 #include <linux/rculist.h>
 
+#ifdef CONFIG_SEC_DEBUG
 #include <linux/sec_debug.h>
-#include <linux/sec_debug_user_reset.h>
+#endif
 
 extern struct bug_entry __start___bug_table[], __stop___bug_table[];
 
@@ -191,27 +192,7 @@ enum bug_trap_type report_bug(unsigned long bugaddr, struct pt_regs *regs)
 		return BUG_TRAP_TYPE_WARN;
 	}
 
-#ifdef CONFIG_USER_RESET_DEBUG
-#define MAX_BUG_STRING_SIZE	56
-	if (file) {
-		unsigned int length;
-		char *new_file;
-		new_file = strstr(file, "kernel");
-		if (new_file == NULL) {
-			length = strlen(file);
-			if (length > MAX_BUG_STRING_SIZE)
-				sec_debug_store_bug_string("%s %u", &file[length - MAX_BUG_STRING_SIZE], line);
-			else
-				sec_debug_store_bug_string("%s %u", file, line);
-		} else {
-			length = strlen(new_file);
-			if (length > MAX_BUG_STRING_SIZE)
-				sec_debug_store_bug_string("%s %u", &new_file[length - MAX_BUG_STRING_SIZE], line);
-			else 
-				sec_debug_store_bug_string("%s %u", new_file, line);
-		}
-	}
-#endif
+	sec_debug_store_bug_string(file, line);
 
 	printk(KERN_DEFAULT "------------[ cut here ]------------\n");
 

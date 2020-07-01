@@ -859,6 +859,13 @@ config MMAP_READAROUND_LIMIT
 	  during the sluggish situation. Add the hard upper-limit for
 	  mmap readaround.
 
+config RBIN
+	bool "RBIN memory support"
+	default n
+	select CLEANCACHE
+	help
+	  This provides RBIN functionality in memory management.
+
 config LARGE_DIRTY_BUFFER
 	bool "Use large dirty_threshold value by enabling dirty_ratio"
 	default n

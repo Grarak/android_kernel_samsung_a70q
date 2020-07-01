@@ -1,4 +1,4 @@
-/* Copyright (c) 2002,2008-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2002, 2008-2017, 2019 The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -164,12 +164,14 @@ static int print_mem_entry(void *data, void *ptr)
 						&egl_image_count);
 
 #if defined(CONFIG_DISPLAY_SAMSUNG) && !defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
-	seq_printf(s, "%p %p %16llu %5d %9s %10s %16s %5d %16llu %6d %6d",
+	seq_printf(s, m->useraddr ? "%p %p %16llu %5d %9s %10s %16s %5d %16llu %6d %6d" :
+			"%p %pK %16llu %5d %9s %10s %16s %5d %16llu %6d %6d",
 			(uint64_t *)(uintptr_t) m->gpuaddr,
 			(unsigned long *) m->useraddr,
 			m->size, entry->id, flags,
 			memtype_str(usermem_type),
-			usage, (m->sgt ? m->sgt->nents : 0), m->mapsize,
+			usage, (m->sgt ? m->sgt->nents : 0),
+			(u64)atomic64_read(&m->mapsize),
 			egl_surface_count, egl_image_count);
 #else
 	seq_printf(s, "%pK %pK %16llu %5d %9s %10s %16s %5d %16llu %6d %6d",
@@ -177,7 +179,8 @@ static int print_mem_entry(void *data, void *ptr)
 			(unsigned long *) m->useraddr,
 			m->size, entry->id, flags,
 			memtype_str(usermem_type),
-			usage, (m->sgt ? m->sgt->nents : 0), m->mapsize,
+			usage, (m->sgt ? m->sgt->nents : 0),
+			(u64)atomic64_read(&m->mapsize),
 			egl_surface_count, egl_image_count);
 #endif
 

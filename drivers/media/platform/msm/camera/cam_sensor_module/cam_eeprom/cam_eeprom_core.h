@@ -28,7 +28,11 @@ int32_t cam_eeprom_check_firmware_cal(uint32_t camera_cal_crc, uint8_t cal_map_v
 #if defined(CONFIG_SEC_A90Q_PROJECT)
 #define TOF_UID_FRONT_PARTRON_1     0xCA16     // Partron 80Mhz~20Mhz 2.1A
 #define TOF_UID_FRONT_PARTRON_2     0xCA26     // Partron 80Mhz~20Mhz 1.5A
-#define TOF_UID_FRONT_SEC           0xAA26     // Samsung 80Mhz~20Mhz 1.5A
+#define TOF_UID_FRONT_SEC_1         0xAA16     // Samsung 80Mhz~20Mhz 2.1A
+#define TOF_UID_FRONT_SEC_2         0xAA26     // Samsung 80Mhz~20Mhz 1.5A
+#define TOF_UID_REAR_PARTRON        0xCA06     // Partron 80Mhz~20Mhz 2.5A
+#define TOF_UID_REAR_SEC            0xAA06     // Samsung 80Mhz~20Mhz 2.5A
+#define TOF_UID_DEFAULT             0xCA05     // Default 100Mhz~20Mhz 2.8A
 #endif
 
 #endif

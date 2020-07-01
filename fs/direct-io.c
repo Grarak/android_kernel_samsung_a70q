@@ -221,6 +221,27 @@ static inline struct page *dio_get_page(struct dio *dio,
 	return dio->pages[sdio->head];
 }
 
+/*
+ * Warn about a page cache invalidation failure during a direct io write.
+ */
+void dio_warn_stale_pagecache(struct file *filp)
+{
+	static DEFINE_RATELIMIT_STATE(_rs, 86400 * HZ, DEFAULT_RATELIMIT_BURST);
+	char pathname[128];
+	struct inode *inode = file_inode(filp);
+	char *path;
+
+	errseq_set(&inode->i_mapping->wb_err, -EIO);
+	if (__ratelimit(&_rs)) {
+		path = file_path(filp, pathname, sizeof(pathname));
+		if (IS_ERR(path))
+			path = "(unknown)";
+		pr_crit("Page cache invalidation failure on direct I/O.  Possible data corruption due to collision with buffered I/O!\n");
+		pr_crit("File: %s PID: %d Comm: %.20s\n", path, current->pid,
+			current->comm);
+	}
+}
+
 /**
  * dio_complete() - called when all DIO BIO I/O has been completed
  * @offset: the byte offset in the file of the completed operation
@@ -292,7 +313,8 @@ static ssize_t dio_complete(struct dio *dio, ssize_t ret, unsigned int flags)
 		err = invalidate_inode_pages2_range(dio->inode->i_mapping,
 					offset >> PAGE_SHIFT,
 					(offset + ret - 1) >> PAGE_SHIFT);
-		WARN_ON_ONCE(err);
+		if (err)
+			dio_warn_stale_pagecache(dio->iocb->ki_filp);
 	}
 
 	if (!(dio->flags & DIO_SKIP_DIO_COUNT))
@@ -306,8 +328,8 @@ static ssize_t dio_complete(struct dio *dio, ssize_t ret, unsigned int flags)
 		 */
 		dio->iocb->ki_pos += transferred;
 
-		if (dio->op == REQ_OP_WRITE)
-			ret = generic_write_sync(dio->iocb,  transferred);
+		if (ret > 0 && dio->op == REQ_OP_WRITE)
+			ret = generic_write_sync(dio->iocb, ret);
 		dio->iocb->ki_complete(dio->iocb, ret, 0);
 	}
 
@@ -432,23 +454,6 @@ dio_bio_alloc(struct dio *dio, struct dio_submit *sdio,
 	sdio->logical_offset_in_bio = sdio->cur_page_fs_offset;
 }
 
-#ifdef CONFIG_PFK
-static bool is_inode_filesystem_type(const struct inode *inode,
-					const char *fs_type)
-{
-	if (!inode || !fs_type)
-		return false;
-
-	if (!inode->i_sb)
-		return false;
-
-	if (!inode->i_sb->s_type)
-		return false;
-
-	return (strcmp(inode->i_sb->s_type->name, fs_type) == 0);
-}
-#endif
-
 /*
  * In the AIO read case we speculatively dirty the pages before starting IO.
  * During IO completion, any of these pages which happen to have been written
@@ -469,7 +474,9 @@ static inline void dio_bio_submit(struct dio *dio, struct dio_submit *sdio)
 
 #ifdef CONFIG_FS_INLINE_ENCRYPTION
 	if (fscrypt_inline_encrypted(dio->inode)) {
-		fscrypt_set_bio_cryptd(dio->inode, bio);
+		fscrypt_set_bio_cryptd_dun(dio->inode, bio,
+				fscrypt_get_dun(dio->inode,
+				(sdio->logical_offset_in_bio >> PAGE_SHIFT)));
 #if defined(CONFIG_CRYPTO_DISKCIPHER_DEBUG)
 		crypto_diskcipher_debug(FS_DIO, bio->bi_opf);
 #endif
@@ -482,15 +489,8 @@ static inline void dio_bio_submit(struct dio *dio, struct dio_submit *sdio)
 	dio->bio_disk = bio->bi_disk;
 #ifdef CONFIG_PFK
 	bio->bi_dio_inode = dio->inode;
-
-/* iv sector for security/pfe/pfk_fscrypt.c and f2fs in fs/f2fs/f2fs.h */
-#define PG_DUN_NEW(i,p)                                            \
-	(((((u64)(i)->i_ino) & 0xffffffff) << 32) | ((p) & 0xffffffff))
-
-	if (is_inode_filesystem_type(dio->inode, "f2fs"))
-		fscrypt_set_ice_dun(dio->inode, bio, PG_DUN_NEW(dio->inode,
-			(sdio->logical_offset_in_bio >> PAGE_SHIFT)));
 #endif
+
 	if (sdio->submit_io) {
 		sdio->submit_io(bio, dio->inode, sdio->logical_offset_in_bio);
 		dio->bio_cookie = BLK_QC_T_NONE;
@@ -708,6 +708,7 @@ static int get_more_blocks(struct dio *dio, struct dio_submit *sdio,
 	unsigned long fs_count;	/* Number of filesystem-sized blocks */
 	int create;
 	unsigned int i_blkbits = sdio->blkbits + sdio->blkfactor;
+	loff_t i_size;
 
 	/*
 	 * If there was a memory error and we've overwritten all the
@@ -737,8 +738,8 @@ static int get_more_blocks(struct dio *dio, struct dio_submit *sdio,
 		 */
 		create = dio->op == REQ_OP_WRITE;
 		if (dio->flags & DIO_SKIP_HOLES) {
-			if (fs_startblk <= ((i_size_read(dio->inode) - 1) >>
-							i_blkbits))
+			i_size = i_size_read(dio->inode);
+			if (i_size && fs_startblk <= (i_size - 1) >> i_blkbits)
 				create = 0;
 		}
 

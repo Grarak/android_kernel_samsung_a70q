@@ -1,4 +1,3 @@
-#define DEBUG
 /* Copyright (c) 2018-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
@@ -17,6 +16,7 @@
 #include <linux/platform_device.h>
 #include <linux/clk.h>
 #include <linux/thermal.h>
+#include <linux/clk-provider.h>
 #include <sound/soc.h>
 #include <sound/soc-dapm.h>
 #include <sound/tlv.h>
@@ -203,6 +203,7 @@ struct wsa_macro_priv {
 	unsigned int vi_feed_value;
 	struct mutex mclk_lock;
 	struct mutex swr_clk_lock;
+	struct mutex clk_lock;
 	struct wsa_macro_swr_ctrl_data *swr_ctrl_data;
 	struct wsa_macro_swr_ctrl_platform_data swr_plat_data;
 	struct work_struct wsa_macro_add_child_devices_work;
@@ -227,6 +228,7 @@ struct wsa_macro_priv {
 	struct wsa_macro_bcl_pmic_params bcl_pmic_params;
 	struct thermal_cooling_device *tcdev;
 	unsigned long thermal_cur_state;
+	int wsa_digital_mute_status[WSA_MACRO_RX_MAX];
 };
 
 static int wsa_macro_config_ear_spkr_gain(struct snd_soc_codec *codec,
@@ -852,6 +854,28 @@ static int wsa_macro_mclk_event(struct snd_soc_dapm_widget *w,
 	return ret;
 }
 
+static int wsa_macro_mclk_reset(struct device *dev)
+{
+	struct wsa_macro_priv *wsa_priv = dev_get_drvdata(dev);
+	int count = 0;
+
+	mutex_lock(&wsa_priv->clk_lock);
+	while (__clk_is_enabled(wsa_priv->wsa_core_clk)) {
+		clk_disable_unprepare(wsa_priv->wsa_npl_clk);
+		clk_disable_unprepare(wsa_priv->wsa_core_clk);
+		count++;
+	}
+	dev_dbg(wsa_priv->dev,
+			"%s: clock reset after ssr, count %d\n", __func__, count);
+	while (count) {
+		clk_prepare_enable(wsa_priv->wsa_core_clk);
+		clk_prepare_enable(wsa_priv->wsa_npl_clk);
+		count--;
+	}
+	mutex_unlock(&wsa_priv->clk_lock);
+	return 0;
+}
+
 static int wsa_macro_mclk_ctrl(struct device *dev, bool enable)
 {
 	struct wsa_macro_priv *wsa_priv = dev_get_drvdata(dev);
@@ -860,6 +884,7 @@ static int wsa_macro_mclk_ctrl(struct device *dev, bool enable)
 	if (!wsa_priv)
 		return -EINVAL;
 
+	mutex_lock(&wsa_priv->clk_lock);
 	if (enable) {
 		ret = clk_prepare_enable(wsa_priv->wsa_core_clk);
 		if (ret < 0) {
@@ -878,6 +903,7 @@ static int wsa_macro_mclk_ctrl(struct device *dev, bool enable)
 		clk_disable_unprepare(wsa_priv->wsa_core_clk);
 	}
 exit:
+	mutex_unlock(&wsa_priv->clk_lock);
 	return ret;
 }
 
@@ -888,6 +914,9 @@ static int wsa_macro_event_handler(struct snd_soc_codec *codec, u16 event,
 	struct wsa_macro_priv *wsa_priv = NULL;
 
 	if (!wsa_macro_get_data(codec, &wsa_dev, &wsa_priv, __func__))
+		return -EINVAL;
+
+	if (!(wsa_priv->swr_ctrl_data))
 		return -EINVAL;
 
 	switch (event) {
@@ -905,6 +934,9 @@ static int wsa_macro_event_handler(struct snd_soc_codec *codec, u16 event,
 		swrm_wcd_notify(
 			wsa_priv->swr_ctrl_data[0].wsa_swr_pdev,
 			SWR_DEVICE_SSR_UP, NULL);
+			break;
+	case BOLERO_MACRO_EVT_CLK_RESET:
+		wsa_macro_mclk_reset(wsa_dev);
 		break;
 	}
 	return 0;
@@ -1714,6 +1746,66 @@ static int wsa_macro_set_ec_hq(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
+static int wsa_macro_get_rx_mute_status(struct snd_kcontrol *kcontrol,
+			       struct snd_ctl_elem_value *ucontrol)
+{
+
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
+	struct device *wsa_dev = NULL;
+	struct wsa_macro_priv *wsa_priv = NULL;
+	int wsa_rx_shift = ((struct soc_multi_mixer_control *)
+		       kcontrol->private_value)->shift;
+
+	if (!wsa_macro_get_data(codec, &wsa_dev, &wsa_priv, __func__))
+		return -EINVAL;
+
+	ucontrol->value.integer.value[0] =
+		wsa_priv->wsa_digital_mute_status[wsa_rx_shift];
+	return 0;
+}
+
+static int wsa_macro_set_rx_mute_status(struct snd_kcontrol *kcontrol,
+			       struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
+	struct device *wsa_dev = NULL;
+	struct wsa_macro_priv *wsa_priv = NULL;
+	int value = ucontrol->value.integer.value[0];
+	int wsa_rx_shift = ((struct soc_multi_mixer_control *)
+			kcontrol->private_value)->shift;
+
+	if (!wsa_macro_get_data(codec, &wsa_dev, &wsa_priv, __func__))
+		return -EINVAL;
+
+	switch (wsa_rx_shift) {
+	case 0:
+		snd_soc_update_bits(codec, BOLERO_CDC_WSA_RX0_RX_PATH_CTL,
+				0x10, value << 4);
+		break;
+	case 1:
+		snd_soc_update_bits(codec, BOLERO_CDC_WSA_RX1_RX_PATH_CTL,
+				0x10, value << 4);
+		break;
+	case 2:
+		snd_soc_update_bits(codec, BOLERO_CDC_WSA_RX0_RX_PATH_MIX_CTL,
+				0x10, value << 4);
+		break;
+	case 3:
+		snd_soc_update_bits(codec, BOLERO_CDC_WSA_RX1_RX_PATH_MIX_CTL,
+				0x10, value << 4);
+		break;
+	default:
+		pr_err("%s: invalid argument rx_shift = %d\n", __func__,
+			wsa_rx_shift);
+		return -EINVAL;
+	}
+
+	dev_dbg(codec->dev, "%s: WSA Digital Mute RX %d Enable %d\n",
+		__func__, wsa_rx_shift, value);
+	wsa_priv->wsa_digital_mute_status[wsa_rx_shift] = value;
+	return 0;
+}
+
 static int wsa_macro_get_compander(struct snd_kcontrol *kcontrol,
 			       struct snd_ctl_elem_value *ucontrol)
 {
@@ -1887,6 +1979,10 @@ static int wsa_macro_rx_mux_put(struct snd_kcontrol *kcontrol,
 			dev_err(wsa_dev, "%s: AIF reset already\n", __func__);
 			return 0;
 		}
+		if (aif_rst >= WSA_MACRO_RX_MAX) {
+			dev_err(wsa_dev, "%s: Invalid AIF reset\n", __func__);
+			return 0;
+		}
 	}
 	wsa_priv->rx_port_value[widget->shift] = rx_port_value;
 
@@ -1894,11 +1990,17 @@ static int wsa_macro_rx_mux_put(struct snd_kcontrol *kcontrol,
 	if (widget->shift >= WSA_MACRO_RX_MIX)
 		bit_input %= WSA_MACRO_RX_MIX;
 
+	dev_dbg(wsa_dev,
+		"%s: mux input: %d, mux output: %d, bit: %d\n",
+		__func__, rx_port_value, widget->shift, bit_input);
+
 	switch (rx_port_value) {
 	case 0:
-		clear_bit(bit_input,
-			  &wsa_priv->active_ch_mask[aif_rst]);
-		wsa_priv->active_ch_cnt[aif_rst]--;
+		if (wsa_priv->active_ch_cnt[aif_rst]) {
+			clear_bit(bit_input,
+				&wsa_priv->active_ch_mask[aif_rst]);
+			wsa_priv->active_ch_cnt[aif_rst]--;
+		}		
 		break;
 	case 1:
 	case 2:
@@ -1908,7 +2010,8 @@ static int wsa_macro_rx_mux_put(struct snd_kcontrol *kcontrol,
 		break;
 	default:
 		dev_err(wsa_dev,
-			"%s: Invalid AIF_ID for WSA RX MUX\n", __func__);
+			"%s: Invalid AIF_ID for WSA RX MUX %d\n",
+			__func__, rx_port_value);
 		return -EINVAL;
 	}
 
@@ -2020,6 +2123,18 @@ static const struct snd_kcontrol_new wsa_macro_snd_controls[] = {
 	SOC_SINGLE_SX_TLV("WSA_RX1 Digital Volume",
 			  BOLERO_CDC_WSA_RX1_RX_VOL_CTL,
 			  0, -84, 40, digital_gain),
+	SOC_SINGLE_EXT("WSA_RX0 Digital Mute", SND_SOC_NOPM, WSA_MACRO_RX0, 1,
+			0, wsa_macro_get_rx_mute_status,
+			wsa_macro_set_rx_mute_status),
+	SOC_SINGLE_EXT("WSA_RX1 Digital Mute", SND_SOC_NOPM, WSA_MACRO_RX1, 1,
+			0, wsa_macro_get_rx_mute_status,
+			wsa_macro_set_rx_mute_status),
+	SOC_SINGLE_EXT("WSA_RX0_MIX Digital Mute", SND_SOC_NOPM,
+			WSA_MACRO_RX_MIX0, 1, 0, wsa_macro_get_rx_mute_status,
+			wsa_macro_set_rx_mute_status),
+	SOC_SINGLE_EXT("WSA_RX1_MIX Digital Mute", SND_SOC_NOPM,
+			WSA_MACRO_RX_MIX1, 1, 0, wsa_macro_get_rx_mute_status,
+			wsa_macro_set_rx_mute_status),
 	SOC_SINGLE_EXT("WSA_COMP1 Switch", SND_SOC_NOPM, WSA_MACRO_COMP1, 1, 0,
 		wsa_macro_get_compander, wsa_macro_set_compander),
 	SOC_SINGLE_EXT("WSA_COMP2 Switch", SND_SOC_NOPM, WSA_MACRO_COMP2, 1, 0,
@@ -2869,6 +2984,7 @@ static int wsa_macro_probe(struct platform_device *pdev)
 	dev_set_drvdata(&pdev->dev, wsa_priv);
 	mutex_init(&wsa_priv->mclk_lock);
 	mutex_init(&wsa_priv->swr_clk_lock);
+	mutex_init(&wsa_priv->clk_lock);
 	wsa_macro_init_ops(&ops, wsa_io_base);
 	ret = bolero_register_macro(&pdev->dev, WSA_MACRO, &ops);
 	if (ret < 0) {
@@ -2880,6 +2996,7 @@ static int wsa_macro_probe(struct platform_device *pdev)
 reg_macro_fail:
 	mutex_destroy(&wsa_priv->mclk_lock);
 	mutex_destroy(&wsa_priv->swr_clk_lock);
+	mutex_destroy(&wsa_priv->clk_lock);
 	return ret;
 }
 
@@ -2900,6 +3017,7 @@ static int wsa_macro_remove(struct platform_device *pdev)
 	bolero_unregister_macro(&pdev->dev, WSA_MACRO);
 	mutex_destroy(&wsa_priv->mclk_lock);
 	mutex_destroy(&wsa_priv->swr_clk_lock);
+	mutex_destroy(&wsa_priv->clk_lock);
 	if (wsa_priv->tcdev)
 		thermal_cooling_device_unregister(wsa_priv->tcdev);
 	return 0;

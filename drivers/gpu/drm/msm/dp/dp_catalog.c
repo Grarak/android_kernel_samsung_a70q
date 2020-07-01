@@ -59,17 +59,17 @@
 }
 
 static u8 const vm_pre_emphasis[4][4] = {
-	{0x00, 0x0B, 0x12, 0xFF},       /* pe0, 0 db */
-	{0x00, 0x0A, 0x12, 0xFF},       /* pe1, 3.5 db */
-	{0x00, 0x0C, 0xFF, 0xFF},       /* pe2, 6.0 db */
+	{0x00, 0x0B, 0x14, 0xFF},       /* pe0, 0 db */
+	{0x00, 0x0B, 0x12, 0xFF},       /* pe1, 3.5 db */
+	{0x00, 0x0B, 0xFF, 0xFF},       /* pe2, 6.0 db */
 	{0xFF, 0xFF, 0xFF, 0xFF}        /* pe3, 9.5 db */
 };
 
 /* voltage swing, 0.2v and 1.0v are not support */
 static u8 const vm_voltage_swing[4][4] = {
-	{0x07, 0x0F, 0x14, 0xFF}, /* sw0, 0.4v  */
-	{0x11, 0x1D, 0x1F, 0xFF}, /* sw1, 0.6 v */
-	{0x18, 0x1F, 0xFF, 0xFF}, /* sw1, 0.8 v */
+	{0x07, 0x0F, 0x16, 0xFF}, /* sw0, 0.4v  */
+	{0x11, 0x1E, 0x1F, 0xFF}, /* sw1, 0.6 v */
+	{0x19, 0x1F, 0xFF, 0xFF}, /* sw1, 0.8 v */
 	{0xFF, 0xFF, 0xFF, 0xFF}  /* sw1, 1.2 v, optional */
 };
 
@@ -87,6 +87,7 @@ struct dp_catalog_io {
 	struct dp_io_data *hdcp_physical;
 	struct dp_io_data *dp_p1;
 	struct dp_io_data *dp_tcsr;
+	struct dp_io_data *dp_pixel_mn;
 };
 
 /* audio related catalog functions */
@@ -760,6 +761,7 @@ static void dp_catalog_ctrl_config_ctrl(struct dp_catalog_ctrl *ctrl, u8 ln_cnt)
 	cfg = dp_read(catalog->exe_mode, io_data, DP_CONFIGURATION_CTRL);
 	cfg &= ~(BIT(4) | BIT(5));
 	cfg |= (ln_cnt - 1) << 4;
+	cfg &= ~BIT(10);
 	dp_write(catalog->exe_mode, io_data, DP_CONFIGURATION_CTRL, cfg);
 
 	cfg = dp_read(catalog->exe_mode, io_data, DP_MAINLINK_CTRL);
@@ -857,6 +859,8 @@ static void dp_catalog_ctrl_lane_mapping(struct dp_catalog_ctrl *ctrl,
 {
 	struct dp_catalog_private *catalog;
 	struct dp_io_data *io_data;
+	u8 l_map[4], i;
+	u32 lane_map_reg = 0;
 
 	if (!ctrl) {
 		pr_err("invalid input\n");
@@ -866,8 +870,14 @@ static void dp_catalog_ctrl_lane_mapping(struct dp_catalog_ctrl *ctrl,
 	catalog = dp_catalog_get_priv(ctrl);
 	io_data = catalog->io.dp_link;
 
+	for (i = 0; i < DP_MAX_PHY_LN; i++)
+		l_map[i] = lane_map[i];
+
+	lane_map_reg = ((l_map[3]&3)<<6)|((l_map[2]&3)<<4)|((l_map[1]&3)<<2)
+			|(l_map[0]&3);
+
 	dp_write(catalog->exe_mode, io_data, DP_LOGICAL2PHYSICAL_LANE_MAPPING,
-			0xe4);
+			lane_map_reg);
 }
 
 static void dp_catalog_ctrl_lane_pnswap(struct dp_catalog_ctrl *ctrl,
@@ -964,12 +974,10 @@ static void dp_catalog_panel_config_misc(struct dp_catalog_panel *panel)
 }
 
 static void dp_catalog_panel_config_msa(struct dp_catalog_panel *panel,
-					u32 rate, u32 stream_rate_khz,
-					bool fixed_nvid)
+					u32 rate, u32 stream_rate_khz)
 {
 	u32 pixel_m, pixel_n;
 	u32 mvid, nvid;
-	u64 mvid_calc;
 	u32 const nvid_fixed = 0x8000;
 	u32 const link_rate_hbr2 = 540000;
 	u32 const link_rate_hbr3 = 810000;
@@ -989,56 +997,38 @@ static void dp_catalog_panel_config_msa(struct dp_catalog_panel *panel,
 	}
 
 	catalog = dp_catalog_get_priv(panel);
-	if (fixed_nvid) {
-		pr_debug("use fixed NVID=0x%x\n", nvid_fixed);
-		nvid = nvid_fixed;
+	io_data = catalog->io.dp_mmss_cc;
 
-		pr_debug("link rate=%dkbps, stream_rate_khz=%uKhz",
-			rate, stream_rate_khz);
+	if (panel->stream_id == DP_STREAM_1)
+		strm_reg_off = MMSS_DP_PIXEL1_M - MMSS_DP_PIXEL_M;
 
-		/*
-		 * For intermediate results, use 64 bit arithmetic to avoid
-		 * loss of precision.
-		 */
-		mvid_calc = (u64) stream_rate_khz * nvid;
-		mvid_calc = div_u64(mvid_calc, rate);
+	pixel_m = dp_read(catalog->exe_mode, io_data,
+			MMSS_DP_PIXEL_M + strm_reg_off);
+	pixel_n = dp_read(catalog->exe_mode, io_data,
+			MMSS_DP_PIXEL_N + strm_reg_off);
+	pr_debug("pixel_m=0x%x, pixel_n=0x%x\n", pixel_m, pixel_n);
 
-		/*
-		 * truncate back to 32 bits as this final divided value will
-		 * always be within the range of a 32 bit unsigned int.
-		 */
-		mvid = (u32) mvid_calc;
+	mvid = (pixel_m & 0xFFFF) * 5;
+	nvid = (0xFFFF & (~pixel_n)) + (pixel_m & 0xFFFF);
 
-		if (panel->widebus_en) {
-			mvid <<= 1;
-			nvid <<= 1;
-		}
-	} else {
-		io_data = catalog->io.dp_mmss_cc;
+	if (nvid < nvid_fixed) {
+		u32 temp;
 
-		if (panel->stream_id == DP_STREAM_1)
-			strm_reg_off = MMSS_DP_PIXEL1_M - MMSS_DP_PIXEL_M;
-
-		pixel_m = dp_read(catalog->exe_mode, io_data,
-				MMSS_DP_PIXEL_M + strm_reg_off);
-		pixel_n = dp_read(catalog->exe_mode, io_data,
-				MMSS_DP_PIXEL_N + strm_reg_off);
-		pr_debug("pixel_m=0x%x, pixel_n=0x%x\n", pixel_m, pixel_n);
-
-		mvid = (pixel_m & 0xFFFF) * 5;
-		nvid = (0xFFFF & (~pixel_n)) + (pixel_m & 0xFFFF);
-
-		pr_debug("rate = %d\n", rate);
-
-		if (panel->widebus_en)
-			mvid <<= 1;
-
-		if (link_rate_hbr2 == rate)
-			nvid *= 2;
-
-		if (link_rate_hbr3 == rate)
-			nvid *= 3;
+		temp = (nvid_fixed / nvid) * nvid;
+		mvid = (nvid_fixed / nvid) * mvid;
+		nvid = temp;
 	}
+
+	pr_debug("rate = %d\n", rate);
+
+	if (panel->widebus_en)
+		mvid <<= 1;
+
+	if (link_rate_hbr2 == rate)
+		nvid *= 2;
+
+	if (link_rate_hbr3 == rate)
+		nvid *= 3;
 
 	io_data = catalog->io.dp_link;
 
@@ -1104,6 +1094,8 @@ static void dp_catalog_ctrl_usb_reset(struct dp_catalog_ctrl *ctrl, bool flip)
 
 	dp_write(catalog->exe_mode, io_data, USB3_DP_COM_RESET_OVRD_CTRL, 0x0a);
 	dp_write(catalog->exe_mode, io_data, USB3_DP_COM_PHY_MODE_CTRL, 0x02);
+	pr_debug("Program PHYMODE to DP only\n");
+
 	dp_write(catalog->exe_mode, io_data, USB3_DP_COM_SW_RESET, 0x01);
 	/* make sure usb3 com phy software reset is done */
 	wmb();
@@ -2406,6 +2398,7 @@ static void dp_catalog_get_io_buf(struct dp_catalog_private *catalog)
 	dp_catalog_fill_io_buf(hdcp_physical);
 	dp_catalog_fill_io_buf(dp_p1);
 	dp_catalog_fill_io_buf(dp_tcsr);
+	dp_catalog_fill_io_buf(dp_pixel_mn);
 }
 
 static void dp_catalog_get_io(struct dp_catalog_private *catalog)
@@ -2425,6 +2418,7 @@ static void dp_catalog_get_io(struct dp_catalog_private *catalog)
 	dp_catalog_fill_io(hdcp_physical);
 	dp_catalog_fill_io(dp_p1);
 	dp_catalog_fill_io(dp_tcsr);
+	dp_catalog_fill_io(dp_pixel_mn);
 }
 
 static void dp_catalog_set_exe_mode(struct dp_catalog *dp_catalog, char *mode)

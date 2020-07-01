@@ -640,6 +640,17 @@ static int sendcmd(struct adreno_device *adreno_dev,
 	secs = time.ktime;
 	nsecs = do_div(secs, 1000000000);
 
+	/*
+	 * For the first submission in any given command queue update the
+	 * expected expire time - this won't actually be used / updated until
+	 * the command queue in question goes current, but universally setting
+	 * it here avoids the possibilty of some race conditions with preempt
+	 */
+
+	if (dispatch_q->inflight == 1)
+		dispatch_q->expires = jiffies +
+			msecs_to_jiffies(adreno_drawobj_timeout);
+
 	trace_adreno_cmdbatch_submitted(drawobj, (int) dispatcher->inflight,
 		time.ticks, (unsigned long) secs, nsecs / 1000, drawctxt->rb,
 		adreno_get_rptr(drawctxt->rb));
@@ -651,17 +662,6 @@ static int sendcmd(struct adreno_device *adreno_dev,
 	dispatch_q->cmd_q[dispatch_q->tail] = cmdobj;
 	dispatch_q->tail = (dispatch_q->tail + 1) %
 		ADRENO_DISPATCH_DRAWQUEUE_SIZE;
-
-	/*
-	 * For the first submission in any given command queue update the
-	 * expected expire time - this won't actually be used / updated until
-	 * the command queue in question goes current, but universally setting
-	 * it here avoids the possibilty of some race conditions with preempt
-	 */
-
-	if (dispatch_q->inflight == 1)
-		dispatch_q->expires = jiffies +
-			msecs_to_jiffies(adreno_drawobj_timeout);
 
 	/*
 	 * If we believe ourselves to be current and preemption isn't a thing,
@@ -1396,6 +1396,22 @@ int adreno_dispatcher_queue_cmds(struct kgsl_device_private *dev_priv,
 
 	user_ts = *timestamp;
 
+	/*
+	 * If there is only one drawobj in the array and it is of
+	 * type SYNCOBJ_TYPE, skip comparing user_ts as it can be 0
+	 */
+	if (!(count == 1 && drawobj[0]->type == SYNCOBJ_TYPE) &&
+		(drawctxt->base.flags & KGSL_CONTEXT_USER_GENERATED_TS)) {
+		/*
+		 * User specified timestamps need to be greater than the last
+		 * issued timestamp in the context
+		 */
+		if (timestamp_cmp(drawctxt->timestamp, user_ts) >= 0) {
+			spin_unlock(&drawctxt->lock);
+			return -ERANGE;
+		}
+	}
+
 	for (i = 0; i < count; i++) {
 
 		switch (drawobj[i]->type) {
@@ -1681,7 +1697,7 @@ static void adreno_fault_header(struct kgsl_device *device,
 	struct kgsl_drawobj *drawobj = DRAWOBJ(cmdobj);
 	unsigned int status, rptr, wptr, ib1sz, ib2sz;
 	uint64_t ib1base, ib2base;
-	
+
 	/*
 	* GPU registers can't be accessed if the gx headswitch is off.
 	* During the gx off case access to GPU gx blocks will show data
@@ -1717,6 +1733,9 @@ static void adreno_fault_header(struct kgsl_device *device,
 	if (drawobj != NULL) {
 		struct adreno_context *drawctxt =
 			ADRENO_CONTEXT(drawobj->context);
+
+		drawctxt->base.total_fault_count++;
+		drawctxt->base.last_faulted_cmd_ts = drawobj->timestamp;
 
 		trace_adreno_gpu_fault(drawobj->context->id,
 			drawobj->timestamp,
@@ -2121,7 +2140,7 @@ static int dispatcher_do_fault(struct adreno_device *adreno_dev)
 	}
 
 	/* Mask all GMU interrupts */
-	if (gmu_core_isenabled(device)) {
+	if (gmu_core_gpmu_isenabled(device)) {
 		adreno_write_gmureg(adreno_dev,
 			ADRENO_REG_GMU_AO_HOST_INTERRUPT_MASK,
 			0xFFFFFFFF);
@@ -2262,14 +2281,6 @@ static int dispatcher_do_fault(struct adreno_device *adreno_dev)
 	}
 
 	atomic_add(halt, &adreno_dev->halt);
-
-	/*
-	 * At this point it is safe to assume that we recovered. Setting
-	 * this field allows us to take a new snapshot for the next failure
-	 * if we are prioritizing the first unrecoverable snapshot.
-	 */
-	if (device->snapshot)
-		device->snapshot->recovered = true;
 
 	return 1;
 }

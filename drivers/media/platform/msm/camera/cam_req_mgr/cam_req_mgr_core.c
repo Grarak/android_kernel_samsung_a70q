@@ -251,8 +251,12 @@ static int __cam_req_mgr_traverse(struct cam_req_mgr_traverse *traverse_data)
 		}
 	} else {
 		/* This pd table is not ready to proceed with asked idx */
-		CAM_INFO(CAM_CRM,
+		CAM_DBG(CAM_CRM,
 			"Skip Frame: req: %lld not ready pd: %d open_req count: %d",
+			CRM_GET_REQ_ID(traverse_data->in_q, curr_idx),
+			tbl->pd,
+			traverse_data->open_req_cnt);
+		trace_printk("Skip Frame: req: %lld not ready pd: %d open_req count: %d\n",
 			CRM_GET_REQ_ID(traverse_data->in_q, curr_idx),
 			tbl->pd,
 			traverse_data->open_req_cnt);
@@ -989,6 +993,7 @@ static int __cam_req_mgr_process_req(struct cam_req_mgr_core_link *link,
 	uint32_t trigger)
 {
 	int                                  rc = 0, idx;
+	int                                  reset_step = 0;
 	struct cam_req_mgr_slot             *slot = NULL;
 	struct cam_req_mgr_req_queue        *in_q;
 	struct cam_req_mgr_core_session     *session;
@@ -1121,8 +1126,15 @@ static int __cam_req_mgr_process_req(struct cam_req_mgr_core_link *link,
 				slot->req_id,
 				link->link_hdl);
 			idx = in_q->rd_idx;
+			reset_step = link->max_delay;
+			if (link->sync_link) {
+				if ((link->in_msync_mode) &&
+					(link->sync_link->is_master))
+					reset_step =
+						link->sync_link->max_delay;
+			}
 			__cam_req_mgr_dec_idx(
-				&idx, link->max_delay + 1,
+				&idx, reset_step + 1,
 				in_q->num_slots);
 			__cam_req_mgr_reset_req_slot(link, idx);
 		}
@@ -1905,15 +1917,14 @@ int cam_req_mgr_process_add_req(void *priv, void *data)
 	slot->state = CRM_REQ_STATE_PENDING;
 	slot->req_ready_map |= (1 << device->dev_bit);
 
-	CAM_DBG(CAM_CRM, "idx %d dev_hdl %x req_id %lld pd %d ready_map %x",
-		idx, add_req->dev_hdl, add_req->req_id, tbl->pd,
+	trace_printk("link 0x%x idx %d dev_hdl %x req_id %lld pd %d ready_map %x\n",
+		link->link_hdl, idx, add_req->dev_hdl, add_req->req_id, tbl->pd,
 		slot->req_ready_map);
 
 	trace_cam_req_mgr_add_req(link, idx, add_req, tbl, device);
 
 	if (slot->req_ready_map == tbl->dev_mask) {
-		CAM_DBG(CAM_REQ,
-			"link 0x%x idx %d req_id %lld pd %d SLOT READY",
+		trace_printk("link 0x%x idx %d req_id %lld pd %d SLOT READY\n",
 			link->link_hdl, idx, add_req->req_id, tbl->pd);
 		slot->state = CRM_REQ_STATE_READY;
 	}

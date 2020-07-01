@@ -27,6 +27,11 @@ struct fscrypt_operations {
 	const char *key_prefix;
 	int (*get_context)(struct inode *, void *, size_t);
 	int (*set_context)(struct inode *, const void *, size_t, void *);
+	unsigned long long (*get_dun)(const struct inode *, pgoff_t p);
+#if defined(CONFIG_DDAR) || defined(CONFIG_FSCRYPT_SDP)
+	int (*get_knox_context)(struct inode *, const char *, void *, size_t);
+	int (*set_knox_context)(struct inode *, const char *, const void *, size_t, void *);
+#endif
 	bool (*dummy_context)(struct inode *);
 	bool (*empty_dir)(struct inode *);
 	unsigned int max_namelen;

@@ -490,7 +490,7 @@ void manager_notifier_usbdp_support(void)
 }
 
 static int manager_external_notifier_notification(struct notifier_block *nb,
-		unsigned long action, void *data)
+				unsigned long action, void *data)
 {
 	int ret = 0;
 	int enable = *(int *)data;
@@ -498,14 +498,21 @@ static int manager_external_notifier_notification(struct notifier_block *nb,
 	switch (action) {
 	case EXTERNAL_NOTIFY_DEVICEADD:
 		pr_info("%s EXTERNAL_NOTIFY_DEVICEADD, enable=%d\n", __func__, enable);
-		if (enable && 
-			typec_manager.ccic_drp_state == USB_STATUS_NOTIFY_ATTACH_DFP) {
+		
+		pr_info("drp_state %d, ccic_attach_state %d, muic_attach_state %d\n", typec_manager.ccic_drp_state, typec_manager.ccic_attach_state, typec_manager.muic_attach_state);
+		if (enable &&
+			typec_manager.ccic_drp_state == USB_STATUS_NOTIFY_ATTACH_DFP &&
+			typec_manager.muic_attach_state != MUIC_NOTIFY_CMD_DETACH) {
 			pr_info("%s: a usb device is added in host mode\n", __func__);
+			/* USB cable Type */
+			manager_event_work(CCIC_NOTIFY_DEV_MANAGER, CCIC_NOTIFY_DEV_BATTERY,
+				CCIC_NOTIFY_ID_USB, 0, 0, PD_USB_TYPE);
 		}
 		break;
 	default:
 		break;
 	}
+
 	return ret;
 }
 
@@ -1088,7 +1095,12 @@ int manager_notifier_register(struct notifier_block *nb, notifier_fn_t notifier,
 		m_noti.src = CCIC_NOTIFY_DEV_MANAGER;
 		m_noti.dest = CCIC_NOTIFY_DEV_USB;
 		m_noti.id = CCIC_NOTIFY_ID_USB;
-		if (!typec_manager.water_det && typec_manager.cable_type != MANAGER_NOTIFY_MUIC_CHARGER){
+
+		if (!typec_manager.water_det && typec_manager.cable_type != MANAGER_NOTIFY_MUIC_CHARGER
+#if !defined(CONFIG_USB_CCIC_NOTIFIER_USING_QC)
+			&& !(typec_manager.ccic_rid_state == RID_523K || typec_manager.ccic_rid_state == RID_619K)
+#endif
+			){
 			if (typec_manager.ccic_drp_state) {
 				m_noti.sub1 = typec_manager.ccic_attach_state;
 				m_noti.sub2 = typec_manager.ccic_drp_state;

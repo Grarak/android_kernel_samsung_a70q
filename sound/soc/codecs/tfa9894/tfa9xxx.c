@@ -2766,7 +2766,12 @@ static struct snd_soc_dai_driver tfa9xxx_dai[] = {
 
 static int tfa9xxx_ext_reset(struct tfa9xxx *tfa9xxx)
 {
-	if (tfa9xxx && gpio_is_valid(tfa9xxx->reset_gpio)) {
+	if (!tfa9xxx) {
+		pr_err("%s: tfa9xxx is not available\n", __func__);
+		return 0;
+	}
+
+	if (gpio_is_valid(tfa9xxx->reset_gpio)) {
 		dev_info(&tfa9xxx->i2c->dev, "%s reset (RST pin)\n",
 			__func__);
 

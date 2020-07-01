@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -643,6 +643,22 @@ static int for_each_subsys_device(struct subsys_device **list,
 	return 0;
 }
 
+static void subsys_notif_uevent(struct subsys_desc *desc,
+				enum subsys_notif_type notif)
+{
+	char *envp[3];
+
+	if (notif == SUBSYS_AFTER_POWERUP) {
+		envp[0] = kasprintf(GFP_KERNEL, "SUBSYSTEM=%s", desc->name);
+		envp[1] = kasprintf(GFP_KERNEL, "NOTIFICATION=%d", notif);
+		envp[2] = NULL;
+		kobject_uevent_env(&desc->dev->kobj, KOBJ_CHANGE, envp);
+		pr_debug("%s %s sent\n", envp[0], envp[1]);
+		kfree(envp[1]);
+		kfree(envp[0]);
+	}
+}
+
 static void notify_each_subsys_device(struct subsys_device **list,
 		unsigned int count,
 		enum subsys_notif_type notif, void *data)
@@ -689,6 +705,7 @@ static void notify_each_subsys_device(struct subsys_device **list,
 								&notif_data);
 		cancel_timeout(dev->desc);
 		trace_pil_notif("after_send_notif", notif, dev->desc->fw_name);
+		subsys_notif_uevent(dev->desc, notif);
 	}
 }
 
@@ -989,7 +1006,7 @@ void *__subsystem_get(const char *name, const char *fw_name)
 		goto err_module;
 	}
 
-	subsys_d = subsystem_get(subsys->desc->depends_on);
+	subsys_d = subsystem_get(subsys->desc->pon_depends_on);
 	if (IS_ERR(subsys_d)) {
 		retval = subsys_d;
 		goto err_depends;
@@ -1069,6 +1086,10 @@ void subsystem_put(void *subsystem)
 	if (IS_ERR_OR_NULL(subsys))
 		return;
 
+	subsys_d = find_subsys_device(subsys->desc->poff_depends_on);
+	if (subsys_d)
+		subsystem_put(subsys_d);
+
 	track = subsys_get_track(subsys);
 	mutex_lock(&track->lock);
 	if (WARN(!subsys->count, "%s: %s: Reference count mismatch\n",
@@ -1082,11 +1103,6 @@ void subsystem_put(void *subsystem)
 	}
 	mutex_unlock(&track->lock);
 
-	subsys_d = find_subsys_device(subsys->desc->depends_on);
-	if (subsys_d) {
-		subsystem_put(subsys_d);
-		put_device(&subsys_d->dev);
-	}
 	module_put(subsys->owner);
 	put_device(&subsys->dev);
 	return;
@@ -1282,7 +1298,7 @@ int subsystem_restart_dev(struct subsys_device *dev)
     
     send_early_notifications(dev->early_notify);
 
-	if ((sec_debug_is_modem_separate_debug_ssr() ==
+	if ((sec_debug_summary_is_modem_separate_debug_ssr() ==
 	    SEC_DEBUG_MODEM_SEPARATE_EN)
 	    && strcmp(name, "slpi")
 	    && strcmp(name, "adsp")) {
@@ -1295,12 +1311,6 @@ int subsystem_restart_dev(struct subsys_device *dev)
 		dev->restart_level = RESET_SUBSYS_COUPLED;
 	else
 		dev->restart_level = RESET_SOC;
-
-#if defined(CONFIG_SEC_A70Q_PROJECT) || defined(CONFIG_SEC_A60Q_PROJECT)
-	if (!strcmp(name, "adsp")) {
-		dev->restart_level = RESET_SUBSYS_COUPLED;
-	}
-#endif
 
 	if (!strncmp(name, "modem", 5)) {
 		if (silent_ssr)  /* qcrtr ioctl force silent ssr */
@@ -1784,6 +1794,14 @@ static int subsys_parse_devicetree(struct subsys_desc *desc)
 							PTR_ERR(order));
 		return PTR_ERR(order);
 	}
+
+	if (of_property_read_string(pdev->dev.of_node, "qcom,pon-depends-on",
+				&desc->pon_depends_on))
+		pr_debug("pon-depends-on not set for %s\n", desc->name);
+
+	if (of_property_read_string(pdev->dev.of_node, "qcom,poff-depends-on",
+				&desc->poff_depends_on))
+		pr_debug("poff-depends-on not set for %s\n", desc->name);
 
 	return 0;
 }

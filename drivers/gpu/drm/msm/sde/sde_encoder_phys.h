@@ -205,6 +205,7 @@ struct sde_encoder_phys_ops {
  * @INTR_IDX_UNDERRUN: Underrun unterrupt for video and cmd mode panel
  * @INTR_IDX_RDPTR:    Readpointer done unterrupt for cmd mode panel
  * @INTR_IDX_WB_DONE:  Writeback done interrupt for WB
+ * @INTR_IDX_PP1_OVFL: Pingpong overflow interrupt on PP1 for Concurrent WB
  * @INTR_IDX_PP2_OVFL: Pingpong overflow interrupt on PP2 for Concurrent WB
  * @INTR_IDX_PP3_OVFL: Pingpong overflow interrupt on PP3 for Concurrent WB
  * @INTR_IDX_PP4_OVFL: Pingpong overflow interrupt on PP4 for Concurrent WB
@@ -220,6 +221,7 @@ enum sde_intr_idx {
 	INTR_IDX_RDPTR,
 	INTR_IDX_AUTOREFRESH_DONE,
 	INTR_IDX_WB_DONE,
+	INTR_IDX_PP1_OVFL,
 	INTR_IDX_PP2_OVFL,
 	INTR_IDX_PP3_OVFL,
 	INTR_IDX_PP4_OVFL,
@@ -258,6 +260,7 @@ struct sde_encoder_irq {
  * @hw_ctl:		Hardware interface to the ctl registers
  * @hw_intf:		Hardware interface to INTF registers
  * @hw_cdm:		Hardware interface to the cdm registers
+ * @hw_qdss:		Hardware interface to the qdss registers
  * @cdm_cfg:		Chroma-down hardware configuration
  * @hw_pp:		Hardware interface to the ping pong registers
  * @sde_kms:		Pointer to the sde_kms top level
@@ -307,6 +310,7 @@ struct sde_encoder_phys {
 	struct sde_hw_ctl *hw_ctl;
 	struct sde_hw_intf *hw_intf;
 	struct sde_hw_cdm *hw_cdm;
+	struct sde_hw_qdss *hw_qdss;
 	struct sde_hw_cdm_cfg cdm_cfg;
 	struct sde_hw_pingpong *hw_pp;
 	struct sde_kms *sde_kms;

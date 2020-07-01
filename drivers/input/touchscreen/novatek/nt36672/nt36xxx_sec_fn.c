@@ -1101,7 +1101,7 @@ static int nvt_ts_mode_switch(struct nvt_ts_data *ts, u8 cmd, bool stored)
 		buf[1] = cmd;
 		nvt_ts_i2c_write(ts, I2C_FW_Address, buf, 2);
 
-		usleep_range(1000, 1500);
+		usleep_range(15000, 16000);
 
 		//---read cmd status---
 		buf[0] = EVENT_MAP_HOST_CMD;
@@ -1225,6 +1225,16 @@ static void fw_update(void *device_data)
 	int ret;
 
 	sec_cmd_set_default_result(sec);
+
+#if defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
+	if (sec->cmd_param[0] == UMS) {
+		input_err(true, &ts->client->dev, "%s: user_ship, skip\n", __func__);
+		snprintf(buff, sizeof(buff), "OK");
+		sec_cmd_set_cmd_result(sec, buff, strnlen(buff, sizeof(buff)));
+		sec->cmd_state = SEC_CMD_STATUS_OK;
+		return;
+	}
+#endif
 
 	switch (sec->cmd_param[0]) {
 	case BUILT_IN:

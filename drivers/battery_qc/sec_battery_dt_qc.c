@@ -74,7 +74,7 @@ int sec_bat_parse_dt(struct device *dev,
 #ifdef CONFIG_SEC_FACTORY
 	battery->default_charging_current = 1500;
 	battery->charging_current[POWER_SUPPLY_TYPE_USB_DCP].fast_charging_current = 1500;
-#if defined(CONFIG_SEC_A70Q_PROJECT)
+#if defined(CONFIG_SEC_A70Q_PROJECT) || defined(CONFIG_SEC_A70S_PROJECT)
 	battery->charging_current[POWER_SUPPLY_TYPE_AFC].fast_charging_current = 2400;
 #endif
 #endif

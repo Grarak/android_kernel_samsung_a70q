@@ -242,6 +242,8 @@ struct etspi_data {
 	int sensortype;
 	u32 spi_value;
 	struct device *fp_device;
+	int reset_count;
+	int interrupt_count;
 #ifdef ENABLE_SENSORS_FPRINT_SECURE
 	bool enabled_clk;
 	bool isGpio_cfgDone;

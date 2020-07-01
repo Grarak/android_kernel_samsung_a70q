@@ -19,22 +19,27 @@
 const char *cisd_data_str[] = {
 	"RESET_ALG", "ALG_INDEX", "FULL_CNT", "CAP_MAX", "CAP_MIN", "RECHARGING_CNT", "VALERT_CNT",
 	"BATT_CYCLE", "WIRE_CNT", "WIRELESS_CNT", "HIGH_SWELLING_CNT", "LOW_SWELLING_CNT",
-	"SWELLING_CHARGING", "SWELLING_FULL_CNT", "SWELLING_RECOVERY_CNT", "AICL_CNT", "BATT_THM_MAX",
+	"WC_HIGH_SWELLING_CNT", "SWELLING_FULL_CNT", "SWELLING_RECOVERY_CNT", "AICL_CNT", "BATT_THM_MAX",
 	"BATT_THM_MIN", "CHG_THM_MAX", "CHG_THM_MIN", "WPC_THM_MAX", "WPC_THM_MIN", "USB_THM_MAX", "USB_THM_MIN",
 	"CHG_BATT_THM_MAX", "CHG_BATT_THM_MIN", "CHG_CHG_THM_MAX", "CHG_CHG_THM_MIN", "CHG_WPC_THM_MAX",
 	"CHG_WPC_THM_MIN", "CHG_USB_THM_MAX", "CHG_USB_THM_MIN", "USB_OVERHEAT_CHARGING", "UNSAFETY_VOLT",
-	"UNSAFETY_TEMP", "SAFETY_TIMER", "VSYS_OVP", "VBAT_OVP", "AFC_FAIL", "BUCK_OFF", "WATER_DET", "DROP_SENSOR"
+	"UNSAFETY_TEMP", "SAFETY_TIMER", "VSYS_OVP", "VBAT_OVP", "USB_OVERHEAT_RAPID_CHANGE", "BUCK_OFF",
+	"USB_OVERHEAT_ALONE", "DROP_SENSOR"
 };
 const char *cisd_data_str_d[] = {
 	"FULL_CNT_D", "CAP_MAX_D", "CAP_MIN_D", "RECHARGING_CNT_D", "VALERT_CNT_D", "WIRE_CNT_D", "WIRELESS_CNT_D",
-	"HIGH_SWELLING_CNT_D", "LOW_SWELLING_CNT_D", "SWELLING_CHARGING_D", "SWELLING_FULL_CNT_D",
+	"HIGH_SWELLING_CNT_D", "LOW_SWELLING_CNT_D", "WC_HIGH_SWELLING_CNT_D", "SWELLING_FULL_CNT_D",
 	"SWELLING_RECOVERY_CNT_D", "AICL_CNT_D", "BATT_THM_MAX_D", "BATT_THM_MIN_D", "CHG_THM_MAX_D",
 	"CHG_THM_MIN_D", "WPC_THM_MAX_D", "WPC_THM_MIN_D", "USB_THM_MAX_D", "USB_THM_MIN_D",
 	"CHG_BATT_THM_MAX_D", "CHG_BATT_THM_MIN_D", "CHG_CHG_THM_MAX_D", "CHG_CHG_THM_MIN_D",
 	"CHG_WPC_THM_MAX_D", "CHG_WPC_THM_MIN_D", "CHG_USB_THM_MAX_D", "CHG_USB_THM_MIN_D",
 	"USB_OVERHEAT_CHARGING_D", "UNSAFETY_VOLT_D", "UNSAFETY_TEMP_D", "SAFETY_TIMER_D", "VSYS_OVP_D",
-	"VBAT_OVP_D", "AFC_FAIL_D", "BUCK_OFF_D", "WATER_DET_D", "DROP_SENSOR_D"
+	"VBAT_OVP_D", "USB_OVERHEAT_RAPID_CHANGE_D", "BUCK_OFF_D", "USB_OVERHEAT_ALONE_D", "DROP_SENSOR_D"
 };
+
+const char *cisd_cable_data_str[] = {"INDEX", "TA", "AFC", "AFC_FAIL", "QC", "QC_FAIL", "PD", "PD_HIGH", "HV_WC_20"};
+const char *cisd_tx_data_str[] = {"INDEX", "ON", "GEAR", "PHONE", "OTHER"};
+const char *cisd_event_data_str[] = {"DC_ERR", "TA_OCP_DET", "TA_OCP_ON"};
 
 bool sec_bat_cisd_check(struct sec_battery_info *battery)
 {
@@ -66,6 +71,9 @@ bool sec_bat_cisd_check(struct sec_battery_info *battery)
 			pcisd->data[CISD_DATA_VBAT_OVP]++;
 			pcisd->data[CISD_DATA_VBAT_OVP_PER_DAY]++;
 			pcisd->state |= CISD_STATE_OVER_VOLTAGE;
+#if defined(CONFIG_SEC_ABC)
+			sec_abc_send_event("MODULE=battery@ERROR=over_voltage");
+#endif
 		}
 
 		if (battery->temperature > pcisd->data[CISD_DATA_CHG_BATT_TEMP_MAX])
@@ -125,6 +133,9 @@ bool sec_bat_cisd_check(struct sec_battery_info *battery)
 				pcisd->data[CISD_DATA_VBAT_OVP]++;
 				pcisd->data[CISD_DATA_VBAT_OVP_PER_DAY]++;
 				pcisd->state |= CISD_STATE_OVER_VOLTAGE;
+#if defined(CONFIG_SEC_ABC)
+				sec_abc_send_event("MODULE=battery@ERROR=over_voltage");
+#endif
 			}
 		}
 
@@ -279,7 +290,7 @@ static void add_pad_data(struct cisd* cisd, unsigned int pad_id, unsigned int pa
 	struct pad_data* temp_data = cisd->pad_array->next;
 	struct pad_data* pad_data;
 
-	if (pad_id == 0 || pad_id >= MAX_PAD_ID)
+	if (pad_id >= MAX_PAD_ID)
 		return;
 
 	pad_data = create_pad_data(pad_id, pad_count);
@@ -317,23 +328,32 @@ void init_cisd_pad_data(struct cisd* cisd)
 	}
 
 	/* create dummy data */
-	cisd->pad_count = 0;
 	cisd->pad_array = create_pad_data(0, 0);
 	if (cisd->pad_array == NULL)
-		return;
+		goto err_create_dummy_data;
 	temp_data = create_pad_data(MAX_PAD_ID, 0);
 	if (temp_data == NULL) {
 		kfree(cisd->pad_array);
-		return;
+		cisd->pad_array = NULL;
+		goto err_create_dummy_data;
 	}
+	cisd->pad_count = 0;
 	cisd->pad_array->next = temp_data;
 	temp_data->prev = cisd->pad_array;
+
+err_create_dummy_data:
 	mutex_unlock(&cisd->padlock);
 }
 
 void count_cisd_pad_data(struct cisd* cisd, unsigned int pad_id)
 {
 	struct pad_data* pad_data;
+
+	if (cisd->pad_array == NULL) {
+		pr_info("%s: can't update the connected count of pad_id(0x%x) because of null\n",
+			__func__, pad_id);
+		return;
+	}
 
 	mutex_lock(&cisd->padlock);
 	if ((pad_data = find_pad_data_by_id(cisd, pad_id)) != NULL)
@@ -346,6 +366,8 @@ void count_cisd_pad_data(struct cisd* cisd, unsigned int pad_id)
 static unsigned int convert_wc_index_to_pad_id(unsigned int wc_index)
 {
 	switch (wc_index) {
+	case WC_UNKNOWN:
+		return WC_PAD_ID_UNKNOWN;
 	case WC_SNGL_NOBLE:
 		return WC_PAD_ID_SNGL_NOBLE;
 	case WC_SNGL_VEHICLE:
@@ -379,7 +401,7 @@ void set_cisd_pad_data(struct sec_battery_info *battery, const char* buf)
 	int i, x;
 
 	pr_info("%s: %s\n", __func__, buf);
-	if (sscanf(buf, "%10d%n", &pad_index, &x) <= 0) {
+	if (sscanf(buf, "%10d %n", &pad_index, &x) <= 0) {
 		pr_info("%s: failed to read pad index\n", __func__);
 		return;
 	}
@@ -389,9 +411,14 @@ void set_cisd_pad_data(struct sec_battery_info *battery, const char* buf)
 	if (pcisd->pad_count > 0)
 		init_cisd_pad_data(pcisd);
 
+	if (pcisd->pad_array == NULL) {
+		pr_info("%s: can't set the pad data because of null\n", __func__);
+		return;
+	}
+
 	if (!pad_index) {
 		for (i = WC_DATA_INDEX + 1; i < WC_DATA_MAX; i++) {
-			if (sscanf(buf, "%10d%n", &pad_count, &x) <= 0)
+			if (sscanf(buf, "%10d %n", &pad_count, &x) <= 0)
 				break;
 			buf += (size_t)x;
 
@@ -407,14 +434,14 @@ void set_cisd_pad_data(struct sec_battery_info *battery, const char* buf)
 			}
 		}
 	} else {
-		if ((sscanf(buf + 1, "%10d%n", &pad_total_count, &x) <= 0) ||
+		if ((sscanf(buf, "%10d %n", &pad_total_count, &x) <= 0) ||
 			(pad_total_count >= MAX_PAD_ID))
 			return;
-		buf += (size_t)(x + 1);
+		buf += (size_t)x;
 
 		pr_info("%s: add pad data(count: %d)\n", __func__, pad_total_count);
 		for (i = 0; i < pad_total_count; i++) {
-			if (sscanf(buf, " 0x%02x:%10d%n", &pad_id, &pad_count, &x) != 2) {
+			if (sscanf(buf, "0x%02x:%10d %n", &pad_id, &pad_count, &x) != 2) {
 				pr_info("%s: failed to read pad data(0x%x, %d, %d)!!!re-init pad data\n",
 					__func__, pad_id, pad_count, x);
 				init_cisd_pad_data(pcisd);

@@ -22,9 +22,13 @@ int dw772x_hall_out(void);
 
 static int dw772x_magnet_cal_set(void);
 static int dw772x_device_init(struct i2c_client *client);
+#if 0 // disable interrupt routine
 static int irq_rtp_exit(void);
 static int irq_rtp_init(void);
+#endif
 
+static int dw772x_seq_read(u32 addr, u32 ram_addr, u32 ram_bit, u8* data, u32 size);
+static int dw772x_seq_write(u32 addr, u32 ram_addr, u32 ram_bit, u8* data, u32 size);
 	
 struct dw772x_priv {
 	s8 dev_name[6];
@@ -79,8 +83,3 @@ static const struct i2c_device_id dw772x_drv_id[] = {
 
 #define HALL_MSB	0x08
 #define HALL_LSB	0x07
-
-
-
-
-

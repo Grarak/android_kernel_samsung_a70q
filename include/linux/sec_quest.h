@@ -116,7 +116,7 @@ TOTALTEST_NO_RESULT_FILE = 4,
 
 #define MAX_DDR_ERR_ADDR_CNT 64
 
-struct param_quest_ddr_test_result_t {
+struct param_quest_ddr_result_t {
 	uint32_t ddr_err_addr_total;
 	uint64_t ddr_err_addr[MAX_DDR_ERR_ADDR_CNT];
 };
@@ -145,7 +145,7 @@ struct param_quest_ddr_test_result_t {
  *	10 : PASS
  */
 
- 
+/* Please sync with STR_TEST_ITEM in sec_quest.c */
 enum TEST_ITEM {
 	NOT_ASSIGN = -1,
 	UFS,
@@ -171,7 +171,7 @@ enum TEST_ITEM {
 #define TEST_ITEM_RESULT(curr, item, result) \
 		(result ? \
 			(0x1 << (((curr) * 16) + ((item) * 2) + ((result)-1))) \
-				: (0x3 << (((curr) * 16) + ((item) * 2))))
+				: (0x0 << (((curr) * 16) + ((item) * 2))))
 
 #define GET_DDR_TEST_RESULT(step, ddrtest_result) \
 	(((ddrtest_result)&((0xFF<<(8*step))))>>(8*step))

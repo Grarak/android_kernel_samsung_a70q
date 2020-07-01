@@ -104,4 +104,7 @@ void prox_factory_init_work(void);
 #ifdef CONFIG_GP2AP110S_FACTORY
 void prox_gp2ap110s_init_settings(struct adsp_data *data);
 #endif
+#ifdef CONFIG_SUPPORT_PROX_DUALIZATION
+void prox_set_name_vendor(int32_t buf);
+#endif
 #endif

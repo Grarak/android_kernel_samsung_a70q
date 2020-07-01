@@ -36,6 +36,7 @@ static irqreturn_t mmc_gpio_cd_irqt(int irq, void *dev_id)
 {
 	/* Schedule a card detection after a debounce timeout */
 	struct mmc_host *host = dev_id;
+
 	struct mmc_gpio *ctx = host->slot.handler_priv;
 	bool status;
 

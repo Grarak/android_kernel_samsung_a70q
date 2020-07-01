@@ -352,26 +352,27 @@ static struct avc_xperms_decision_node
 	struct avc_xperms_decision_node *xpd_node;
 	struct extended_perms_decision *xpd;
 
-	xpd_node = kmem_cache_zalloc(avc_xperms_decision_cachep, GFP_NOWAIT);
+	xpd_node = kmem_cache_zalloc(avc_xperms_decision_cachep,
+			GFP_NOWAIT | __GFP_NOWARN);
 	if (!xpd_node)
 		return NULL;
 
 	xpd = &xpd_node->xpd;
 	if (which & XPERMS_ALLOWED) {
 		xpd->allowed = kmem_cache_zalloc(avc_xperms_data_cachep,
-						GFP_NOWAIT);
+						GFP_NOWAIT | __GFP_NOWARN);
 		if (!xpd->allowed)
 			goto error;
 	}
 	if (which & XPERMS_AUDITALLOW) {
 		xpd->auditallow = kmem_cache_zalloc(avc_xperms_data_cachep,
-						GFP_NOWAIT);
+						GFP_NOWAIT | __GFP_NOWARN);
 		if (!xpd->auditallow)
 			goto error;
 	}
 	if (which & XPERMS_DONTAUDIT) {
 		xpd->dontaudit = kmem_cache_zalloc(avc_xperms_data_cachep,
-						GFP_NOWAIT);
+						GFP_NOWAIT | __GFP_NOWARN);
 		if (!xpd->dontaudit)
 			goto error;
 	}
@@ -399,7 +400,8 @@ static struct avc_xperms_node *avc_xperms_alloc(void)
 {
 	struct avc_xperms_node *xp_node;
 
-	xp_node = kmem_cache_zalloc(avc_xperms_cachep, GFP_NOWAIT);
+	xp_node = kmem_cache_zalloc(avc_xperms_cachep,
+			GFP_NOWAIT | __GFP_NOWARN);
 	if (!xp_node)
 		return xp_node;
 	INIT_LIST_HEAD(&xp_node->xpd_head);
@@ -552,7 +554,7 @@ static struct avc_node *avc_alloc_node(void)
 {
 	struct avc_node *node;
 
-	node = kmem_cache_zalloc(avc_node_cachep, GFP_NOWAIT);
+	node = kmem_cache_zalloc(avc_node_cachep, GFP_NOWAIT | __GFP_NOWARN);
 	if (!node)
 		goto out;
 
@@ -681,7 +683,11 @@ static struct avc_node *avc_insert(u32 ssid, u32 tsid, u16 tclass,
 		avc_node_populate(node, ssid, tsid, tclass, avd);
 		rc = avc_xperms_populate(node, xp_node);
 		if (rc) {
-			kmem_cache_free(avc_node_cachep, node);
+//[SEC_SELINUX_PORTING_COMMON
+// P191014-03912 - avc_cache.active_nodes is not decresed when "avc_alloc_node-success"&"avc_xperms_populate-fail"
+//			kmem_cache_free(avc_node_cachep, node);
+			avc_node_kill(node);
+//]SEC_SELINUX_PORTING_COMMON
 			return NULL;
 		}
 		head = &avc_cache.slots[hvalue];
@@ -869,7 +875,11 @@ static int avc_update_node(u32 event, u32 perms, u8 driver, u8 xperm, u32 ssid,
 	if (orig->ae.xp_node) {
 		rc = avc_xperms_populate(node, orig->ae.xp_node);
 		if (rc) {
-			kmem_cache_free(avc_node_cachep, node);
+//[SEC_SELINUX_PORTING_COMMON
+// P191014-03912 - avc_cache.active_nodes is not decresed when "avc_alloc_node-success"&"avc_xperms_populate-fail"
+//			kmem_cache_free(avc_node_cachep, node);
+			avc_node_kill(node);
+//]SEC_SELINUX_PORTING_COMMON
 			goto out_unlock;
 		}
 	}

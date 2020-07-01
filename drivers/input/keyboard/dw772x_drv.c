@@ -48,10 +48,10 @@
 
 extern struct device *sec_key;
 
-static bool digital_hall_status = 1;
-
 #define MAX_DEFAULT 3350
 #define MIN_DEFAULT 1950
+
+static bool digital_hall_status = 1;
 
 #ifdef REQUEST_FW
 #define FW_FILE "dw7720a.bin"
@@ -108,7 +108,7 @@ int dw772x_byte_write(u8 addr, u8 data)
 	ret = i2c_smbus_write_byte_data(dw772x->dwclient, addr, data);
 
 	if (ret < 0) {
-	 pr_info("%s i2c byte write fail.!\n",dw772x->dev_name);
+		pr_info("%s i2c byte write fail.!\n", dw772x->dev_name);
 	}
 
 	return ret;
@@ -147,7 +147,7 @@ int dw772x_word_read(u8 addr)
 
 	if (ret < 0) {
 		gprint("%s i2c byte read fail.!\n",dw772x->dev_name);
-	}	 
+	}
 
 	return ret;
 
@@ -166,8 +166,8 @@ int dw772x_byte_read(u8 addr)
 	ret = i2c_smbus_read_byte_data(dw772x->dwclient, addr);
 
 	if (ret < 0) {
-	 pr_info("%s i2c byte read fail.!\n",dw772x->dev_name);
-	}	 
+		pr_info("%s i2c byte read fail.!\n",dw772x->dev_name);
+	}
 
 	return ret;
 }
@@ -189,7 +189,7 @@ int dw772x_hall_read(void)
 	ret = ((u32)adc[0]<<4) | (adc[1]>>4);
 
 	if (ret < 0) {
-	 pr_info("%s i2c byte read fail.!\n", dw772x->dev_name);
+		pr_info("%s i2c byte read fail.!\n", dw772x->dev_name);
 	}
 	else pr_info("Hall Read Out: %d\n", ret);
 
@@ -197,48 +197,43 @@ int dw772x_hall_read(void)
 }
 
 /* =====================================================================================
-
 function : dw772x convert hall value to distance value
-
 descript : devices id 0x18
-
 version  : 1.0
-
 release  : 2019.01.30
-
 ====================================================================================== */
 int dw772x_hall_out(void)
 {
-     int tmp;
-     int adc[2];
+	int tmp;
+	int real_tmp;
+	int adc[2];
 
-	if(g_fw_version == 0x0801) {
-		adc[0] = i2c_smbus_read_byte_data(dw772x->dwclient, 0x84);
-		adc[1] = i2c_smbus_read_byte_data(dw772x->dwclient, 0x85);
-	}
-	else {
-		adc[0] = i2c_smbus_read_byte_data(dw772x->dwclient, 0x08);
-		adc[1] = i2c_smbus_read_byte_data(dw772x->dwclient, 0x09);
-	}
+	adc[0] = i2c_smbus_read_byte_data(dw772x->dwclient, 0x84);
+	adc[1] = i2c_smbus_read_byte_data(dw772x->dwclient, 0x85);
 
 	tmp = ((int)adc[0]<<4) | (adc[1]>>4);
+	real_tmp = tmp;
 
-    if(tmp >= 2000) { 
+	if((tmp >= 0)&&(tmp < 200)) {
+		tmp = 4095;
+		pr_info("%s : Hall Adc overflow!\n",__func__);
+	}
+
+	if(tmp >= 2000) { 
 		g_hall_sector = 1;
 	} else { 
 		g_hall_sector = 2; 
-	}			
+	}
 
-	//g_hall_to_dist = (g_hall_slope * (g_hall_max_point - tmp) + 512) / 1024;
-	//g_hall_to_dist = (g_hall_slope * (g_hall_max_point - tmp)) / 1024; // dwa jks-20190412
-	g_hall_to_dist = (4 * (g_hall_max_point - tmp)) / (g_hall_max_point - g_hall_min_point); // dwa jks-20190412	
+	g_hall_to_dist = (4 * (g_hall_max_point - tmp)) / (g_hall_max_point - g_hall_min_point); // dwa jks-20190412
 
 	if (g_hall_to_dist < 0)
 		g_hall_to_dist = 0;
-	
-	pr_info("%s : Hall Read Out: %d\n", __func__, tmp);
+	if (real_tmp == 0)
+		g_hall_to_dist = -1;
+	pr_info("%s : Hall Read Out: %d\n", __func__, real_tmp);
 
-	return tmp;
+	return real_tmp;
 }
 
 /* =====================================================================================
@@ -284,15 +279,24 @@ release  : 2019.05.18
 ====================================================================================== */
 void dw772x_cal_backup(void)
 {
-	int cal_max=0,cal_min=0;
-	int read_max=0,read_min=0;
+	int cal_lock=0;
+	int cal_max=0, cal_min=0;
+	char buffer[64];
+	char buffer2[64];
+	int try_count;
+	int result=0;
+	int i;
+
+	pm_runtime_get_sync(dw772x->dev);
 
 	cal_max = dw772x_word_read(0x5C);
 	cal_min = dw772x_word_read(0x5E);
 
 	if(cal_max==0) {
+		cal_lock++;
 		gprint("dw772x_cal_max_0-1\n");
 		cal_max = dw772x_word_read(0x64);
+
 		if(cal_max == 0) {
 			gprint("dw772x_cal_max_0-2\n");
 			cal_max = dw772x_word_read(0x68);
@@ -301,22 +305,13 @@ void dw772x_cal_backup(void)
 				cal_max = MAX_DEFAULT;
 			}
 		}
-		dw772x_word_write(0x5C, cal_max);
-
-		dw772x_magnet_cal_set();		// Reapply the formula
-		dw772x_byte_write(0x03, 0x01);	// STORE
-		mdelay(15);
-		dw772x_byte_write(0x04, 0x01);	// SW RESET
-		mdelay(10);
-		dw772x_init_mode_sel(ACTIVE_MODE, 0);
-		
-		read_max = dw772x_word_read(0x5C);
-		if(read_max != cal_max)
-			gprint("read_max=%d , cal_max=%d\n", read_max, cal_max);		
 	}
+
 	if(cal_min==0) {
+		cal_lock++;
 		gprint("dw772x_cal_min_0-1\n");
 		cal_min = dw772x_word_read(0x66);
+
 		if(cal_min == 0) {
 			gprint("dw772x_cal_min_0-2\n");
 			cal_min = dw772x_word_read(0x6A);
@@ -325,21 +320,56 @@ void dw772x_cal_backup(void)
 				cal_min = MIN_DEFAULT;
 			}
 		}
-		dw772x_word_write(0x5E, cal_min);
-
-		dw772x_magnet_cal_set();		// Reapply the formula
-		dw772x_byte_write(0x03, 0x01);	// STORE
-		mdelay(15);
-		dw772x_byte_write(0x04, 0x01);	// SW RESET
-		mdelay(10);
-		dw772x_init_mode_sel(ACTIVE_MODE, 0);
-		
-		read_min = dw772x_word_read(0x5E);
-		if(read_min != cal_min)
-			gprint("read_min=%d , cal_min=%d\n", read_min, cal_min);		
 	}
-	
-	return;
+
+	if(cal_lock > 0) {
+		memset(buffer, 0, sizeof(buffer));
+		memset(buffer2, 0, sizeof(buffer2));
+
+		dw772x_byte_write(0x3B, 0x94);
+		
+
+		dw772x_word_write(0x5C, cal_max);
+		dw772x_word_write(0x64, cal_max);
+		dw772x_word_write(0x68, cal_max);
+
+		dw772x_word_write(0x5E, cal_min);
+		dw772x_word_write(0x66, cal_min);
+		dw772x_word_write(0x6A, cal_min);
+		dw772x_seq_read(0x40, 0, RAM_ADDR8, buffer, 64);  // page read
+
+		for(try_count=0;try_count<3;try_count++)
+		{
+			//------------------------------------------
+			dw772x_byte_write(0x03, 0x01);  // STORE
+			mdelay(15);
+			dw772x_byte_write(0x04, 0x01);  // SW RESET
+			mdelay(10);
+			dw772x_byte_write(0x02, 0x00);  // Active
+			mdelay(10);
+			//------------------------------------------
+
+			dw772x_seq_read(0x40, 0, RAM_ADDR8, buffer2, 64);
+
+			result = memcmp(buffer, buffer2, 64);
+
+			if(result==0){
+				gprint("DW7720 calibration backup was passed.\n");
+				break;
+			}
+			else {
+				dw772x_byte_write(0x3B, 0x94);
+				dw772x_seq_write(0x40, 0, RAM_ADDR8, buffer, 64);   // page write
+				gprint("DW7720 sector not match!(%d)\n", try_count);
+				for(i=0;i<64;i+=4) {
+					printk("%02x-1 %02x %02x %02x %02x\n",i,buffer[i],buffer[i+1],buffer[i+2],buffer[i+3]);
+					printk("%02x-2 %02x %02x %02x %02x\n",i,buffer2[i],buffer2[i+1],buffer2[i+2],buffer2[i+3]);
+				}
+			}
+		}
+	}
+	pm_runtime_mark_last_busy(dw772x->dev);
+	pm_runtime_put_autosuspend(dw772x->dev);
 }
 
 /* =====================================================================================
@@ -353,7 +383,6 @@ static int dw772x_device_init(struct i2c_client *client)
 	int ret=0;
 
 	dw772x_init_mode_sel(INT_MODE, 0);
-	//mdelay(5);	// 190401 jks
 	dw772x_init_mode_sel(ACTIVE_MODE, 0);
 	dw772x_init_mode_sel(HALL_CAL_MODE, 0);
 
@@ -369,7 +398,6 @@ release  : 2019.01.16
 int dw772x_init_mode_sel(int mode, u32 data)
 {
 	int ret=0;
-	u8 tmp[2];
 
 	pr_info("%s : mode=%d , data=%d!\n", __func__, mode, data);
 	switch(mode) {
@@ -382,118 +410,47 @@ int dw772x_init_mode_sel(int mode, u32 data)
 		break;
 
 		case INT_MODE:
-			dw772x_byte_write(0x3B, 0x94);
-			dw772x_byte_write(0x6C, 0x30);
-			dw772x_byte_write(0x6D, 0x05);
-			dw772x_byte_write(0x6E, 0xFF);
-			dw772x_byte_write(0x6F, 0xC0);
-			dw772x_byte_write(0x7B, 0x03);	// jks 2019.03.12
-			dw772x_byte_write(0x7C, 0x2C);
-			dw772x_byte_write(0x7E, 0x72); 
-
-			dw772x_byte_write(0x52, 0x00);  // Interrupt time MSB
-			dw772x_byte_write(0x53, 0x01);  // Interrupt time LSB
-
-			// fw check!-------------------------
-			tmp[0] = dw772x_byte_read(0x0C);
-			tmp[1] = dw772x_byte_read(0x0D);
-			g_fw_version = (int)tmp[0] << 8 | tmp[1];
+			g_fw_version = dw772x_word_read(0x0C); 
 			ggprint("dw772x fw version: %04x\n", g_fw_version);
 
-			// set lpf --------------------------				
-			if(g_fw_version <= 0x0801) {
-				dw772x_byte_write(0x60, 0x0D);
-				dw772x_byte_write(0x61, 0xD3);
-				dw772x_byte_write(0x62, 0x02);
-				dw772x_byte_write(0x63, 0x2C);
-			}
-			else {
-				dw772x_byte_write(0x54, 0x32);
-				dw772x_byte_write(0x55, 0x64);
-				dw772x_byte_write(0x56, 0x14);
-
-				dw772x_byte_write(0x60, 0x3E);
-				dw772x_byte_write(0x61, 0x5E);
-				dw772x_byte_write(0x62, 0x01);
-				dw772x_byte_write(0x63, 0xA1);
-			}
-
-			// cal flag check! ------------------
-			if(dw772x_byte_read(0x5B) == 0) {
-				dw772x_word_write(0x4A, 0);	//2500
-				dw772x_word_write(0x4C, 0);	//2300
-				dw772x_word_write(0x4E, 0);	//2500
-				dw772x_word_write(0x50, 0);	//2300
-			}
-
-			g_hall_max_point = dw772x_word_read(0x5C);	// dwa jks - 20190429
-			g_hall_min_point = dw772x_word_read(0x5E);	// dwa jks - 20190429
-			
-			//add register hall chopping
-			dw772x_byte_write(0x2F, 0xDA);
-			dw772x_byte_write(0x98, 0x27);
-			dw772x_byte_write(0x03, 0x03);
-			mdelay(15);
-			dw772x_byte_write(0x03, 0x01); // STORE
-			mdelay(15);
-			dw772x_byte_write(0x04, 0x01); // SW RESET
-			mdelay(5);
-		break;
-		
-		case SEQ_MODE:
-			dw772x_byte_write(0x3B, 0x94);  // Protection off
-			dw772x_byte_write(0x52, 0x00);  // Interrupt time MSB
-			dw772x_byte_write(0x53, 0x0A);  // Interrupt time LSB			
-			dw772x_byte_write(0x02, 0x00);	// active mode
-			mdelay(5);
-		break;
-		
-		case SEQ_STORE_MODE:
-			dw772x_byte_write(0x3B, 0x94);  // Protection off
+			dw772x_byte_write(0x3B, 0x94);
+			dw772x_word_write(0x4A, 0x00);
+			dw772x_word_write(0x4C, 0x00);
+			dw772x_word_write(0x4E, 0x00);
+			dw772x_word_write(0x50, 0x00);
+			dw772x_byte_write(0x52, 0x00);
+			dw772x_byte_write(0x53, 0x01);
+			dw772x_byte_write(0x54, 0x32);
+			dw772x_byte_write(0x55, 0x64);
+			dw772x_byte_write(0x56, 0x14);
+			dw772x_byte_write(0x60, 0x3E);
+			dw772x_byte_write(0x61, 0x5E);
+			dw772x_byte_write(0x62, 0x01);
+			dw772x_byte_write(0x63, 0xA1);
 			dw772x_byte_write(0x6C, 0x30);
 			dw772x_byte_write(0x6D, 0x05);
 			dw772x_byte_write(0x6E, 0xFF);
 			dw772x_byte_write(0x6F, 0xC0);
-			dw772x_byte_write(0x7B, 0x05);
+			dw772x_byte_write(0x7B, 0x03);
 			dw772x_byte_write(0x7C, 0x2C);
-			dw772x_byte_write(0x7D, 0x30); 
-			dw772x_byte_write(0x7E, 0x72); 
-			dw772x_byte_write(0x52, 0x00);  // Interrupt time MSB
-			dw772x_byte_write(0x53, 0x0A);  // Interrupt time LSB
-			dw772x_byte_write(0x03, 0x01); 	// store
-			mdelay(15);
-			dw772x_byte_write(0x04, 0x01); // SW RESET
-			mdelay(5);
+			dw772x_byte_write(0x7E, 0x72);
+			dw772x_cal_backup();
+			dw772x_byte_write(0x3B, 0x97);
+			g_hall_max_point = dw772x_word_read(0x5C);
+			g_hall_min_point = dw772x_word_read(0x5E);
 		break;
-		
-		case HALL_SET_MODE:
-			dw772x_byte_write(0x3B, 0x94);  // Protection off
-			dw772x_byte_write(0x6C, 0x30);
-			dw772x_byte_write(0x6D, 0x05);
-			dw772x_byte_write(0x6E, 0xFF);
-			dw772x_byte_write(0x6F, 0xC0);
-			dw772x_byte_write(0x7B, 0x05);
-			dw772x_byte_write(0x7C, 0x2C);
-			dw772x_byte_write(0x7D, 0x30); 
-			dw772x_byte_write(0x7E, 0x72); 			
-		break;
-		
 		case ACTIVE_MODE:
-			dw772x_byte_write(0x02, 0x00); 	// active
-			mdelay(5);
-		break;
-
+			dw772x_byte_write(0x02, 0x00);
+			mdelay(35);
+			break;
 		case HALL_READOUT:
 			dw772x_hall_read();
-		break;
-
+			break;
 		case HALL_CAL_MODE:
 			dw772x_magnet_cal_set();
 			break;
+	}
 
-	}	 
-
-	
 	return ret;
 }
 
@@ -521,7 +478,7 @@ static void dw772x_irq_work(struct work_struct *work)
 	input_report_switch(dw772x->input,
 			SW_DIGITALUPHALL, dw772x->digital_hall);
 	input_sync(dw772x->input);
-#endif	
+#endif
 }
 
 DECLARE_WORK(work, dw772x_irq_work);
@@ -570,7 +527,7 @@ static int irq_rtp_init(void)
 		return -1;
 	}
 
-	ret = request_irq(dw772x->irq_num, (irq_handler_t)irq_rtp_handler, 
+	ret = request_irq(dw772x->irq_num, (irq_handler_t)irq_rtp_handler,
 		IRQF_TRIGGER_RISING|IRQF_TRIGGER_FALLING, "trig_interrupt", NULL);
 
 	if(ret < 0) {
@@ -578,7 +535,7 @@ static int irq_rtp_init(void)
 	 	pr_info("IRQ requset error: %d\n", ret);
 	}
 
-	return ret;	 
+	return ret;
 }
 
 static int dw772x_seq_write(u32 addr, u32 ram_addr, u32 ram_bit, u8* data, u32 size)
@@ -592,33 +549,33 @@ static int dw772x_seq_write(u32 addr, u32 ram_addr, u32 ram_bit, u8* data, u32 s
 
 	if(size > 1023) {
 		ret = -1;
-		pr_info("%s : The transferable size has been exceeded.\n", __func__);		
+		pr_info("%s : The transferable size has been exceeded.\n", __func__);
 		return ret;
 	}
 
-	if(ram_bit == RAM_ADDR8) { 
-		xbuf[0] = (u8)addr;	
+	if(ram_bit == RAM_ADDR8) {
+		xbuf[0] = (u8)addr;
 		xfer[0].addr  = i2c_fnc->addr;
 		xfer[0].len   = size + 1;
 		xfer[0].flags = 0;
 		xfer[0].buf = xbuf;
 		memcpy((u8*)xbuf + 1, (u8*)data, size);
 	}
-    else if(ram_bit == RAM_ADDR16) {
-        xbuf[0] = addr;
-        xbuf[1] = ram_addr >> 8;
-        xbuf[2] = (u8)ram_addr;
+	else if(ram_bit == RAM_ADDR16) {
+		xbuf[0] = addr;
+		xbuf[1] = ram_addr >> 8;
+		xbuf[2] = (u8)ram_addr;
 
-        xfer[0].addr  = i2c_fnc->addr;
-        xfer[0].len   = size + 3;
-        xfer[0].flags = 0;
-        xfer[0].buf = xbuf;
-        memcpy((u8*)xbuf + 3, (u8*)data, size);
-    }
+		xfer[0].addr  = i2c_fnc->addr;
+		xfer[0].len   = size + 3;
+		xfer[0].flags = 0;
+		xfer[0].buf = xbuf;
+		memcpy((u8*)xbuf + 3, (u8*)data, size);
+	}
 
 	ret = i2c_transfer(i2c_fnc->adapter, xfer, 1);
 	pr_info("%s : dw772x i2c_transfer ret:%d\n", __func__, ret);
-	
+
 	return ret;
 }
 
@@ -631,31 +588,35 @@ static int dw772x_seq_read(u32 addr, u32 ram_addr, u32 ram_bit, u8* data, u32 si
 
 	memset(xbuf, 0, sizeof(xbuf));
 
-	if(ram_bit == RAM_ADDR8) { 
-		xbuf[0] = (u8)addr;	
+	if(ram_bit == RAM_ADDR8) {
+		xbuf[0] = addr;
 		xfer[0].addr  = i2c_fnc->addr;
-		xfer[0].len   = size + 1;
+		xfer[0].len   = 1;
 		xfer[0].flags = 0;
 		xfer[0].buf = xbuf;
-		memcpy((u8*)xbuf + 1, (u8*)data, size);
-	}
-    else if(ram_bit == RAM_ADDR16) {
-        xbuf[0] = addr;
-        xbuf[1] = ram_addr >> 8;
-        xbuf[2] = (u8)ram_addr;
-
-        xfer[0].addr  = i2c_fnc->addr;
-        xfer[0].len   = 3;
-        xfer[0].flags = 0;
-        xfer[0].buf = xbuf;
 
 		xfer[1].addr  = i2c_fnc->addr;
-        xfer[1].len   = size;
-        xfer[1].flags = I2C_M_RD;
-        xfer[1].buf = data;
+		xfer[1].len   = size;
+		xfer[1].flags = I2C_M_RD;
+		xfer[1].buf = data;
+	}
+	else if(ram_bit == RAM_ADDR16) {
+		xbuf[0] = addr;
+		xbuf[1] = ram_addr >> 8;
+		xbuf[2] = (u8)ram_addr;
 
-//        memcpy((u8*)data, (u8*)rbuf, size);
-    }
+		xfer[0].addr  = i2c_fnc->addr;
+		xfer[0].len   = 3;
+		xfer[0].flags = 0;
+		xfer[0].buf = xbuf;
+
+		xfer[1].addr  = i2c_fnc->addr;
+		xfer[1].len   = size;
+		xfer[1].flags = I2C_M_RD;
+		xfer[1].buf = data;
+
+//		memcpy((u8*)data, (u8*)rbuf, size);
+	}
 
 	ret = i2c_transfer(i2c_fnc->adapter, xfer, 2);
 	pr_info("%s : dw772x i2c_transfer ret:%d\n", __func__, ret);
@@ -693,17 +654,21 @@ static int request_transfer_firmware(u8* fw_data, u32 size)
 		mdelay(10);
 	}
 
+	ret = dw772x_byte_write(0x2F, 0xCF);
+	if(ret < 0) return ret;
+		mdelay(15);
+
 	// SW reset
 	dw772x_byte_write(0x04, 0x01);
-    mdelay(15);
+	mdelay(15);
 
-    dw772x_init_mode_sel(INT_MODE, 0);
-    mdelay(5);
-    dw772x_init_mode_sel(ACTIVE_MODE, 0);
-    dw772x_init_mode_sel(HALL_CAL_MODE, 0);
+	dw772x_init_mode_sel(INT_MODE, 0);
+	mdelay(5);
+	dw772x_init_mode_sel(ACTIVE_MODE, 0);
+	dw772x_init_mode_sel(HALL_CAL_MODE, 0);
 
 	pr_info("%s : dw772x requeset firmware transfer complete!\n", __func__);
-	
+
 	return ret;
 }
 
@@ -739,14 +704,17 @@ static int request_verify_firmware(u8* fw_data, u32 size)
 		}
 	}
 
+	ret = dw772x_byte_write(0x2F, 0xCF);
+	if(ret < 0) return ret;
+		mdelay(10);
 	// SW reset
 	dw772x_byte_write(0x04, 0x01);
-    mdelay(15);
+	mdelay(15);
 
-    dw772x_init_mode_sel(INT_MODE, 0);
-    mdelay(5);
-    dw772x_init_mode_sel(ACTIVE_MODE, 0);
-    dw772x_init_mode_sel(HALL_CAL_MODE, 0);
+	dw772x_init_mode_sel(INT_MODE, 0);
+	mdelay(5);
+	dw772x_init_mode_sel(ACTIVE_MODE, 0);
+	dw772x_init_mode_sel(HALL_CAL_MODE, 0);
 
 	ret1 = dw772x_byte_read(0x0C);
 	ret2 = dw772x_byte_read(0x0D);
@@ -808,8 +776,9 @@ static ssize_t enableDW772x_set (struct device *dev, struct device_attribute *at
 
 	addr = temp >> 8;
 	data = 0xFF & temp;
-
+	dw772x_byte_write(0x3B, 0x94);
 	dw772x_byte_write(addr, data);	
+	dw772x_byte_write(0x3B, 0x97);
 	
 	pr_info("%s : write Addr: %02x  Data: %02x\n", __func__, addr, data);
 	pm_runtime_mark_last_busy(dw772x->dev);
@@ -848,21 +817,31 @@ static ssize_t enableDW772x_show(struct device *dev, struct device_attribute *at
 
 static ssize_t calDW772x_set (struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
-	int mode=0, value=0, diff_e=0;
-	int max=0, max_th, min_th;
-	int min_val=0, max_val=0;
+	int mode=0, value=0;
 	unsigned char cal_cnt=0;
+	char t_msb, t_lsb;
+	char buffer[64];
+	char buffer2[64];
+	int try_count;
+	int result=0;
+	int i;
 
 	pm_runtime_get_sync(dw772x->dev);
 
 	sscanf(buf, "%d %d", &mode, &value);
 
 	gprint("dw772x_cal_check - mode:%d, val:%d\n", mode, value);
-	
+
 	if(value == 0) {
-		gprint(" trying to set cal value as zero! it'll return without setting\n");			
+		gprint(" trying to set cal value as zero! it'll return without setting\n");
 		return count;
 	}
+
+	memset(buffer, 0, sizeof(buffer));
+	memset(buffer2, 0, sizeof(buffer2));
+
+	dw772x_byte_write(0x3B, 0x94);
+	dw772x_seq_read(0x40, 0, RAM_ADDR8, buffer, 64);  // page read
 
 	if(mode == 1) { 		// cal 1point
 		dw772x_word_write(0x5C, value);
@@ -873,51 +852,68 @@ static ssize_t calDW772x_set (struct device *dev, struct device_attribute *attr,
 		dw772x_word_write(0x5E, value);
 		dw772x_word_write(0x66, value);
 		dw772x_word_write(0x6A, value);
-
-		max = dw772x_word_read(0x5C);
-
-		if(max > value) {
-			diff_e = (max - value) >> 3;
-			max_th = (max - (max - value) / 2) + diff_e;
-			min_th = (max - (max - value) / 2) - diff_e;
-
-			dw772x_word_write(0x4A, 0); //max_th	// for test jks 190409
-			dw772x_word_write(0x4C, 0); //min_th
-			dw772x_word_write(0x4E, 0); //max_th
-			dw772x_word_write(0x50, 0); //min_th
-			dw772x_byte_write(0x5B, 0x01);	// cAL Flag Set
-		}
-		else {
-			dw772x_word_write(0x4A, 0); //2500
-			dw772x_word_write(0x4C, 0); //2300
-			dw772x_word_write(0x4E, 0); //2500
-			dw772x_word_write(0x50, 0); //2300
-			dw772x_byte_write(0x5B, 0x00);	// cAL Flag Set
-		}			
-	}
-//	else if(mode == 12) {	// cal clear
-//		dw772x_word_write(0x5C, 0);
-//		dw772x_word_write(0x5E, 0);
-//	}
-
-	if(mode==1 || mode==2 /*|| mode==12*/) {
-		dw772x_magnet_cal_set();		// Reapply the formula
-		dw772x_byte_write(0x03, 0x01);	// STORE
-		mdelay(15);
-		dw772x_byte_write(0x04, 0x01);	// SW RESET
-		mdelay(10);
-		dw772x_init_mode_sel(ACTIVE_MODE, 0);
-
-		max_val = dw772x_word_read(0x5C);
-		min_val = dw772x_word_read(0x5E);
-		if(max_val==0 || min_val==0) {
-			gprint("dw772x_cal_error - max:%d, min:%d\n", max_val, min_val);
-		}
-		cal_cnt = dw772x_byte_read(0x5A);
-		cal_cnt++;
+		dw772x_byte_write(0x5B, 0x01);	// cAL Flag Set
+		cal_cnt = dw772x_byte_read(0x5A) + 1;
 		dw772x_byte_write(0x5A, cal_cnt);
 	}
-	
+
+	if(mode==1 || mode==2) {
+		dw772x_magnet_cal_set();		// Reapply the formula
+		for(try_count=0;try_count<3;try_count++)
+		{
+			//------------------------------------------
+			dw772x_byte_write(0x03, 0x01);	// STORE
+			mdelay(15);
+			dw772x_byte_write(0x04, 0x01);	// SW RESET
+			mdelay(10);
+			dw772x_byte_write(0x02, 0x00);  // Active
+			mdelay(10);
+			//------------------------------------------
+
+			t_msb = value>>8;
+			t_lsb = value&0xFF;
+
+			if(mode==1) {
+				buffer[0x1C] = t_msb;
+				buffer[0x1D] = t_lsb;
+				buffer[0x24] = t_msb;
+				buffer[0x25] = t_lsb;
+				buffer[0x28] = t_msb;
+				buffer[0x29] = t_lsb;
+			}
+			if(mode==2) {
+				buffer[0x1E] = t_msb;
+				buffer[0x1F] = t_lsb;
+				buffer[0x26] = t_msb;
+				buffer[0x27] = t_lsb;
+				buffer[0x2A] = t_msb;
+				buffer[0x2B] = t_lsb;
+				buffer[0x1A] = cal_cnt; // cal count register
+				buffer[0x1B] = 1; // cal flag register
+			}
+
+			dw772x_seq_read(0x40, 0, RAM_ADDR8, buffer2, 64);
+
+			result = memcmp(buffer, buffer2, 64);
+
+			if(result==0){
+				g_hall_max_point = dw772x_word_read(0x5C);
+				g_hall_min_point = dw772x_word_read(0x5E);
+				gprint("DW7720 Calibration data storage has been passed.\n");
+				break;
+			}
+			else {
+				dw772x_byte_write(0x3B, 0x94);
+				dw772x_seq_write(0x40, 0, RAM_ADDR8, buffer, 64);   // page write
+				gprint("sector not match!(%d)\n", try_count);
+				for(i=0;i<64;i+=4) {
+					printk("%02x-1 %02x %02x %02x %02x\n",i,buffer[i],buffer[i+1],buffer[i+2],buffer[i+3]);
+					printk("%02x-2 %02x %02x %02x %02x\n",i,buffer2[i],buffer2[i+1],buffer2[i+2],buffer2[i+3]);
+				}
+			}
+		}
+	}
+
 	gprint("write mode: %d	value: %d\n", mode, value);
 
 	pm_runtime_mark_last_busy(dw772x->dev);
@@ -950,10 +946,10 @@ static ssize_t calDW772x_show(struct device *dev, struct device_attribute *attr,
 static ssize_t dumpDW772x_set (struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
 {
 	int value=0;
-	
+
 	sscanf(buf, "%02x", &value);
 	g_hall_addr = value;
-	 
+
 	return count;
 }
 
@@ -1027,13 +1023,6 @@ static ssize_t self_test_set(struct device *dev, struct device_attribute *attr, 
 
 	gprint("dw772x self_test_set\n");
 
-	dw772x_byte_write(0x3B, 0x94); //PT1 Off
-	dw772x_byte_write(0x54, 0x32); //ST_MARGIN1
-	dw772x_byte_write(0x55, 0x64); //ST_MARGIN2
-	dw772x_byte_write(0x56, 0x14); //ST_MARGIN3
-
-	dw772x_byte_write(0x03, 0x01); //Store
-	mdelay(5);
 	dw772x_byte_write(0x02, 0x40);
 	dw772x_byte_write(0x02, 0x04);
 
@@ -1050,17 +1039,17 @@ static ssize_t self_test_show(struct device *dev, struct device_attribute *attr,
 	pm_runtime_get_sync(dw772x->dev);
 
 	// Read Test Status
-	dw772x_byte_write(0x3b, 0x94); //PT1 Off
+	//dw772x_byte_write(0x3b, 0x94); //PT1 Off
 	ret = dw772x_byte_read(0x45);
 
 	// SW reset
 	dw772x_byte_write(0x04, 0x01);
-    mdelay(5);
+	mdelay(5);
 
-    dw772x_init_mode_sel(INT_MODE, 0);
-    mdelay(5);
-    dw772x_init_mode_sel(ACTIVE_MODE, 0);
-    dw772x_init_mode_sel(HALL_CAL_MODE, 0);
+	//dw772x_init_mode_sel(INT_MODE, 0);
+	//mdelay(5);
+	dw772x_init_mode_sel(ACTIVE_MODE, 0);
+	//dw772x_init_mode_sel(HALL_CAL_MODE, 0);
 
 	gprint("dw772x %02x\n", ret);
 
@@ -1080,7 +1069,7 @@ static ssize_t suspend_set(struct device *dev, struct device_attribute *attr, co
 
 	if(mode == 0) {			// resume
 		dw772x_init_mode_sel(STANDBY_MODE, 0);
-		dw772x_init_mode_sel(ACTIVE_MODE, 0);				
+		dw772x_init_mode_sel(ACTIVE_MODE, 0);
 		gprint("dw772x power_resume_mode_set!\n");
 	}
 	else if(mode == 1) {	// suspend
@@ -1170,7 +1159,7 @@ static int dw772x_hall_sysfs_init(void)
 	ret = device_create_file(sec_key, &dev_attr_verHALL);
 	if (ret < 0) {
 		pr_err("Failed to create device file(%s)!, error: %d\n",
-		dev_attr_self_test.attr.name, ret);
+		dev_attr_verHALL.attr.name, ret);
 	}
 
 	ret = device_create_file(sec_key, &dev_attr_suspendHALL);
@@ -1199,7 +1188,7 @@ static int dw772x_parse_dt(struct i2c_client *i2c, struct dw772x_priv *pdev)
 	}
 
 	if(!gpio_is_valid(pdev->irq_gpio)) {	 
-		 pr_info(KERN_ERR "dw772x enable pin(%u) is invalid\n", pdev->irq_gpio);
+		 pr_info("dw772x enable pin(%u) is invalid\n", pdev->irq_gpio);
 	}
 
 	external_vdd_use = of_get_named_gpio(np, "hall,hall_ldo_en", 0);
@@ -1238,7 +1227,7 @@ static int dw772x_probe(struct i2c_client *client, const struct i2c_device_id *i
 	int ret = 0;
 	struct input_dev *input;
 
-	gprint("dw772x Hall driver probe start....190518\n");	// DW772x Kernel Version!
+	gprint("dw772x Hall driver probe start....190604\n");	// DW772x Kernel Version!
 
 	dw772x = kzalloc(sizeof(struct dw772x_priv), GFP_KERNEL);
 
@@ -1274,7 +1263,6 @@ static int dw772x_probe(struct i2c_client *client, const struct i2c_device_id *i
 
 	dw772x_device_init(client);
 	pr_info("%s: dw772x_device_init!\n", __func__);
-	dw772x_cal_backup();
 
 	input = input_allocate_device();
 	if (!input) {
@@ -1323,7 +1311,7 @@ static int dw772x_probe(struct i2c_client *client, const struct i2c_device_id *i
 	pm_runtime_put_autosuspend(dw772x->dev);
 
 	pr_info("%s probe success!\n", dw772x->dev_name);
-	
+
 fail1:
 	return ret;
 }
@@ -1335,8 +1323,8 @@ static int dw772x_remove(struct i2c_client *client)
 
 	gpio_free(dw772x->irq_gpio);
 	free_irq(dw772x->irq_num, NULL);
-	i2c_set_clientdata(client, NULL);	
-	kfree(dw772x);  
+	i2c_set_clientdata(client, NULL);
+	kfree(dw772x);
 	return 0;
 }
 

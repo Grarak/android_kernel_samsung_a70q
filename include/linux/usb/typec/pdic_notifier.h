@@ -42,6 +42,8 @@ typedef enum {
 	CCIC_NOTIFY_ID_POWER_STATUS,
 	CCIC_NOTIFY_ID_WATER,
 	CCIC_NOTIFY_ID_VCONN,
+	CCIC_NOTIFY_ID_OTG,
+	CCIC_NOTIFY_ID_TA,
 	CCIC_NOTIFY_ID_DP_CONNECT,
 	CCIC_NOTIFY_ID_DP_HPD,
 	CCIC_NOTIFY_ID_DP_LINK_CONF,
@@ -204,7 +206,7 @@ extern int ccic_notifier_unregister(struct notifier_block *nb);
 extern int ccic_notifier_init(void);
 
 #define CCIC_NOTI_DEST_NUM	(12)
-#define CCIC_NOTI_ID_NUM	(15)
+#define CCIC_NOTI_ID_NUM	(17)
 #define CCIC_NOTI_RID_NUM	(8)
 #define CCIC_NOTI_USB_STATUS_NUM (5)
 #define CCIC_NOTI_PIN_STATUS_NUM	(8)

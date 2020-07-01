@@ -24,6 +24,8 @@
 #define CMCS_FLAG_CS		(1 << 1)
 #define CMCS_FLAG_CMJIT		(1 << 2)
 #define CMCS_FLAG_SLOPE		(1 << 3)
+#define CMCS_FLAG_CRJIT		(1 << 4)
+#define CMCS_FLAG_CRJIT2	(1 << 5)
 #define CMCS_FLAG_ALL		(CMCS_FLAG_CM | CMCS_FLAG_SLOPE | \
 					CMCS_FLAG_CS | CMCS_FLAG_CMJIT)
 
@@ -38,6 +40,8 @@
 #define CS_MSG_VALID		(0x5E7FC500)
 #define CMJIT_MSG_VALID		(0x5E7F7100)
 #define SLOPE_MSG_VALID		(0x5E7F5700)
+#define CRJIT_MSG_VALID		(0x5E7FC900)
+#define CRJIT2_MSG_VALID 	(0x5E7FC800)
 
 #define IST40XX_CMCS_NAME	"ist40xx.cms"
 #define IST40XX_CMCS_MAGIC	"CMCS5TAG"
@@ -150,6 +154,8 @@ typedef struct _CMCS_BUF {
 	s16 slope[IST40XX_MAX_NODE_NUM];
 	s16 slope0[IST40XX_MAX_NODE_NUM];
 	s16 slope1[IST40XX_MAX_NODE_NUM];
+	u32 cr_variance[3];
+	u32 cr_variance2[3];
 	u32 cm_tx_result[2];
 	u32 cm_rx_result[2];
 	u32 cs_tx_result[2];
@@ -161,6 +167,8 @@ typedef struct _CMCS_BUF {
 	int cs_result;
 	int cm_jit_result;
 	int slope_result;
+	int cr_variance_result;
+	int cr_variance2_result;
 	int cm_min;
 	int cm_max;
 	int cs_min;

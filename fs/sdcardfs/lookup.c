@@ -256,7 +256,6 @@ static struct dentry *__sdcardfs_lookup(struct dentry *dentry,
 	struct dentry *lower_dentry;
 	const struct qstr *name;
 	struct path lower_path;
-	struct qstr dname;
 	struct dentry *ret_dentry = NULL;
 	struct sdcardfs_sb_info *sbi;
 
@@ -361,20 +360,12 @@ put_name:
 	if (err && err != -ENOENT)
 		goto out;
 
-	/* instatiate a new negative dentry */
-	dname.name = name->name;
-	dname.len = name->len;
-
-	/* See if the low-level filesystem might want
-	 * to use its own hash
-	 */
-	lower_dentry = lookup_one_len_unlocked(dname.name, lower_dir_dentry,
-					       dname.len);
-	if (IS_ERR(lower_dentry))
-		return lower_dentry;
-
-	if (d_really_is_negative(lower_dentry))
-		err = -ENOENT;
+	lower_dentry = lookup_one_len_unlocked(dentry->d_name.name,
+			lower_dir_dentry, dentry->d_name.len);
+	if (unlikely(IS_ERR(lower_dentry))) {
+		err =  PTR_ERR(lower_dentry);
+		goto out;
+	}
 
 	lower_path.dentry = lower_dentry;
 	lower_path.mnt = mntget(lower_dir_mnt);

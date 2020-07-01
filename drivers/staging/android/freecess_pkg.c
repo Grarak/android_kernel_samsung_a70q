@@ -128,7 +128,6 @@ static void kfreecess_cfb_hook(void* data, unsigned int len)
 	struct kfreecess_msg_data* payload = (struct kfreecess_msg_data*)data;
 	int uid = payload->target_uid;
 
-	printk(KERN_INFO "cfb_target: uid = %d\n", uid);
 	binders_in_transcation(uid);
 }
 

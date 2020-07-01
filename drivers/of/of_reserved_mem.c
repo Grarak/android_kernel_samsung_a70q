@@ -26,7 +26,7 @@
 #include <linux/slab.h>
 #include <linux/kmemleak.h>
 
-#define MAX_RESERVED_REGIONS	40
+#define MAX_RESERVED_REGIONS	64
 static struct reserved_mem reserved_mem[MAX_RESERVED_REGIONS];
 static int reserved_mem_count;
 
@@ -299,6 +299,10 @@ void __init fdt_init_reserved_mem(void)
 		if (err == 0) {
 			__reserved_mem_init_node(rmem);
 			nomap = of_get_flat_dt_prop(node, "no-map", NULL) != NULL;
+#ifdef CONFIG_ION_RBIN_HEAP
+			if (of_get_flat_dt_prop(node, "ion,recyclable", NULL))
+				rmem->reusable = true;
+#endif
 			record_memsize_reserved(rmem->name, rmem->base,
 						rmem->size, nomap,
 						rmem->reusable);

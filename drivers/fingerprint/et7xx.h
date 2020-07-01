@@ -187,6 +187,7 @@ struct etspi_data {
 	unsigned int ldo_pin;	/* Ldo GPIO pin number */
 	unsigned int min_cpufreq_limit;
 	unsigned int spi_cs;	/* spi cs pin <temporary gpio setting> */
+	const char *rb;
 
 	unsigned int drdy_irq_flag;	/* irq flag */
 	bool ldo_onoff;

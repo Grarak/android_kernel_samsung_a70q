@@ -3,7 +3,7 @@
  *
  * This code is based on drivers/scsi/ufs/ufshcd.h
  * Copyright (C) 2011-2013 Samsung India Software Operations
- * Copyright (c) 2013-2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2019, The Linux Foundation. All rights reserved.
  *
  * Authors:
  *	Santosh Yaraganavi <santosh.sy@samsung.com>
@@ -117,11 +117,13 @@ enum ufs_pm_op {
 	UFS_RUNTIME_PM,
 	UFS_SYSTEM_PM,
 	UFS_SHUTDOWN_PM,
+	UFS_SYSTEM_RESTORE,
 };
 
 #define ufshcd_is_runtime_pm(op) ((op) == UFS_RUNTIME_PM)
 #define ufshcd_is_system_pm(op) ((op) == UFS_SYSTEM_PM)
 #define ufshcd_is_shutdown_pm(op) ((op) == UFS_SHUTDOWN_PM)
+#define ufshcd_is_restore(op) ((op) == UFS_SYSTEM_RESTORE)
 
 /* Host <-> Device UniPro Link state */
 enum uic_link_state {
@@ -1002,6 +1004,7 @@ struct ufs_hba {
 	u32 ufshcd_state;
 	u32 eh_flags;
 	u32 intr_mask;
+	u32 transferred_sector;
 	u16 ee_ctrl_mask;
 	bool is_powered;
 
@@ -1134,6 +1137,8 @@ struct ufs_hba {
 
 	bool reinit_g4_rate_A;
 	bool force_g4;
+	/* distinguish between resume and restore */
+	bool restore;
 #if defined(CONFIG_SCSI_UFS_QCOM)
 	struct device_attribute hw_reset_info_attr;
 #endif
@@ -1275,6 +1280,9 @@ static inline bool ufshcd_keep_autobkops_enabled_except_suspend(
 	return hba->caps & UFSHCD_CAP_KEEP_AUTO_BKOPS_ENABLED_EXCEPT_SUSPEND;
 }
 
+extern int ufshcd_system_thaw(struct ufs_hba *hba);
+extern int ufshcd_system_restore(struct ufs_hba *hba);
+extern int ufshcd_system_freeze(struct ufs_hba *hba);
 extern int ufshcd_runtime_suspend(struct ufs_hba *hba);
 extern int ufshcd_runtime_resume(struct ufs_hba *hba);
 extern int ufshcd_runtime_idle(struct ufs_hba *hba);

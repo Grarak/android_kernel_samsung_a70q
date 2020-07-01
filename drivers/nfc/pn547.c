@@ -95,9 +95,10 @@ struct pn547_dev {
 	char *r_buf;
 	char *w_buf;
 
-#ifdef CONFIG_NFC_PN547_CLOCK_REQUEST
 	unsigned int clk_req_gpio;
 	unsigned int clk_req_irq;
+	bool clk_req_wake;
+#ifdef CONFIG_NFC_PN547_CLOCK_REQUEST
 	struct msm_xo_voter *nfc_clock;
 	struct work_struct work_nfc_clock;
 	struct workqueue_struct *wq_clock;
@@ -108,6 +109,7 @@ struct pn547_dev {
 };
 
 static struct pn547_dev *pn547_dev;
+static atomic_t s_Device_opened = ATOMIC_INIT(1);
 
 #ifdef CONFIG_NFC_PN547_ESE_SUPPORT
 static void release_ese_lock(enum p61_access_state  p61_current_state);
@@ -140,6 +142,13 @@ static irqreturn_t pn547_dev_irq_handler(int irq, void *dev_id)
 	NFC_LOG_REC("irq handler called\n");
 
 	wake_lock_timeout(&pn547_dev->nfc_wake_lock, 2*HZ);
+	return IRQ_HANDLED;
+}
+
+static irqreturn_t pn547_wake_irq_handler(int irq, void *dev_id)
+{
+	wake_lock_timeout(&pn547_dev->nfc_wake_lock, 2*HZ);
+	NFC_LOG_REC("clk req irq handler called\n");
 	return IRQ_HANDLED;
 }
 
@@ -311,6 +320,13 @@ static int pn547_dev_open(struct inode *inode, struct file *filp)
 	struct pn547_dev *pn547_dev = container_of(filp->private_data,
 						   struct pn547_dev,
 						   pn547_device);
+
+	if (!atomic_dec_and_test(&s_Device_opened)) {
+		atomic_inc(&s_Device_opened);
+		NFC_LOG_ERR("already opened!\n");
+		return -EBUSY;
+	}
+
 	filp->private_data = pn547_dev;
 	NFC_LOG_INFO("imajor:%d, iminor:%d (%d)\n", imajor(inode), iminor(inode),
 			pn547_dev->i2c_probe);
@@ -332,6 +348,8 @@ static int pn547_dev_release(struct inode *inode, struct file *filp)
 			(P61_STATE_SPI|P61_STATE_SPI_PRIO)) == 0))
 		release_ese_lock(P61_STATE_WIRED);
 #endif
+	atomic_inc(&s_Device_opened);
+
 	return 0;
 }
 
@@ -359,7 +377,6 @@ static int release_dwp_onoff(void)
 	NFC_LOG_INFO("enter\n");
 	complete(&pn547_dev->dwp_onoff_comp);
 	{
-		sema_init(&dwp_onoff_release_sema, 0);
 		if(down_timeout(&dwp_onoff_release_sema, tempJ) != 0)
 		{
 			NFC_LOG_INFO("Dwp On/off release wait protection: Timeout");
@@ -407,7 +424,7 @@ static void p61_update_access_state(struct pn547_dev *pn547_dev,
 						= P61_STATE_INVALID;
 			pn547_dev->p61_current_state |= current_state;
 		} else {
-			pn547_dev->p61_current_state ^= current_state;
+			pn547_dev->p61_current_state &= (unsigned int)(~current_state);
 			if (!pn547_dev->p61_current_state)
 				pn547_dev->p61_current_state = P61_STATE_IDLE;
 		}
@@ -1252,6 +1269,20 @@ static int pn547_parse_dt(struct device *dev,
 	struct pn547_dev *pdev)
 {
 	struct device_node *np = dev->of_node;
+	int nfc_det_gpio;
+
+	nfc_det_gpio = of_get_named_gpio(np, "pn547,nfc-det-gpio", 0);
+	if (!gpio_is_valid(nfc_det_gpio)) {
+		pr_info("%s : nfc-det-gpio is not set", __func__);
+	} else {
+		gpio_request(nfc_det_gpio, "nfc_det_gpio");
+		gpio_direction_input(nfc_det_gpio);
+		if (!gpio_get_value(nfc_det_gpio)) {
+			pr_info("%s : nfc is not supported", __func__);
+			return -ENODEV;
+		}
+		pr_info("%s : nfc is supported", __func__);
+	}
 
 	pdev->irq_gpio = of_get_named_gpio(np, "pn547,irq-gpio", 0);
 	pdev->ven_gpio = of_get_named_gpio(np, "pn547,ven-gpio", 0);
@@ -1263,11 +1294,12 @@ static int pn547_parse_dt(struct device *dev,
 #ifdef CONFIG_NFC_PN547_ESE_SUPPORT
 	pdev->ese_pwr_req = of_get_named_gpio(np, "pn547,pwr_req", 0);
 #endif
-#if defined(CONFIG_NFC_PN547_CLOCK_REQUEST)
+	pdev->clk_req_wake = of_property_read_bool(np, "pn547,clk_req_wake");
+	pr_info("%s : pn547_clk_req_wake: %s\n", __func__, pdev->clk_req_wake ? "true" : "false");
+
 	pdev->clk_req_gpio = of_get_named_gpio(np, "pn547,clk_req-gpio", 0);
-	if (pdev->clk_req_gpio < 0)
+	if (!gpio_is_valid(pdev->clk_req_gpio))
 		pr_info("%s : clk_req-gpio is not set", __func__);
-#endif
 
 	if (of_get_property(dev->of_node, "pn547,ldo_control", NULL)) {
 		pdev->nfc_pvdd = devm_regulator_get(dev, "pn547,nfc_pvdd");
@@ -1489,6 +1521,15 @@ static ssize_t test_store(struct class *class,
 static CLASS_ATTR_RW(test);
 #endif
 
+static ssize_t nfc_support_show(struct class *class,
+		struct class_attribute *attr, char *buf)
+{
+	NFC_LOG_INFO("\n");
+	return 0;
+}
+
+static CLASS_ATTR_RO(nfc_support);
+
 static int pn547_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
 	int ret;
@@ -1516,8 +1557,10 @@ static int pn547_probe(struct i2c_client *client, const struct i2c_device_id *id
 			return -ENOMEM;
 
 		err = pn547_parse_dt(&client->dev, pn547_dev);
-		if (err)
+		if (err) {
+			devm_kfree(&client->dev, pn547_dev);
 			return err;
+		}
 	} else {
 		NFC_LOG_ERR("no dts\n");
 		return -ENODEV;
@@ -1542,11 +1585,16 @@ static int pn547_probe(struct i2c_client *client, const struct i2c_device_id *id
 	if (ret)
 		goto err_ese;
 #endif
+
+	if (gpio_is_valid(pn547_dev->clk_req_gpio)) {
+		ret = gpio_request(pn547_dev->clk_req_gpio, "nfc_clk_req");
+		if (ret) {
+			NFC_LOG_ERR("clk_req_gpio request failed: %d\n", ret);
 #ifdef CONFIG_NFC_PN547_CLOCK_REQUEST
-	ret = gpio_request(pn547_dev->clk_req_gpio, "nfc_clk_req");
-	if (ret)
-		goto err_clk_req;
+			goto err_clk_req;
 #endif
+		}
+	}
 #ifdef ISO_RST
 	ret = gpio_request(pn547_dev->iso_rst_gpio, "iso_rst");
 	if (ret)
@@ -1656,7 +1704,21 @@ static int pn547_probe(struct i2c_client *client, const struct i2c_device_id *id
 	}
 
 	enable_irq_wake(pn547_dev->clk_req_irq);
+	pn547->clk_req_wake = false;
 #endif
+
+	if (pn547_dev->clk_req_wake) {
+		gpio_direction_input(pn547_dev->clk_req_gpio);
+		pn547_dev->clk_req_irq = gpio_to_irq(pn547_dev->clk_req_gpio);
+		NFC_LOG_INFO("clk_req IRQ num %d\n", pn547_dev->clk_req_irq);
+
+		ret = request_irq(pn547_dev->clk_req_irq, pn547_wake_irq_handler, IRQF_TRIGGER_RISING,
+				"pn547_clk_req", pn547_dev);
+		if (ret)
+			NFC_LOG_ERR("clk_req_irq failed\n");
+		else
+			enable_irq_wake(pn547_dev->clk_req_irq);
+	}
 
 	gpio_set_value(pn547_dev->ven_gpio, 1);
 	gpio_set_value(pn547_dev->firm_gpio, 1); /* add firmware pin */
@@ -1702,13 +1764,22 @@ static int pn547_probe(struct i2c_client *client, const struct i2c_device_id *id
 #ifdef FEATURE_NFC_TEST
 	nfc_class = class_create(THIS_MODULE, "nfc_test");
 	if (IS_ERR(&nfc_class)) {
-		NFC_LOG_ERR("failed to create nfc class\n");
+		NFC_LOG_ERR("failed to create nfc_test class\n");
 	} else {
 		ret = class_create_file(nfc_class, &class_attr_test);
 		if (ret)
-			NFC_LOG_ERR("failed to create file\n");
+			NFC_LOG_ERR("failed to create attr_test file\n");
 	}
 #endif
+	nfc_class = class_create(THIS_MODULE, "nfc");
+	if (IS_ERR(&nfc_class)) {
+		NFC_LOG_ERR("failed to create nfc class\n");
+	} else {
+		ret = class_create_file(nfc_class, &class_attr_nfc_support);
+		if (ret)
+			NFC_LOG_ERR("failed to create nfc_support file\n");
+	}
+
 	pn547_dev->r_buf = kzalloc(sizeof(char) * MAX_BUFFER_SIZE, GFP_KERNEL);
 	if (pn547_dev->r_buf == NULL) {
 		NFC_LOG_ERR("failed to allocate for i2c r_buffer\n");

@@ -286,7 +286,7 @@ static void lsm_event_handler(uint32_t opcode, uint32_t token,
 	}
 
 	case LSM_SESSION_EVENT_DETECTION_STATUS:
-		if (client_size < 3 * sizeof(uint8_t)) {
+                if (client_size < 3 * sizeof(uint8_t)) {
 			dev_err(rtd->dev,
 					"%s: client_size has invalid size[%d]\n",
 					__func__, client_size);
@@ -1093,7 +1093,7 @@ static int msm_lsm_ioctl_shared(struct snd_pcm_substream *substream,
 		if (ses_data_v2.app_id != LSM_VOICE_WAKEUP_APP_ID_V2) {
 			dev_err(rtd->dev,
 				"%s:Invalid App id %d for Listen client\n",
-			       __func__, session_data.app_id);
+			       __func__, ses_data_v2.app_id);
 			rc = -EINVAL;
 			break;
 		}

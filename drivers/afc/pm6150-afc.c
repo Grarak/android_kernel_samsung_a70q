@@ -37,7 +37,6 @@ static int afc_gpios = 0;
 #if defined(CONFIG_SEC_A90Q_PROJECT)
 //set L2 for AFC_DET GPIO_51 
 #define GENI_CFG_SEQ_START 0x84 
-#define GENI_CFG_REG80 0x240 
 #endif
 
 struct geni_afc_dev *gafc;
@@ -474,10 +473,6 @@ static ssize_t afc_disable_store(struct device *dev,
 #endif
 	int val = 0, ret = 0;
 
-	sscanf(buf, "%d", &val);
-	
-	pr_info("%s, val: %d\n", __func__, val);
-
 	if (!strncasecmp(buf, "1", 1))
 		gafc->afc_disable = true;
 	else if (!strncasecmp(buf, "0", 1))
@@ -486,6 +481,10 @@ static ssize_t afc_disable_store(struct device *dev,
 		pr_warn("%s:%s invalid value\n", __func__);
 		return count;
 	}
+
+	val = gafc->afc_disable ? '1' : '0';
+	pr_info("%s: param_val:%d\n", __func__, val);
+
 #if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 	if (psy_usb == NULL) {
 		psy_usb = power_supply_get_by_name("usb");
@@ -493,7 +492,7 @@ static ssize_t afc_disable_store(struct device *dev,
 			pr_err("%s: Failed to Register psy_usb\n", __func__);
 		}
 	}
-	value.intval = val ? HV_DISABLE : HV_ENABLE;
+	value.intval = gafc->afc_disable ? HV_DISABLE : HV_ENABLE;
 	ret = power_supply_set_property(psy_usb,
 			(enum power_supply_property)POWER_SUPPLY_EXT_PROP_HV_DISABLE, &value);
 	if(ret < 0) {
@@ -502,7 +501,7 @@ static ssize_t afc_disable_store(struct device *dev,
 		pr_info("%s: voltage max limit set to (%d) \n", __func__, value.intval);                
 	}
 #endif
-
+	
 	ret = sec_set_param(param_index_afc_disable, &val); 
 	if (ret == false) {
 		pr_err("%s: set_param failed!!\n", __func__);

@@ -159,53 +159,35 @@ RETRY_MAG_SELFTEST:
 		data->msg_buf[MSG_MAG][8], data->msg_buf[MSG_MAG][9]);
 }
 
+
 static ssize_t mag_dhr_sensor_info_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-#if 0
 	struct adsp_data *data = dev_get_drvdata(dev);
-	struct msg_data message;
 	uint8_t cnt = 0;
 
-	message.msg_type = MSG_MAG;
-	data->calib_ready_flag &= ~(1 << MSG_MAG);
-	adsp_unicast(&message, sizeof(message),
-		MSG_TYPE_GET_CALIB_DATA, 0, 0);
-
-	while (!(data->calib_ready_flag & 1 << MSG_MAG) &&
+	adsp_unicast(NULL, 0, MSG_MAG, 0, MSG_TYPE_GET_DHR_INFO);
+	while (!(data->ready_flag[MSG_TYPE_GET_DHR_INFO] & 1 << MSG_MAG) &&
 		cnt++ < TIMEOUT_CNT)
-		msleep(20);
+		usleep_range(500, 550);
 
-	data->calib_ready_flag &= ~(1 << MSG_MAG);
+	data->ready_flag[MSG_TYPE_GET_DHR_INFO] &= ~(1 << MSG_MAG);
 
-	if (cnt >= TIMEOUT_CNT)
+	if (cnt >= TIMEOUT_CNT) {
 		pr_err("[FACTORY] %s: Timeout!!!\n", __func__);
+	} else {
+		pr_info("[FACTORY] %s - WIA1/2: 0x%02x/0x%02x, ST1/2: 0x%02x/0x%02x, DATA: 0x%02x/0x%02x/0x%02x/0x%02x/0x%02x/0x%02x, CNTL1/2/3: 0x%02x/0x%02x/0x%02x\n",
+			__func__,
+			data->msg_buf[MSG_MAG][0], data->msg_buf[MSG_MAG][1],
+			data->msg_buf[MSG_MAG][2], data->msg_buf[MSG_MAG][9],
+			data->msg_buf[MSG_MAG][3], data->msg_buf[MSG_MAG][4],
+			data->msg_buf[MSG_MAG][5], data->msg_buf[MSG_MAG][6],
+			data->msg_buf[MSG_MAG][7], data->msg_buf[MSG_MAG][8],
+			data->msg_buf[MSG_MAG][10], data->msg_buf[MSG_MAG][11],
+			data->msg_buf[MSG_MAG][12]);
+	}
 
-	pr_info("[FACTORY] %s\n", __func__);
-	pr_info("[FACTORY] 0x%08x 0x%08x 0x%08x 0x%08x 0x%08x 0x%08x 0x%08x 0x%08x 0x%08x\n",
-		data->sensor_calib_data[MSG_MAG].si_mat[0],
-		data->sensor_calib_data[MSG_MAG].si_mat[1],
-		data->sensor_calib_data[MSG_MAG].si_mat[2],
-		data->sensor_calib_data[MSG_MAG].si_mat[3],
-		data->sensor_calib_data[MSG_MAG].si_mat[4],
-		data->sensor_calib_data[MSG_MAG].si_mat[5],
-		data->sensor_calib_data[MSG_MAG].si_mat[6],
-		data->sensor_calib_data[MSG_MAG].si_mat[7],
-		data->sensor_calib_data[MSG_MAG].si_mat[8]);
-
-	return snprintf(buf, PAGE_SIZE,
-		"\"SI_PARAMETER\":\"0x%08x 0x%08x 0x%08x 0x%08x 0x%08x 0x%08x 0x%08x 0x%08x 0x%08x\"\n",
-		data->sensor_calib_data[MSG_MAG].si_mat[0],
-		data->sensor_calib_data[MSG_MAG].si_mat[1],
-		data->sensor_calib_data[MSG_MAG].si_mat[2],
-		data->sensor_calib_data[MSG_MAG].si_mat[3],
-		data->sensor_calib_data[MSG_MAG].si_mat[4],
-		data->sensor_calib_data[MSG_MAG].si_mat[5],
-		data->sensor_calib_data[MSG_MAG].si_mat[6],
-		data->sensor_calib_data[MSG_MAG].si_mat[7],
-		data->sensor_calib_data[MSG_MAG].si_mat[8]);
-#endif
-	return 0;
+	return snprintf(buf, PAGE_SIZE, "%s\n", "Done");
 }
 
 static DEVICE_ATTR(name, 0444, mag_name_show, NULL);
@@ -217,7 +199,11 @@ static DEVICE_ATTR(chk_registers, 0444, mag_check_registers, NULL);
 static DEVICE_ATTR(selftest, 0440, mag_selttest_show, NULL);
 static DEVICE_ATTR(asa, 0444, mag_get_asa, NULL);
 static DEVICE_ATTR(status, 0444, mag_get_status, NULL);
+#ifdef CONFIG_SEC_FACTORY
+static DEVICE_ATTR(dhr_sensor_info, 0444, mag_dhr_sensor_info_show, NULL);
+#else
 static DEVICE_ATTR(dhr_sensor_info, 0440, mag_dhr_sensor_info_show, NULL);
+#endif
 
 static struct device_attribute *mag_attrs[] = {
 	&dev_attr_name,

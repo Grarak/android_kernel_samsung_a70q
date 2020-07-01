@@ -3976,7 +3976,7 @@ static void cam_ife_mgr_print_io_bufs(struct cam_packet *packet,
 			if (pf_buf_info &&
 				GET_FD_FROM_HANDLE(io_cfg[i].mem_handle[j]) ==
 				GET_FD_FROM_HANDLE(pf_buf_info)) {
-				CAM_INFO_RATE_LIMIT(CAM_ISP,
+				CAM_ERR(CAM_ISP,
 					"Found PF at port: 0x%x mem 0x%x fd: 0x%x",
 					io_cfg[i].resource_type,
 					io_cfg[i].mem_handle[j],
@@ -3985,7 +3985,7 @@ static void cam_ife_mgr_print_io_bufs(struct cam_packet *packet,
 					*mem_found = true;
 			}
 
-			CAM_INFO_RATE_LIMIT(CAM_ISP,
+			CAM_ERR(CAM_ISP,
 				"port: 0x%x f: %u format: %d dir %d",
 				io_cfg[i].resource_type,
 				io_cfg[i].fence,
@@ -4009,7 +4009,7 @@ static void cam_ife_mgr_print_io_bufs(struct cam_packet *packet,
 				continue;
 			}
 
-			CAM_INFO_RATE_LIMIT(CAM_ISP,
+			CAM_ERR(CAM_ISP,
 				"pln %d w %d h %d s %u size 0x%x addr 0x%x end_addr 0x%x offset %x memh %x",
 				j, io_cfg[i].planes[j].width,
 				io_cfg[i].planes[j].height,
@@ -4679,12 +4679,14 @@ static int cam_ife_hw_mgr_check_irq_for_dual_vfe(
 		return 0;
 	}
 
+	CAM_QCLOGMINIMAL(CAM_ISP, "event_cnt[core_idx0]  = %u event_cnt[core_idx1]  = %u \n ",
+		          event_cnt[core_idx0],event_cnt[core_idx1]  );
 	if (event_cnt[core_idx0] ==
 			event_cnt[core_idx1]) {
 
 		event_cnt[core_idx0] = 0;
 		event_cnt[core_idx1] = 0;
-
+		CAM_QCLOGMINIMAL(CAM_ISP, "Count Match \n " );
 		rc = 0;
 		return rc;
 	}
@@ -4963,6 +4965,7 @@ static int cam_ife_hw_mgr_handle_sof(
 		if (ife_src_res->res_type == CAM_IFE_HW_MGR_RES_UNINIT)
 			continue;
 
+		CAM_QCLOGMINIMAL(CAM_ISP, "Enter Res id =  %u \n ",ife_src_res->res_id);
 		switch (ife_src_res->res_id) {
 		case CAM_ISP_HW_VFE_IN_RDI0:
 		case CAM_ISP_HW_VFE_IN_RDI1:
@@ -5243,6 +5246,7 @@ static int cam_ife_hw_mgr_handle_buf_done_for_hw_res(
 			if (buf_done_event_data.num_handles > 0 &&
 				ife_hwr_irq_wm_done_cb) {
 				CAM_DBG(CAM_ISP, "notify isp context");
+				trace_printk("notify isp context\n");
 				ife_hwr_irq_wm_done_cb(
 					ife_hwr_mgr_ctx->common.cb_priv,
 					CAM_ISP_HW_EVENT_DONE,
@@ -5262,8 +5266,7 @@ static int cam_ife_hw_mgr_handle_buf_done_for_hw_res(
 			break;
 		}
 		if (!buf_done_status)
-			CAM_DBG(CAM_ISP,
-				"buf_done status:(%d),out_res->res_id: 0x%x",
+			trace_printk("buf_done status:(%d),out_res->res_id: 0x%x\n",
 				buf_done_status, isp_ife_out_res->res_id);
 	}
 
@@ -5307,6 +5310,8 @@ int cam_ife_mgr_do_tasklet_buf_done(void *handler_priv,
 		evt_payload, evt_payload->core_index);
 	CAM_DBG(CAM_ISP, "bus_irq_status_0: = %x", evt_payload->irq_reg_val[0]);
 	CAM_DBG(CAM_ISP, "bus_irq_status_1: = %x", evt_payload->irq_reg_val[1]);
+	trace_printk("core %d bus_irq_status_1: = %x\n", evt_payload->core_index,
+		evt_payload->irq_reg_val[1]);
 	CAM_DBG(CAM_ISP, "bus_irq_status_2: = %x", evt_payload->irq_reg_val[2]);
 	CAM_DBG(CAM_ISP, "bus_irq_comp_err: = %x", evt_payload->irq_reg_val[3]);
 	CAM_DBG(CAM_ISP, "bus_irq_comp_owrt: = %x",
@@ -5339,7 +5344,9 @@ int cam_ife_mgr_do_tasklet(void *handler_priv, void *evt_payload_priv)
 		(void *)evt_payload,
 		evt_payload->core_index);
 	CAM_DBG(CAM_ISP, "irq_status_0: = %x", evt_payload->irq_reg_val[0]);
+	trace_printk("core %d irq_status_0: = %x\n", evt_payload->core_index, evt_payload->irq_reg_val[0]);
 	CAM_DBG(CAM_ISP, "irq_status_1: = %x", evt_payload->irq_reg_val[1]);
+	trace_printk("core %d irq_status_1: = %x\n", evt_payload->core_index, evt_payload->irq_reg_val[1]);
 	CAM_DBG(CAM_ISP, "Violation register: = %x",
 		evt_payload->irq_reg_val[2]);
 

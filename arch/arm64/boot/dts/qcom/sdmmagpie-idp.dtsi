@@ -187,6 +187,15 @@
 	qcom,platform-reset-gpio = <&pm6150l_gpios 9 0>;
 };
 
+&dsi_rm69299_visionox_amoled_video {
+	qcom,panel-supply-entries = <&dsi_panel_pwr_supply_labibb_amoled>;
+	qcom,mdss-dsi-bl-pmic-control-type = "bl_ctrl_dcs";
+	qcom,mdss-dsi-bl-min-level = <1>;
+	qcom,mdss-dsi-bl-max-level = <255>;
+	qcom,platform-te-gpio = <&tlmm 10 0>;
+	qcom,platform-reset-gpio = <&pm6150l_gpios 9 0>;
+};
+
 &dsi_sim_cmd {
 	qcom,panel-supply-entries = <&dsi_panel_pwr_supply_no_labibb>;
 	qcom,mdss-dsi-bl-pmic-control-type = "bl_ctrl_dcs";
@@ -238,6 +247,48 @@
 	qcom,platform-en-gpio = <&pm6150l_gpios 4 0>;
 	qcom,platform-bklight-en-gpio = <&pm6150l_gpios 5 0>;
 	qcom,platform-te-gpio = <&tlmm 11 0>;
+};
+
+&dsi_sharp_qsync_wqhd_cmd {
+	qcom,panel-supply-entries = <&dsi_panel_pwr_supply_no_labibb>;
+	qcom,mdss-dsi-bl-pmic-control-type = "bl_ctrl_external";
+	qcom,mdss-dsi-bl-min-level = <1>;
+	qcom,mdss-dsi-bl-max-level = <4095>;
+	qcom,platform-te-gpio = <&tlmm 10 0>;
+	qcom,platform-reset-gpio = <&pm6150l_gpios 9 0>;
+	qcom,platform-en-gpio = <&pm6150l_gpios 4 0>;
+	qcom,platform-bklight-en-gpio = <&pm6150l_gpios 5 0>;
+};
+
+&dsi_sharp_qsync_wqhd_video {
+	qcom,panel-supply-entries = <&dsi_panel_pwr_supply_no_labibb>;
+	qcom,mdss-dsi-bl-pmic-control-type = "bl_ctrl_external";
+	qcom,mdss-dsi-bl-min-level = <1>;
+	qcom,mdss-dsi-bl-max-level = <4095>;
+	qcom,platform-reset-gpio = <&pm6150l_gpios 9 0>;
+	qcom,platform-en-gpio = <&pm6150l_gpios 4 0>;
+	qcom,platform-bklight-en-gpio = <&pm6150l_gpios 5 0>;
+};
+
+&dsi_sharp_qsync_fhd_video {
+	qcom,panel-supply-entries = <&dsi_panel_pwr_supply_no_labibb>;
+	qcom,mdss-dsi-bl-pmic-control-type = "bl_ctrl_external";
+	qcom,mdss-dsi-bl-min-level = <1>;
+	qcom,mdss-dsi-bl-max-level = <4095>;
+	qcom,platform-reset-gpio = <&pm6150l_gpios 9 0>;
+	qcom,platform-en-gpio = <&pm6150l_gpios 4 0>;
+	qcom,platform-bklight-en-gpio = <&pm6150l_gpios 5 0>;
+};
+
+&dsi_sharp_qsync_fhd_cmd {
+	qcom,panel-supply-entries = <&dsi_panel_pwr_supply_no_labibb>;
+	qcom,mdss-dsi-bl-pmic-control-type = "bl_ctrl_external";
+	qcom,mdss-dsi-bl-min-level = <1>;
+	qcom,mdss-dsi-bl-max-level = <4095>;
+	qcom,platform-te-gpio = <&tlmm 10 0>;
+	qcom,platform-reset-gpio = <&pm6150l_gpios 9 0>;
+	qcom,platform-en-gpio = <&pm6150l_gpios 4 0>;
+	qcom,platform-bklight-en-gpio = <&pm6150l_gpios 5 0>;
 };
 
 &sde_dp {
@@ -325,6 +376,8 @@
 	qcom,thermal-mitigation = <4200000 3500000 3000000
 			2500000 2000000 1500000 1000000 500000>;
 	dpdm-supply = <&qusb_phy0>;
+	qcom,charger-temp-max = <800>;
+	qcom,smb-temp-max = <800>;
 };
 
 &pm6150_gpios {
@@ -340,8 +393,6 @@
 	};
 };
 
-/* block for smb1390 + sm6150 */
-#if (CONFIG_SEC_A90Q_PROJECT == y)
 &soc {
 	i2c_13: 12c@13 {
 		status  = "ok";
@@ -351,6 +402,7 @@
 		gpios = <&tlmm 42 0 /*sda*/
 			&tlmm 43 0 /*scl*/
 			>;
+
 		#address-cells = <1>;
 		#size-cells = <0>;
 		pinctrl-names = "default";
@@ -358,15 +410,13 @@
 		#include "smb1390.dtsi"
 	};
 };
-#else
+#if 0  /* block for smb1355 + sm7150 */
 &qupv3_se9_i2c {
 	status = "ok";
 	#include "smb1390.dtsi"
 	#include "smb1355.dtsi"
 };
-#endif
 
-#if 0 /* block for smb1390 + sm6150 */
 &smb1355 {
 	/delete-property/ interrupts;
 	interrupts = <0x0 0xc2 0x0 IRQ_TYPE_LEVEL_LOW>;

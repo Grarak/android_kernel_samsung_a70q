@@ -49,6 +49,7 @@ struct accel_data {
 	struct workqueue_struct *accel_wq;
 	struct adsp_data *dev_data;
 	bool is_complete_cal;
+	bool lpf_onoff;
 	int32_t raw_data[ACCEL_RAW_DATA_CNT];
 	int32_t avg_data[ACCEL_RAW_DATA_CNT];
 };
@@ -218,7 +219,7 @@ static void accel_work_func(struct work_struct *work)
 
 	for (i = 0; i < ACCEL_RAW_DATA_CNT; i++) {
 		pdata->avg_data[i] /= ACCEL_FACTORY_CAL_CNT;
-		pr_err("[FACTORY] %s: avg : %d\n", __func__, pdata->avg_data[i]);
+		pr_info("[FACTORY] %s: avg : %d\n", __func__, pdata->avg_data[i]);
 	}
 
 	if (pdata->avg_data[2] > 0)
@@ -244,7 +245,7 @@ RETRY_ACCEL_SELFTEST:
 
 	while (!(data->ready_flag[MSG_TYPE_ST_SHOW_DATA] & 1 << MSG_ACCEL) &&
 		cnt++ < TIMEOUT_CNT)
-		msleep(20);
+		msleep(25);
 
 	data->ready_flag[MSG_TYPE_ST_SHOW_DATA] &= ~(1 << MSG_ACCEL);
 
@@ -292,10 +293,26 @@ static ssize_t accel_raw_data_show(struct device *dev,
 {
 	struct adsp_data *data = dev_get_drvdata(dev);
 	int32_t raw_data[ACCEL_RAW_DATA_CNT] = {0, };
+	static int32_t prev_raw_data[ACCEL_RAW_DATA_CNT];
+	int ret = 0;
 
 	mutex_lock(&data->accel_factory_mutex);
-	get_accel_raw_data(raw_data);
+	ret = get_accel_raw_data(raw_data);
 	mutex_unlock(&data->accel_factory_mutex);
+
+	if (!ret) {
+		memcpy(prev_raw_data, raw_data, sizeof(int32_t) * 3);
+	} else if (!pdata->lpf_onoff) {
+		pr_err("[FACTORY] %s: using prev data!!!\n", __func__);
+		memcpy(raw_data, prev_raw_data, sizeof(int32_t) * 3);
+	} else {
+		pr_err("[FACTORY] %s: Timeout!!!\n", __func__);
+	}
+
+#ifdef CONFIG_SEC_FACTORY
+	pr_info("[FACTORY] %s: %d, %d, %d\n", __func__,
+		raw_data[0], raw_data[1], raw_data[2]);
+#endif
 
 	return snprintf(buf, PAGE_SIZE, "%d,%d,%d\n",
 		raw_data[0], raw_data[1], raw_data[2]);
@@ -362,8 +379,11 @@ static ssize_t accel_lowpassfilter_store(struct device *dev,
 		return size;
 	}
 
-	pr_info("[FACTORY] %s: lpf_on_off done (%d)(0x%x)\n", __func__,
-		data->msg_buf[MSG_ACCEL][0], data->msg_buf[MSG_ACCEL][1]);
+	pdata->lpf_onoff = (bool)data->msg_buf[MSG_ACCEL][1];
+
+	pr_info("[FACTORY] %s: %d, 0x0A:%02x 0x0D:%02x 0x10:%02x\n", __func__,
+		data->msg_buf[MSG_ACCEL][0], data->msg_buf[MSG_ACCEL][1],
+		data->msg_buf[MSG_ACCEL][2], data->msg_buf[MSG_ACCEL][3]);
 
 	return size;
 }
@@ -412,7 +432,6 @@ static ssize_t accel_dhr_sensor_info_show(struct device *dev,
 	uint8_t cnt = 0;
 	char ctrl1_xl = 0;
 	uint8_t fullscale = 0;
-	int32_t *info = data->msg_buf[MSG_ACCEL];
 
 	adsp_unicast(NULL, 0, MSG_ACCEL, 0, MSG_TYPE_GET_DHR_INFO);
 	while (!(data->ready_flag[MSG_TYPE_GET_DHR_INFO] & 1 << MSG_ACCEL) &&
@@ -421,30 +440,30 @@ static ssize_t accel_dhr_sensor_info_show(struct device *dev,
 
 	data->ready_flag[MSG_TYPE_GET_DHR_INFO] &= ~(1 << MSG_ACCEL);
 
-	if (cnt >= TIMEOUT_CNT)
+	if (cnt >= TIMEOUT_CNT) {
 		pr_err("[FACTORY] %s: Timeout!!!\n", __func__);
+	} else {
+		ctrl1_xl = data->msg_buf[MSG_ACCEL][16];
 
-	ctrl1_xl = *info;
+		ctrl1_xl &= 0xC;
 
-	ctrl1_xl &= 0xC;
-
-	switch (ctrl1_xl) {
-	case 0xC:
-		fullscale = 8;
-		break;
-	case 0x8:
-		fullscale = 4;
-		break;
-	case 0x4:
-		fullscale = 16;
-		break;
-	case 0:
-		fullscale = 2;
-		break;
-	default:
-		break;
+		switch (ctrl1_xl) {
+		case 0xC:
+			fullscale = 8;
+			break;
+		case 0x8:
+			fullscale = 4;
+			break;
+		case 0x4:
+			fullscale = 16;
+			break;
+		case 0:
+			fullscale = 2;
+			break;
+		default:
+			break;
+		}
 	}
-
 	pr_info("[FACTORY] %s: f/s %u\n", __func__, fullscale);
 
 	return snprintf(buf, PAGE_SIZE, "\"FULL_SCALE\":\"%uG\"\n", fullscale);
@@ -547,6 +566,7 @@ static int __init lsm6dsl_accel_factory_init(void)
 	pdata->accel_wq = create_singlethread_workqueue("accel_wq");
 	INIT_WORK(&pdata->work_accel, accel_work_func);
 
+	pdata->lpf_onoff = true;
 	pr_info("[FACTORY] %s\n", __func__);
 
 	return 0;

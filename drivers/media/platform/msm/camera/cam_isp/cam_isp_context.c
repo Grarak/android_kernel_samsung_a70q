@@ -436,7 +436,7 @@ static int __cam_isp_ctx_handle_buf_done_in_activated_state(
 		}
 
 		if (!req_isp->bubble_detected) {
-			CAM_DBG(CAM_ISP,
+			CAM_QCLOGMINIMAL(CAM_ISP,
 				"Sync with success: req %lld res 0x%x fd 0x%x, ctx %u",
 				req->request_id,
 				req_isp->fence_map_out[j].resource_handle,
@@ -537,7 +537,7 @@ static void __cam_isp_ctx_send_sof_boot_timestamp(
 	req_msg.u.frame_msg.link_hdl = ctx_isp->base->link_hdl;
 	req_msg.u.frame_msg.sof_status = sof_event_status;
 
-	CAM_DBG(CAM_ISP,
+	CAM_QCLOGMINIMAL(CAM_ISP,
 		"request id:%lld frame number:%lld boot time stamp:0x%llx",
 		 request_id, ctx_isp->frame_id,
 		 ctx_isp->boot_timestamp);
@@ -3178,7 +3178,6 @@ static int __cam_isp_ctx_start_dev_in_ready(struct cam_context *ctx,
 		CAM_ISP_CTX_ACTIVATED_APPLIED :
 		(req_isp->num_fence_map_out) ? CAM_ISP_CTX_ACTIVATED_EPOCH :
 		CAM_ISP_CTX_ACTIVATED_SOF;
-
 	trace_printk("rdi_only_context = %d\n", ctx_isp->rdi_only_context);
 	trace_printk("num_fence_map_out = %d\n", req_isp->num_fence_map_out);
 
@@ -3200,7 +3199,9 @@ static int __cam_isp_ctx_start_dev_in_ready(struct cam_context *ctx,
 	}
 	/* CAM_DBG(CAM_ISP, "start device success ctx %u", ctx->ctx_id); */
 	trace_printk( "start device success ctx %u\n", ctx->ctx_id);
+
 	list_del_init(&req->list);
+
 	if (req_isp->num_fence_map_out) {
 		list_add_tail(&req->list, &ctx->active_req_list);
 		ctx_isp->active_req_cnt++;
@@ -3209,7 +3210,7 @@ static int __cam_isp_ctx_start_dev_in_ready(struct cam_context *ctx,
 	}
 end:
 	trace_printk( "start_dev: active_cnt = %d start sub_state %d\n",
-		      ctx_isp->active_req_cnt, ctx_isp->substate_activated);
+			  ctx_isp->active_req_cnt, ctx_isp->substate_activated);
 	return rc;
 }
 

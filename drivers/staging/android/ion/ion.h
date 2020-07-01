@@ -36,6 +36,7 @@
 #define ION_ADSP_HEAP_NAME	"adsp"
 #define ION_SYSTEM_HEAP_NAME	"system"
 #define ION_MM_HEAP_NAME	"mm"
+#define ION_CAMERA_HEAP_NAME    "camera_preview"
 #define ION_SPSS_HEAP_NAME	"spss"
 #define ION_SECURE_CARVEOUT_HEAP_NAME	"secure_carveout"
 #define ION_USER_CONTIG_HEAP_NAME	"user_contig"
@@ -377,6 +378,9 @@ size_t ion_heap_freelist_size(struct ion_heap *heap);
 struct ion_heap *ion_heap_create(struct ion_platform_heap *heap_data);
 
 struct ion_heap *ion_system_heap_create(struct ion_platform_heap *unused);
+#ifdef CONFIG_ION_RBIN_HEAP
+struct ion_heap *ion_rbin_heap_create(struct ion_platform_heap *unused);
+#endif
 struct ion_heap *ion_system_contig_heap_create(struct ion_platform_heap *heap);
 
 struct ion_heap *ion_carveout_heap_create(struct ion_platform_heap *heap_data);
@@ -452,6 +456,7 @@ struct ion_page_pool {
 struct ion_page_pool *ion_page_pool_create(gfp_t gfp_mask, unsigned int order,
 					   bool cached);
 void ion_page_pool_destroy(struct ion_page_pool *pool);
+struct page *ion_page_pool_only_alloc(struct ion_page_pool *pool);
 struct page *ion_page_pool_alloc(struct ion_page_pool *a, bool *from_pool);
 void ion_page_pool_free(struct ion_page_pool *pool, struct page *page);
 
@@ -489,5 +494,7 @@ int ion_walk_heaps(int heap_id, enum ion_heap_type type, void *data,
 long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
 
 int ion_query_heaps(struct ion_heap_query *query);
+
+unsigned int get_ion_system_heap_id(void);
 
 #endif /* _ION_H */

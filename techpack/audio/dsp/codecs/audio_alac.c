@@ -298,7 +298,7 @@ static int audio_open(struct inode *inode, struct file *file)
 	}
 	rc = audio_aio_open(audio, file);
 	if (rc < 0) {
-		pr_err("%s: audio_aio_open rc=%d\n",
+		pr_err_ratelimited("%s: audio_aio_open rc=%d\n",
 			__func__, rc);
 		goto fail;
 	}

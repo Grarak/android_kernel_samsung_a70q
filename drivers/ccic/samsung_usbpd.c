@@ -535,7 +535,7 @@ static void samsung_usbpd_send_event(struct samsung_usbpd_private *pd,
 	}
 }
 
-static void samsung_usbpd_connect_cb(struct usbpd_svid_handler *hdlr)
+static void samsung_usbpd_connect_cb(struct usbpd_svid_handler *hdlr,bool peer_usb_comm )
 {
 	struct samsung_usbpd_private *pd;
 

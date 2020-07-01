@@ -3836,6 +3836,16 @@ static void fw_update(void *device_data)
 
 	sec_cmd_set_default_result(sec);
 
+#if defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
+	if (sec->cmd_param[0] == UMS) {
+		input_err(true, &client->dev, "%s: user_ship, skip\n", __func__);
+		snprintf(result, sizeof(result), "OK");
+		sec_cmd_set_cmd_result(sec, result, strnlen(result, sizeof(result)));
+		sec->cmd_state = SEC_CMD_STATUS_OK;
+		return;
+	}
+#endif
+
 	switch (sec->cmd_param[0]) {
 	case BUILT_IN:
 		if (!pdata->firmware_name) {

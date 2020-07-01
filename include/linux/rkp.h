@@ -135,6 +135,7 @@ typedef struct kdp_init_struct {
 	u32 rp_task;
 	u32 comm_task;
 	u32 bp_cred_secptr;
+	u32 task_threadinfo;
 	u64 verifiedbootstate;
 } kdp_init_t;
 #endif  /* CONFIG_RKP_KDP */
@@ -222,13 +223,13 @@ static inline void rkp_robuffer_init(void)
 	uh_call(UH_APP_RKP, RKP_GET_RKP_GET_BUFFER_BITMAP, (u64)&rkp_s_bitmap_buffer, (u64)memstart_addr, 0, 0);
 }
 
-static inline u8 rkp_check_bitmap(u64 pa, sparse_bitmap_for_kernel_t *kernel_bitmap, u8 overflow_ret){
+static inline u8 rkp_check_bitmap(u64 pa, sparse_bitmap_for_kernel_t *kernel_bitmap, u8 overflow_ret, u8 uninitialized_ret){
 	u8 val;
 	u64 offset, map_loc, bit_offset;
 	char *map;
 
 	if(!kernel_bitmap || !kernel_bitmap->map)
-		return overflow_ret;
+		return uninitialized_ret;
 
 	offset = pa - kernel_bitmap->start_addr;
 	map_loc = ((offset % SPARSE_UNIT_SIZE) / PAGE_SIZE) >> 3;
@@ -239,22 +240,22 @@ static inline u8 rkp_check_bitmap(u64 pa, sparse_bitmap_for_kernel_t *kernel_bit
 
 	map = kernel_bitmap->map[(offset >> SPARSE_UNIT_BIT)];
 	if(!map)
-		return overflow_ret;
+		return uninitialized_ret;
 
 	val = ((u8)map[map_loc] >> bit_offset) & ((u8)1);
 	return val;
 }
 
 static inline unsigned int is_rkp_ro_page(u64 va){
-	return rkp_check_bitmap(__pa(va), rkp_s_bitmap_buffer, 0);
+	return rkp_check_bitmap(__pa(va), rkp_s_bitmap_buffer, 0, 0);
 }
 
 static inline u8 rkp_is_pg_protected(u64 va){
-	return rkp_check_bitmap(__pa(va), rkp_s_bitmap_ro, 1);
+	return rkp_check_bitmap(__pa(va), rkp_s_bitmap_ro, 1, 0);
 }
 
 static inline u8 rkp_is_pg_dbl_mapped(u64 pa){
-	return rkp_check_bitmap(pa, rkp_s_bitmap_dbl, 0);
+	return rkp_check_bitmap(pa, rkp_s_bitmap_dbl, 0, 0);
 }
 #endif // LINKER_SCRIPT
 #endif //__ASSEMBLY__

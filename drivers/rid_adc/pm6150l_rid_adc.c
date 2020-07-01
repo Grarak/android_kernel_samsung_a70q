@@ -69,6 +69,11 @@ extern void set_factory_force_usb(bool enable);
 
 /* temprory variable */
 static int rid_adc = 0, raw_rid_adc = 0;
+static int rid_adc_gpio = 0;
+#if defined(CONFIG_PM6150_USB_FALSE_DETECTION_WA_BY_GND) && !defined(CONFIG_SEC_FACTORY)
+static struct smb_charger * g_smb_chg;
+static ktime_t drp_none_time;
+#endif
 
 int get_rid_type(void)
 {
@@ -118,6 +123,9 @@ static int handle_rid_adc(int val)
 		pm6150_ccic_event_work(CCIC_NOTIFY_DEV_MUIC, CCIC_NOTIFY_ID_RID,
 			RID_GND/*rid*/, USB_STATUS_NOTIFY_DETACH, 0);
 #endif
+#if defined(CONFIG_PM6150_USB_FALSE_DETECTION_WA_BY_GND) && !defined(CONFIG_SEC_FACTORY)
+		//smblib_drp_enable(g_smb_chg);
+#endif
 		break;
 	case RID_ADC_56K:
 		pr_info("%s: RID_56K\n", __func__);
@@ -135,12 +143,18 @@ static int handle_rid_adc(int val)
 		pm6150_ccic_event_work(CCIC_NOTIFY_DEV_MUIC, CCIC_NOTIFY_ID_RID,
 			RID_255K/*rid*/, USB_STATUS_NOTIFY_DETACH, 0);
 #endif
+#if defined(CONFIG_PM6150_USB_FALSE_DETECTION_WA_BY_GND) && !defined(CONFIG_SEC_FACTORY)
+		//smblib_drp_enable(g_smb_chg);
+#endif
 		break;
 	case RID_ADC_301K:
 		pr_info("%s: RID_301K, Jig on - LOW\n", __func__);
 #if defined(CONFIG_USB_CCIC_NOTIFIER_USING_QC)
 		pm6150_ccic_event_work(CCIC_NOTIFY_DEV_MUIC, CCIC_NOTIFY_ID_RID,
 			RID_301K/*rid*/, USB_STATUS_NOTIFY_DETACH, 0);
+#endif
+#if defined(CONFIG_PM6150_USB_FALSE_DETECTION_WA_BY_GND) && !defined(CONFIG_SEC_FACTORY)
+		//smblib_drp_enable(g_smb_chg);
 #endif
 #if defined(CONFIG_BATTERY_SAMSUNG_USING_QC)
 		if (battery != NULL) {
@@ -193,6 +207,9 @@ static int handle_rid_adc(int val)
 		pm6150_ccic_event_work(CCIC_NOTIFY_DEV_MUIC, CCIC_NOTIFY_ID_RID,
 			RID_OPEN/*rid*/, USB_STATUS_NOTIFY_DETACH, 0);
 #endif
+#if defined(CONFIG_PM6150_USB_FALSE_DETECTION_WA_BY_GND) && !defined(CONFIG_SEC_FACTORY)
+		//smblib_drp_disable(g_smb_chg);
+#endif
 		break;
 	default:
 		break;
@@ -208,7 +225,7 @@ static int detect_rid_adc(struct platform_device *pdev)
 
 	pr_info("%s\n", __func__);
 
-	if (adc_channel == NULL) {
+	if (IS_ERR(adc_channel)) {
 		adc_channel = iio_channel_get(&pdev->dev, "rid_adc_channel");
 		if (IS_ERR(adc_channel)) { 
 			pr_info("%s: channel unavailable\n", __func__);
@@ -282,12 +299,38 @@ static int rid_adc_iio_init(struct platform_device *pdev)
 	return 0;
 }
 
+#if defined(CONFIG_PM6150_USB_FALSE_DETECTION_WA_BY_GND) && !defined(CONFIG_SEC_FACTORY)
+static void rid_handle_drp_mode(void) 
+{
+	if(gpio_get_value(rid_adc_gpio)) {
+		drp_none_time = ktime_to_ms(ktime_get_boottime());
+		smblib_drp_disable(g_smb_chg);
+	}
+	else {
+		ktime_t time_diff = ktime_to_ms(ktime_get_boottime()) - drp_none_time;
+		
+		pr_info("[USB_WA] %s timediff: %lld last disable: %lld \n", \
+					__func__, time_diff, drp_none_time);
+		
+		//PR_NONE to PR_DUAL, needs 50ms.
+		if(time_diff < 50)
+			msleep(50 - time_diff);
+		
+		smblib_drp_enable(g_smb_chg);
+	}
+}
+#endif
+
 static irqreturn_t rid_adc_irq_handler(int irq, void *data)
 {
 	struct platform_device *pdev = data;
 	int val;
 
 	pr_info("%s\n", __func__);
+	
+#if defined(CONFIG_PM6150_USB_FALSE_DETECTION_WA_BY_GND) && !defined(CONFIG_SEC_FACTORY)
+	rid_handle_drp_mode();
+#endif
 
 	val = detect_rid_adc(pdev);
 	if (val < 0) 
@@ -302,7 +345,7 @@ static int rid_adc_irq_init(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct device_node *np= dev->of_node;
-	int rid_adc_gpio = 0, adc_irq = 0, ret = 0;
+	int adc_irq = 0, ret = 0;
 
 	pr_info("%s\n", __func__);
 
@@ -472,6 +515,14 @@ static int rid_pm6150l_remove(struct platform_device *pdev)
 	//...
 	return 0;
 }
+
+#if defined(CONFIG_PM6150_USB_FALSE_DETECTION_WA_BY_GND) && !defined(CONFIG_SEC_FACTORY)
+void smb5_rid_pm6150l_init(struct smb_charger *chg)
+{
+	g_smb_chg = chg;
+}
+EXPORT_SYMBOL(smb5_rid_pm6150l_init);
+#endif
 
 #if defined(CONFIG_OF)
 static const struct of_device_id rid_pm6150l_of_match_table[] = {

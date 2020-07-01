@@ -68,6 +68,7 @@
 #include <linux/ftrace.h>
 #include <linux/lockdep.h>
 #include <linux/nmi.h>
+#include <linux/psi.h>
 #include <linux/sched/cputime.h>
 
 #include <asm/sections.h>
@@ -3304,7 +3305,6 @@ static void warn_alloc_show_mem(gfp_t gfp_mask, nodemask_t *nodemask)
 	if (in_interrupt() || !(gfp_mask & __GFP_DIRECT_RECLAIM))
 		filter &= ~SHOW_MEM_FILTER_NODES;
 
-	show_mem_extra_call_notifiers();
 	show_mem(filter, nodemask);
 	show_mem_call_notifiers();
 }
@@ -3327,7 +3327,8 @@ void warn_alloc(gfp_t gfp_mask, nodemask_t *nodemask, const char *fmt, ...)
 	pr_cont("%pV", &vaf);
 	va_end(args);
 
-	pr_cont(", mode:%#x(%pGg), nodemask=", gfp_mask, &gfp_mask);
+	pr_cont(", mode:%#x(%pGg), fatal_signal:%d, nodemask=", gfp_mask,
+		&gfp_mask, fatal_signal_pending(current) ? 1 : 0);
 	if (nodemask)
 		pr_cont("%*pbl\n", nodemask_pr_args(nodemask));
 	else
@@ -3461,15 +3462,18 @@ __alloc_pages_direct_compact(gfp_t gfp_mask, unsigned int order,
 		enum compact_priority prio, enum compact_result *compact_result)
 {
 	struct page *page;
+	unsigned long pflags;
 	unsigned int noreclaim_flag;
 
 	if (!order)
 		return NULL;
 
+	psi_memstall_enter(&pflags);
 	noreclaim_flag = memalloc_noreclaim_save();
 	*compact_result = try_to_compact_pages(gfp_mask, order, alloc_flags, ac,
 									prio);
 	memalloc_noreclaim_restore(noreclaim_flag);
+	psi_memstall_leave(&pflags);
 
 	if (*compact_result <= COMPACT_INACTIVE)
 		return NULL;
@@ -3701,11 +3705,13 @@ __perform_reclaim(gfp_t gfp_mask, unsigned int order,
 	struct reclaim_state reclaim_state;
 	int progress;
 	unsigned int noreclaim_flag;
+	unsigned long pflags;
 
 	cond_resched();
 
 	/* We now go into synchronous reclaim */
 	cpuset_memory_pressure_bump();
+	psi_memstall_enter(&pflags);
 	noreclaim_flag = memalloc_noreclaim_save();
 	fs_reclaim_acquire(gfp_mask);
 	reclaim_state.reclaimed_slab = 0;
@@ -3717,6 +3723,7 @@ __perform_reclaim(gfp_t gfp_mask, unsigned int order,
 	current->reclaim_state = NULL;
 	fs_reclaim_release(gfp_mask);
 	memalloc_noreclaim_restore(noreclaim_flag);
+	psi_memstall_leave(&pflags);
 
 	cond_resched();
 
@@ -3874,6 +3881,7 @@ should_reclaim_retry(gfp_t gfp_mask, unsigned order,
 	 */
 	if ((did_some_progress || lmk_kill_possible()) &&
 				order <= PAGE_ALLOC_COSTLY_ORDER) {
+
 		*no_progress_loops = 0;
 
 		if (lmk_kill_possible())
@@ -4010,17 +4018,6 @@ __alloc_pages_slowpath(gfp_t gfp_mask, unsigned int order,
 	task_cputime(current, &utime, &stime_s);
 
 	/*
-	 * In the slowpath, we sanity check order to avoid ever trying to
-	 * reclaim >= MAX_ORDER areas which will never succeed. Callers may
-	 * be using allocators in order of preference for an area that is
-	 * too large.
-	 */
-	if (order >= MAX_ORDER) {
-		WARN_ON_ONCE(!(gfp_mask & __GFP_NOWARN));
-		return NULL;
-	}
-
-	/*
 	 * We also sanity check to catch abuse of atomic reserves being used by
 	 * callers that are not in atomic context.
 	 */
@@ -4139,6 +4136,9 @@ retry:
 
 	/* Avoid recursion of direct reclaim */
 	if (current->flags & PF_MEMALLOC)
+		goto nopage;
+
+	if (fatal_signal_pending(current) && !(gfp_mask & __GFP_NOFAIL))
 		goto nopage;
 
 	/* Try direct reclaim and then allocating */
@@ -4339,6 +4339,15 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order, int preferred_nid,
 	gfp_t alloc_mask; /* The gfp_t that was actually used for allocation */
 	struct alloc_context ac = { };
 
+	/*
+	 * There are several places where we assume that the order value is sane
+	 * so bail out early if the request is out of bound.
+	 */
+	if (unlikely(order >= MAX_ORDER)) {
+		WARN_ON_ONCE(!(gfp_mask & __GFP_NOWARN));
+		return NULL;
+	}
+
 	gfp_mask &= gfp_allowed_mask;
 	alloc_mask = gfp_mask;
 	if (!prepare_alloc_pages(gfp_mask, order, preferred_nid, nodemask, &ac, &alloc_mask, &alloc_flags))
@@ -4497,11 +4506,11 @@ refill:
 		/* Even if we own the page, we do not use atomic_set().
 		 * This would break get_page_unless_zero() users.
 		 */
-		page_ref_add(page, size - 1);
+		page_ref_add(page, size);
 
 		/* reset page count bias and offset to start of new frag */
 		nc->pfmemalloc = page_is_pfmemalloc(page);
-		nc->pagecnt_bias = size;
+		nc->pagecnt_bias = size + 1;
 		nc->offset = size;
 	}
 
@@ -4517,10 +4526,10 @@ refill:
 		size = nc->size;
 #endif
 		/* OK, page count is 0, we can safely set it */
-		set_page_count(page, size);
+		set_page_count(page, size + 1);
 
 		/* reset page count bias and offset to start of new frag */
-		nc->pagecnt_bias = size;
+		nc->pagecnt_bias = size + 1;
 		offset = size - fragsz;
 	}
 
@@ -4723,7 +4732,9 @@ long si_mem_available(void)
 	 */
 	available += global_node_page_state(NR_INDIRECTLY_RECLAIMABLE_BYTES) >>
 		PAGE_SHIFT;
-
+#ifdef CONFIG_ION_RBIN_HEAP
+	available += atomic_read(&rbin_cached_pages);
+#endif
 	if (available < 0)
 		available = 0;
 	return available;
@@ -4733,6 +4744,9 @@ EXPORT_SYMBOL_GPL(si_mem_available);
 void si_meminfo(struct sysinfo *val)
 {
 	val->totalram = totalram_pages;
+#ifdef CONFIG_ION_RBIN_HEAP
+	val->totalram += totalrbin_pages;
+#endif
 	val->sharedram = global_node_page_state(NR_SHMEM);
 	val->freeram = global_zone_page_state(NR_FREE_PAGES);
 	val->bufferram = nr_blockdev_pages();
@@ -5716,8 +5730,10 @@ void __meminit init_currently_empty_zone(struct zone *zone,
 					unsigned long size)
 {
 	struct pglist_data *pgdat = zone->zone_pgdat;
+	int zone_idx = zone_idx(zone) + 1;
 
-	pgdat->nr_zones = zone_idx(zone) + 1;
+	if (zone_idx > pgdat->nr_zones)
+		pgdat->nr_zones = zone_idx;
 
 	zone->zone_start_pfn = zone_start_pfn;
 

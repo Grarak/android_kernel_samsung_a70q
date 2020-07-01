@@ -33,17 +33,16 @@ enum {
 	CCIC_DOCK_T_VR		= 112,
 	CCIC_DOCK_UVDM		= 113,
 	CCIC_DOCK_DEXPAD	= 114,
-	CCIC_DOCK_UNSUPPORTED_AUDIO = 115,	/* Ra/Ra TypeC Analog Earphone*/
+	CCIC_DOCK_TYPEC_ANALOG_EARPHONE	= 115,	/* RA/RA TypeC Analog Earphone*/
 	CCIC_DOCK_NEW		= 200,  /* For New uevent */
 };
-
 typedef enum {
-	TYPE_C_DETACH = 0,
-	TYPE_C_ATTACH_DFP = 1, /* Host */
-	TYPE_C_ATTACH_UFP = 2, /* Device */
-	TYPE_C_ATTACH_DRP = 3, /* Dual role */
-	TYPE_C_ATTACH_SRC = 4, /* SRC */
-	TYPE_C_ATTACH_SNK = 5, /* SNK */
+    TYPE_C_DETACH = 0,
+    TYPE_C_ATTACH_DFP = 1, /* Host */
+    TYPE_C_ATTACH_UFP = 2, /* Device */
+    TYPE_C_ATTACH_DRP = 3, /* Dual role */
+    TYPE_C_PR_SWAP = 4,
+    TYPE_C_DR_SWAP = 5,
 } CCIC_OTP_MODE;
 
 #if defined(CONFIG_TYPEC)
@@ -103,7 +102,10 @@ typedef enum {
 
 #define MAX_INPUT_DATA (255)
 #define USBPD_MAX_COUNT_MSG_OBJECT	(8) /* 0..7 */
+
+#if !defined(CONFIG_CCIC_S2MU107) && !defined(CONFIG_CCIC_S2MU106)
 #define USBPD_Vendor_Defined		0xF
+#endif
 
 #define SEC_UVDM_OUTREQ_NUMOBJ (7)
 #define SEC_UVDM_INREQ_NUMOBJ (2)
@@ -144,6 +146,7 @@ typedef union {
 	} BITS;
 } uvdm_header;
 
+#if !defined(CONFIG_CCIC_S2MU107) && !defined(CONFIG_CCIC_S2MU106)
 typedef union {
 	u32 object;
 	u16 word[2];
@@ -335,6 +338,7 @@ typedef union {
 		unsigned bist_mode:4;
 	} bist_data_object;
 } data_obj_type;
+#endif
 
 typedef union {
 	u32 object;
@@ -409,6 +413,7 @@ enum usbpd_port_data_role {
 enum usbpd_port_power_role {
 	USBPD_SINK,
 	USBPD_SOURCE,
+	USBPD_DRP,
 };
 
 enum usbpd_port_vconn_role {

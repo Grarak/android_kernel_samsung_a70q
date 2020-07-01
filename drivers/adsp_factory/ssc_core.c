@@ -32,6 +32,9 @@
 #define SLPI_PASS "SLPI_PASS"
 #endif
 
+#define SENSOR_DUMP_CNT 3 /* Accel/Gyro, Magnetic, Light */
+#define SENSOR_DUMP_DONE "SENSOR_DUMP_DONE"
+
 #ifdef CONFIG_SUPPORT_SSC_MODE
 #ifdef CONFIG_SUPPORT_SSC_MODE_FOR_MAG
 #define ANT_NFC_MST  0
@@ -39,6 +42,13 @@
 #define ANT_DUMMY    2
 #endif
 #endif
+
+struct sdump_data {
+	struct workqueue_struct *sdump_wq;
+	struct work_struct work_sdump;
+	struct adsp_data *dev_data;
+};
+struct sdump_data *pdata_sdump;
 
 static int pid;
 static char panic_msg[SSR_REASON_LEN];
@@ -51,38 +61,16 @@ static char operation_mode_flag[11];
 static ssize_t dumpstate_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
 {
-	struct adsp_data *data = dev_get_drvdata(dev);
-	uint8_t cnt = 0;
 	int32_t type[1];
+
 	if (pid != 0) {
-		adsp_unicast(NULL, 0, MSG_ACCEL, 0, MSG_TYPE_GET_DHR_INFO);
-		while (!(data->ready_flag[MSG_TYPE_GET_DHR_INFO] & 1 << MSG_ACCEL) &&
-			cnt++ < TIMEOUT_CNT)
-			usleep_range(500, 550);
-
-		data->ready_flag[MSG_TYPE_GET_DHR_INFO] &= ~(1 << MSG_ACCEL);
-
-		if (cnt >= TIMEOUT_CNT)
-			pr_err("[FACTORY] %s: accel dhr_sensor_info Timeout!!!\n",
-			__func__);
-
-		adsp_unicast(NULL, 0, MSG_LIGHT, 0, MSG_TYPE_GET_DHR_INFO);
-		while (!(data->ready_flag[MSG_TYPE_GET_DHR_INFO] & 1 << MSG_LIGHT) &&
-			cnt++ < TIMEOUT_CNT)
-			usleep_range(500, 550);
-
-		data->ready_flag[MSG_TYPE_GET_DHR_INFO] &= ~(1 << MSG_LIGHT);
-
-		if (cnt >= TIMEOUT_CNT)
-			pr_err("[FACTORY] %s: light dhr_sensor_info Timeout!!!\n",
-				__func__);
-
 		pr_info("[FACTORY] to take the logs\n");
 		type[0] = 0;
 	} else {
 		type[0] = 2;
 		pr_info("[FACTORY] logging service was stopped %d\n", pid);
 	}
+
 	adsp_unicast(type, sizeof(type), MSG_SSC_CORE, 0, MSG_TYPE_DUMPSTATE);
 	return snprintf(buf, PAGE_SIZE, "SSC_CORE\n");
 }
@@ -126,7 +114,6 @@ static ssize_t mode_show(struct device *dev,
 			if (time_after(jiffies, timeout))
 				pr_info("[FACTORY] %s: Timeout!!!\n", __func__);
 			if (time_after(jiffies, timeout_2)) {
-//				panic("force crash : ssc core\n");
 				pr_info("[FACTORY] pid %d\n", pid);
 				return snprintf(buf, PAGE_SIZE, "1\n");
 			}
@@ -206,7 +193,29 @@ static ssize_t remove_sensor_sysfs_store(struct device *dev,
 	return size;
 }
 
-extern unsigned int sec_hw_rev(void);
+static unsigned int system_rev __read_mostly;
+
+static int __init sec_hw_rev_setup(char *p)
+{
+	int ret;
+
+	ret = kstrtouint(p, 0, &system_rev);
+	if (unlikely(ret < 0)) {
+		pr_warn("androidboot.revision is malformed (%s)\n", p);
+		return -EINVAL;
+	}
+
+	pr_info("androidboot.revision %x\n", system_rev);
+
+	return 0;
+}
+early_param("androidboot.revision", sec_hw_rev_setup);
+
+static unsigned int sec_hw_rev(void)
+{
+	return system_rev;
+}
+
 int ssc_system_rev_test;
 static ssize_t ssc_hw_rev_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -331,6 +340,95 @@ static struct notifier_block sns_device_mode_notifier = {
 };
 #endif
 
+static void print_sensor_dump(struct adsp_data *data, int sensor)
+{
+	int i = 0;
+
+	switch (sensor) {
+	case MSG_ACCEL:
+		for (i = 0; i < 8; i++) {
+			pr_info("[FACTORY] %s - %d: %02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x,%02x\n",
+				__func__, sensor,
+				data->msg_buf[sensor][i * 16 + 0],
+				data->msg_buf[sensor][i * 16 + 1],
+				data->msg_buf[sensor][i * 16 + 2],
+				data->msg_buf[sensor][i * 16 + 3],
+				data->msg_buf[sensor][i * 16 + 4],
+				data->msg_buf[sensor][i * 16 + 5],
+				data->msg_buf[sensor][i * 16 + 6],
+				data->msg_buf[sensor][i * 16 + 7],
+				data->msg_buf[sensor][i * 16 + 8],
+				data->msg_buf[sensor][i * 16 + 9],
+				data->msg_buf[sensor][i * 16 + 10],
+				data->msg_buf[sensor][i * 16 + 11],
+				data->msg_buf[sensor][i * 16 + 12],
+				data->msg_buf[sensor][i * 16 + 13],
+				data->msg_buf[sensor][i * 16 + 14],
+				data->msg_buf[sensor][i * 16 + 15]);
+		}
+		break;
+	case MSG_MAG:
+		pr_info("[FACTORY] %s - %d: WIA1/2: 0x%02x/0x%02x, ST1/2: 0x%02x/0x%02x, DATA: 0x%02x/0x%02x/0x%02x/0x%02x/0x%02x/0x%02x, CNTL1/2/3: 0x%02x/0x%02x/0x%02x\n",
+			__func__, sensor,
+			data->msg_buf[sensor][0], data->msg_buf[sensor][1],
+			data->msg_buf[sensor][2], data->msg_buf[sensor][9],
+			data->msg_buf[sensor][3], data->msg_buf[sensor][4],
+			data->msg_buf[sensor][5], data->msg_buf[sensor][6],
+			data->msg_buf[sensor][7], data->msg_buf[sensor][8],
+			data->msg_buf[sensor][10], data->msg_buf[sensor][11],
+			data->msg_buf[sensor][12]);
+		break;
+	default:
+		break;
+	}
+}
+
+void sensor_dump_work_func(struct work_struct *work)
+{
+	struct sdump_data *sensor_dump_data = container_of((struct work_struct *)work,
+		struct sdump_data, work_sdump);
+	struct adsp_data *data = sensor_dump_data->dev_data;
+
+	int sensor_type[SENSOR_DUMP_CNT] = { MSG_ACCEL, MSG_MAG, MSG_LIGHT };
+
+	int i, cnt;
+
+	for (i = 0; i < SENSOR_DUMP_CNT; i++) {
+		if (!data->sysfs_created[sensor_type[i]]) {
+			pr_info("[FACTORY] %s: %d was not probed\n",
+				__func__, sensor_type[i]);
+			continue;
+		}
+		pr_info("[FACTORY] %s: %d\n", __func__, sensor_type[i]);
+		cnt = 0;
+		adsp_unicast(NULL, 0, sensor_type[i], 0, MSG_TYPE_GET_DHR_INFO);
+		while (!(data->ready_flag[MSG_TYPE_GET_DHR_INFO] & 1 << sensor_type[i]) &&
+			cnt++ < TIMEOUT_CNT)
+			msleep(10);
+
+		data->ready_flag[MSG_TYPE_GET_DHR_INFO] &= ~(1 << sensor_type[i]);
+
+		if (cnt >= TIMEOUT_CNT) {
+			pr_err("[FACTORY] %s: %d Timeout!!!\n",
+				__func__, sensor_type[i]);
+		} else {
+			print_sensor_dump(data, sensor_type[i]);
+			msleep(200);
+		}
+	}
+}
+
+static ssize_t sensor_dump_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
+{
+	struct adsp_data *data = dev_get_drvdata(dev);
+
+	pdata_sdump->dev_data = data;
+	queue_work(pdata_sdump->sdump_wq, &pdata_sdump->work_sdump);
+
+	return snprintf(buf, PAGE_SIZE, "%s\n", SENSOR_DUMP_DONE);
+}
+
 static DEVICE_ATTR(dumpstate, 0440, dumpstate_show, NULL);
 static DEVICE_ATTR(operation_mode, 0664,
 	operation_mode_show, operation_mode_store);
@@ -343,6 +441,7 @@ static DEVICE_ATTR(ssr_reset, 0440, ssr_reset_show, NULL);
 #ifdef CONFIG_SUPPORT_SSC_MODE
 static DEVICE_ATTR(ssc_mode, 0664, ssc_mode_show, ssc_mode_store);
 #endif
+static DEVICE_ATTR(sensor_dump, 0444, sensor_dump_show, NULL);
 
 static struct device_attribute *core_attrs[] = {
 	&dev_attr_dumpstate,
@@ -353,6 +452,7 @@ static struct device_attribute *core_attrs[] = {
 	&dev_attr_ssc_hw_rev,
 	&dev_attr_ssr_msg,
 	&dev_attr_ssr_reset,
+	&dev_attr_sensor_dump,
 #ifdef CONFIG_SUPPORT_SSC_MODE
 	&dev_attr_ssc_mode,
 #endif
@@ -421,6 +521,17 @@ static int __init core_factory_init(void)
 #ifdef CONFIG_SUPPORT_SSC_MODE
 	platform_driver_register(&ssc_core_driver);
 #endif
+	pdata_sdump = kzalloc(sizeof(*pdata_sdump), GFP_KERNEL);
+	if (pdata_sdump == NULL)
+		return -ENOMEM;
+
+	pdata_sdump->sdump_wq = create_singlethread_workqueue("sdump_wq");
+	if (pdata_sdump->sdump_wq == NULL) {
+		pr_err("[FACTORY]: %s - could not create sdump wq\n", __func__);
+		kfree(pdata_sdump);
+		return -ENOMEM;
+	}
+	INIT_WORK(&pdata_sdump->work_sdump, sensor_dump_work_func);
 	pr_info("[FACTORY] %s\n", __func__);
 
 	return 0;
@@ -432,6 +543,11 @@ static void __exit core_factory_exit(void)
 #ifdef CONFIG_SUPPORT_SSC_MODE
 	platform_driver_unregister(&ssc_core_driver);
 #endif
+	if (pdata_sdump->sdump_wq)
+		destroy_workqueue(pdata_sdump->sdump_wq);
+	if (pdata_sdump)
+		kfree(pdata_sdump);
+
 	pr_info("[FACTORY] %s\n", __func__);
 }
 module_init(core_factory_init);

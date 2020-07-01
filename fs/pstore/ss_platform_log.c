@@ -32,7 +32,7 @@
 #include <linux/slab.h>
 #include <asm/unaligned.h>
 
-#include <linux/sec_bsp.h>
+#include <linux/sec_bootstat.h>
 
 /* This defines are for PSTORE */
 #define SS_LOGGER_LEVEL_HEADER		(1)
@@ -41,7 +41,7 @@
 #define SS_LOGGER_LEVEL_MAX		(4)
 #define SS_LOGGER_SKIP_COUNT		(4)
 #define SS_LOGGER_STRING_PAD		(1)
-#define SS_LOGGER_HEADER_SIZE		(68)
+#define SS_LOGGER_HEADER_SIZE		(80)
 
 #define SS_LOG_ID_MAIN			(0)
 #define SS_LOG_ID_RADIO			(1)

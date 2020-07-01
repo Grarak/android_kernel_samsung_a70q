@@ -1,4 +1,4 @@
-/* Copyright (c) 2017-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2017-2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -424,7 +424,7 @@ static int msm_transcode_loopback_set_params(struct snd_compr_stream *cstream,
 
 	q6_state = apr_get_q6_state();
 	if (q6_state == APR_SUBSYS_DOWN) {
-		pr_debug("%s,adsp is down\n", __func__);
+		pr_debug("%s: adsp is down\n", __func__);
 		return -ENETRESET;
 	}
 	mutex_lock(&trans->lock);
@@ -1510,10 +1510,7 @@ static struct snd_soc_platform_driver msm_soc_platform = {
 
 static int msm_transcode_dev_probe(struct platform_device *pdev)
 {
-
 	pr_debug("%s: dev name %s\n", __func__, dev_name(&pdev->dev));
-	if (pdev->dev.of_node)
-		dev_set_name(&pdev->dev, "%s", "msm-transcode-loopback");
 
 	return snd_soc_register_platform(&pdev->dev,
 					&msm_soc_platform);

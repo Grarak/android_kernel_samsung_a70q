@@ -7,6 +7,7 @@ ccflags-y += -Idrivers/media/platform/msm/camera/cam_smmu/
 ccflags-y += -Idrivers/media/platform/msm/camera/cam_cpas/include
 ccflags-y += -Idrivers/media/platform/msm/camera/cam_sensor_module/cam_sensor
 ccflags-y += -Idrivers/media/platform/msm/camera/cam_sensor_module/cam_sensor_utils
+ccflags-y += -Idrivers/media/platform/msm/camera/cam_sensor_module/cam_ois
 ccflags-y += -Idrivers/media/platform/msm/camera/cam_sensor_module/cam_eeprom
 ccflags-y += -Idrivers/media/platform/msm/camera/cam_sensor_module/cam_actuator
 ccflags-y += -Idrivers/media/platform/msm/camera/cam_sensor_module/cam_flash
